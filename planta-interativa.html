@@ -451,7 +451,7 @@ table.bal tr.tot td{border-top:1px solid var(--linha);padding-top:4px}
   window.addEventListener('online',aviso);
 })();
 "use strict";
-const PLANTA_VERSAO='v1.20.0 (2026-08-03)';
+const PLANTA_VERSAO='v1.21.0 (2026-08-04)';
 /* ══════════════════════════════════════════════════════════════════
    CE Voz · motor de planta interativa
    Fonte de verdade: o levantamento (D). A planta é uma camada de
@@ -5820,6 +5820,41 @@ window.addEventListener('beforeunload',ev=>{
   ev.returnValue='Há trabalho na planta que ainda não foi guardado.';
   return ev.returnValue;
 });
+/* ══════════ ABERTA DENTRO DA APP CE VOZ ══════════
+   Quando esta página corre num painel da app (iframe), troca dados com ela por
+   mensagens: recebe o levantamento ao abrir e devolve o layout sempre que se
+   guarda. Assim não é preciso exportar de um lado e importar do outro — é o
+   mesmo trabalho, visto de duas maneiras ao mesmo tempo. */
+const DENTRO_DA_APP = (window.parent && window.parent !== window);
+window.addEventListener('message', ev=>{
+  const m=ev.data;
+  if(!m||typeof m!=='object') return;
+  try{
+    if(m.tipo==='ce-voz:projeto'&&m.proj){
+      carregar(JSON.parse(JSON.stringify(m.proj)),true);
+      const d=document.getElementById('dica');
+      if(d) d.textContent='Levantamento recebido da app: '+
+        ((m.proj.D&&m.proj.D.divisoes||[]).length)+' divisões. '+
+        'O que guardares aqui volta para lá.';
+    }
+    if(m.tipo==='ce-voz:pedir-layout'){ enviarLayoutParaApp(); }
+  }catch(e){}
+});
+function enviarLayoutParaApp(){
+  if(!DENTRO_DA_APP) return false;
+  try{
+    const fs2=(L.fundos&&L.fundos.length)?L.fundos:(L.fundo?[L.fundo]:[]);
+    window.parent.postMessage({tipo:'planta:layout',layout:{
+      ...L, env:L.env||{}, fundos:fs2, fundoAtivo:L.fundoAtivo||0,
+      gerado:new Date().toISOString(), motor:'planta-interativa', versao:PLANTA_VERSAO,
+    }},'*');
+    return true;
+  }catch(e){ return false; }
+}
+if(DENTRO_DA_APP){
+  try{ window.parent.postMessage({tipo:'planta:pronta'},'*'); }catch(e){}
+}
+
 function guardarJSON(){
   // comFundo decide se as IMAGENS das plantas vão dentro do ficheiro. Sem elas o
   // ficheiro fica leve para a nuvem, mas ao reabrir tens de voltar a carregá-las.
@@ -5843,6 +5878,11 @@ function guardarJSON(){
   a.download=nome;
   a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),2000);
   _porGuardar=false;
+  if(enviarLayoutParaApp()){
+    document.getElementById('dica').textContent=
+      'Guardado e devolvido à app CE Voz. Podes continuar o levantamento lá.';
+    return {nome:'(devolvido à app)',bytes:b.size,comFundo};
+  }
   document.getElementById('dica').textContent=
     'Guardado: '+nome+' ('+Math.round(b.size/1024)+' KB)'+
     (comFundo?'':' — sem as imagens das plantas')+
@@ -6264,7 +6304,7 @@ if(DEMO){ nomeFich='URBª MONTE DA BEMPOSTA Lote 19, R C B_levantamento.json'; c
 
 // exposto para testes
 if(typeof window!=='undefined'){
-  window.__planta={get L(){return L;},get proj(){return proj;},carregar,autoLayout,auditar,balanco,relatorioHTML,pdfEnvolvente,marcarAlterado,get porGuardar(){return _porGuardar;},empurrarVizinhos,get vaosSemParede(){return _vaosSemParede;},autoColocarVaos,recolocarVaos,guardarJSON,encostarDivisaoLargada,LIMITE_ENCOSTO,comprimirParaOrcamento,bytesDataURL,PDF_MAX_BYTES,ESP_INTERIOR,espExterior,espDaParede,abrirParaParedes,areaBrutaEstimada,areaBrutaPorPiso,juncoes,marcarFachadasAuto,paredeViradaParaDivisao,ceAutoPorPiso,get fila(){return filaColocar;},orientsMedidas,arrancarColocar,colocarNoPonto,pararColocar,separarPorPiso,pisoDaDivisao,linhasGrossas,divisoesDoFundo,fixarDivisoesDoFundo,recortarFundo,fundos,acrescentarFundo,trocarFundoAtivo,removerFundoAtivo,sincronizarFundo,get saltos(){return PARES_SALTOS;},set saltos(v){PARES_SALTOS=v;},estimarEscalaAutomatica,aplicarEscalaAutomatica,medidasDoLevantamento,conferirContraLevantamento,paredeInternaDaDivisao,colarBocado,encontrarRestos,apagarBlocos,copiarFormaPara,PLANTA_VERSAO,get espessura(){return espessura;},set espessura(v){espessura=v;},get orto(){return orto;},set orto(v){orto=v;},aplicarEmLote,planoParaExportar,resolverVars,__mascaraPronta,lerFormaDoDesenho,aplicarFormaLida,dilatar,erodir,fecharAberturas,alastrar,mancaParaRects,get mascara(){return mascaraFundo;},set mascara(v){mascaraFundo=v;},alinharParedes,fachadaMedida,encaixarDivisoes,zonas,areaPorCF,areaInterseccao,zonasDaDivisao,ajustarAreaDivisao,ajustarTodasAsAreas,abrirAreas,fecharAreas,picosDeLinha,melhorEncaixe,ajustarAoFundo,linhasFundoMetros,linhasDesenhadas,lerAreasColadas,gravarAreaUtil,cancelarTudo,divsSelecionadas,alternarNaSelecao,estaSelecionada,usarImagemFundo,receberFicheiroFundo,aplicarCF,porPincel,paredeDe,ceDiv,ceCorParede,cfParede,cfCor,cfDoTipo,marcarFraccaoRestantes,CF,encostarTudo,gravarEnvNoLevantamento,envDesenhadaPorTipo,abrirMenu,fecharMenu,limparEnvOrfas,pontosArco,ortogonal,contorno,areaBloco,caixa,dentroBloco,pontoParede,editarForma,normalizarDivisao,regiaoBooleana,celulasParaRects,decomporPoligono,areaPoligono,fecharOrtogonal,aplicarPoligono,relatorio,desfazer,refazer,guardarHist,posVao,migrarVaos,buracos,marcarDivisoriasAuto,DIVISORIA,rodar,numeracaoTXT,rotuloVao,calibrarFundo,set fundo(v){ if(!L) return; if(!v){L.fundos=[];L.fundoAtivo=0;L.fundo=null;return;} L.fundos=[v];L.fundoAtivo=0;L.fundo=v; },get fundo(){return L&&L.fundo;},marcarEnvolventesAuto,envObj,envSeg,paredes,vaosLivres,envDe,nomeOrient,parseM,desenhar,XJ,BEAR};
+  window.__planta={get L(){return L;},get proj(){return proj;},carregar,autoLayout,auditar,balanco,relatorioHTML,pdfEnvolvente,enviarLayoutParaApp,DENTRO_DA_APP,marcarAlterado,get porGuardar(){return _porGuardar;},empurrarVizinhos,get vaosSemParede(){return _vaosSemParede;},autoColocarVaos,recolocarVaos,guardarJSON,encostarDivisaoLargada,LIMITE_ENCOSTO,comprimirParaOrcamento,bytesDataURL,PDF_MAX_BYTES,ESP_INTERIOR,espExterior,espDaParede,abrirParaParedes,areaBrutaEstimada,areaBrutaPorPiso,juncoes,marcarFachadasAuto,paredeViradaParaDivisao,ceAutoPorPiso,get fila(){return filaColocar;},orientsMedidas,arrancarColocar,colocarNoPonto,pararColocar,separarPorPiso,pisoDaDivisao,linhasGrossas,divisoesDoFundo,fixarDivisoesDoFundo,recortarFundo,fundos,acrescentarFundo,trocarFundoAtivo,removerFundoAtivo,sincronizarFundo,get saltos(){return PARES_SALTOS;},set saltos(v){PARES_SALTOS=v;},estimarEscalaAutomatica,aplicarEscalaAutomatica,medidasDoLevantamento,conferirContraLevantamento,paredeInternaDaDivisao,colarBocado,encontrarRestos,apagarBlocos,copiarFormaPara,PLANTA_VERSAO,get espessura(){return espessura;},set espessura(v){espessura=v;},get orto(){return orto;},set orto(v){orto=v;},aplicarEmLote,planoParaExportar,resolverVars,__mascaraPronta,lerFormaDoDesenho,aplicarFormaLida,dilatar,erodir,fecharAberturas,alastrar,mancaParaRects,get mascara(){return mascaraFundo;},set mascara(v){mascaraFundo=v;},alinharParedes,fachadaMedida,encaixarDivisoes,zonas,areaPorCF,areaInterseccao,zonasDaDivisao,ajustarAreaDivisao,ajustarTodasAsAreas,abrirAreas,fecharAreas,picosDeLinha,melhorEncaixe,ajustarAoFundo,linhasFundoMetros,linhasDesenhadas,lerAreasColadas,gravarAreaUtil,cancelarTudo,divsSelecionadas,alternarNaSelecao,estaSelecionada,usarImagemFundo,receberFicheiroFundo,aplicarCF,porPincel,paredeDe,ceDiv,ceCorParede,cfParede,cfCor,cfDoTipo,marcarFraccaoRestantes,CF,encostarTudo,gravarEnvNoLevantamento,envDesenhadaPorTipo,abrirMenu,fecharMenu,limparEnvOrfas,pontosArco,ortogonal,contorno,areaBloco,caixa,dentroBloco,pontoParede,editarForma,normalizarDivisao,regiaoBooleana,celulasParaRects,decomporPoligono,areaPoligono,fecharOrtogonal,aplicarPoligono,relatorio,desfazer,refazer,guardarHist,posVao,migrarVaos,buracos,marcarDivisoriasAuto,DIVISORIA,rodar,numeracaoTXT,rotuloVao,calibrarFundo,set fundo(v){ if(!L) return; if(!v){L.fundos=[];L.fundoAtivo=0;L.fundo=null;return;} L.fundos=[v];L.fundoAtivo=0;L.fundo=v; },get fundo(){return L&&L.fundo;},marcarEnvolventesAuto,envObj,envSeg,paredes,vaosLivres,envDe,nomeOrient,parseM,desenhar,XJ,BEAR};
 }
 </script>
 </body>
