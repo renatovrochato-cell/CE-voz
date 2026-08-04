@@ -18,6 +18,39 @@
 :root{--ac:#1D9E75;--acl:#d4f0e6;--acd:#0a5c42;--bg:#0f0f0f;--bg2:#1a1a1a;--bg3:#262626;--bg4:#333;--tx:#f0f0f0;--tx2:#999;--tx3:#555;--br:#2a2a2a;--red:#e24b4a}
 html,body{height:100%;background:var(--bg);color:var(--tx);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;overflow:hidden;font-size:15px}
 #app{height:100%;display:flex;flex-direction:column;max-width:500px;margin:0 auto}
+
+/* ══════════ ECRÃS LARGOS E DOBRÁVEIS ══════════
+   Num Fold desdobrado o ecrã tem 1000 px ou mais e a app ficava numa coluna de
+   500 px ao meio, com metade do ecrã por usar. Em modo largo abre-se um painel
+   ao lado com o que se anda sempre a consultar: as divisões já feitas, as
+   medidas e as fotos. Assim vê-se a pergunta e o contexto ao mesmo tempo, sem
+   andar para trás e para a frente.
+   A dobra é respeitada: em dobráveis, o painel encosta ao vinco em vez de ficar
+   partido ao meio. */
+body.duplo #app{max-width:none;flex-direction:row;gap:0}
+body.duplo #app>.screen{flex:1 1 0;max-width:620px;min-width:0;
+  border-right:1px solid var(--br);overflow-y:auto}
+#painel-lado{display:none}
+body.duplo #painel-lado{display:flex;flex-direction:column;flex:1 1 0;min-width:0;
+  overflow-y:auto;padding:14px 16px;background:var(--bg);gap:12px}
+body.duplo #painel-lado .pl-sec{background:var(--bg2);border:1px solid var(--br);
+  border-radius:12px;padding:12px 13px}
+body.duplo #painel-lado .pl-tit{font-size:11px;color:var(--tx2);font-weight:700;
+  text-transform:uppercase;letter-spacing:.06em;margin-bottom:7px}
+body.duplo #painel-lado .pl-lin{display:flex;justify-content:space-between;
+  gap:10px;font-size:13px;padding:4px 0;border-bottom:1px solid var(--br)}
+body.duplo #painel-lado .pl-lin:last-child{border-bottom:none}
+body.duplo #painel-lado .pl-lin b{font-weight:600;color:var(--tx)}
+body.duplo #painel-lado .pl-lin span{color:var(--tx2);font-family:ui-monospace,monospace}
+body.duplo #painel-lado .pl-fot{display:flex;gap:5px;flex-wrap:wrap}
+body.duplo #painel-lado .pl-fot img{width:54px;height:54px;object-fit:cover;
+  border-radius:7px;border:1px solid var(--br)}
+#btDuplo{display:none}
+/* nos dobráveis a área útil pode estar dividida pelo vinco */
+@media (horizontal-viewport-segments:2){
+  body.duplo #app>.screen{max-width:env(viewport-segment-width 0 0)}
+}
+@media (min-width:900px){ #btDuplo{display:inline-flex} }
 .hdr{padding:max(env(safe-area-inset-top),14px) 16px 11px;background:var(--bg);border-bottom:1px solid var(--br);display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
 .hdr-l{display:flex;flex-direction:column;gap:2px}
 .hdr-proj{font-size:13px;font-weight:600;color:var(--tx)}
@@ -124,6 +157,7 @@ html,body{height:100%;background:var(--bg);color:var(--tx);font-family:-apple-sy
 </head>
 <body>
 <div id="app">
+<button id="btDuplo" onclick="alternarDuplo()" title="Usar o ecrã todo: perguntas à esquerda, contexto à direita" style="position:fixed;top:8px;right:8px;z-index:60;background:var(--bg3);color:var(--tx);border:1px solid var(--br);border-radius:9px;padding:8px 12px;font-size:13px;font-weight:700;cursor:pointer;min-height:40px;align-items:center;gap:6px">▥</button>
 
 <!-- START -->
 <div class="screen active" id="scr-start">
@@ -379,6 +413,7 @@ html,body{height:100%;background:var(--bg);color:var(--tx);font-family:-apple-sy
     <button onclick="gravarSatOrients()" style="border:none;background:#4af;color:#000;border-radius:10px;padding:10px;font-size:13px;font-weight:700;cursor:pointer;width:100%;margin-top:6px">💾 Gravar orientações na recolha</button>
     <div style="font-size:10px;color:#555;text-align:center;margin-top:4px">Orientações já na recolha: <span id="sat-orients-existing" style="color:#888"></span></div>
   </div>
+<div id="painel-lado"></div>
 </div>
 <style>
 .sat-dir-btn{border:1px solid #444;background:rgba(255,255,255,.08);color:#ccc;border-radius:6px;padding:8px 4px;font-size:12px;font-weight:600;cursor:pointer;transition:all .12s}
@@ -422,7 +457,7 @@ const DIVS_BASE=[
 // VERSÃO — fonte única (selo no ecrã inicial + cabeçalho do TXT exportado).
 // Subir aqui a cada alteração ao ficheiro.
 // ═══════════════════════════════════════
-const APP_VERSION='v2026.08.04-FIX158';
+const APP_VERSION='v2026.08.04-FIX161';
 
 // ═══════════════════════════════════════
 // ESTADO
@@ -4135,14 +4170,13 @@ function next(){
     parts.push(ef.value.trim());answers[curQ]=parts.join('|||');
   }
   if(q&&q.key) saveToD(q.key,answers[curQ]||'');
-  // auto-save silencioso a cada pergunta
-  try{
-    const snap={nome:D.nome,morada:D.morada,ts:new Date().toLocaleString('pt-PT'),
-      pergunta:curQ,data:JSON.stringify(D),answers:JSON.stringify(answers)};
-    marcarAlteradoDesdeExportacao();
-    localStorage.setItem('ce_ultimo',JSON.stringify(snap));
-    localStorage.setItem(recolhaKey(D.nome),JSON.stringify(snap));
-  }catch(e){}
+  /* Gravação a cada pergunta — pelo caminho protegido.
+     Estava a gravar DIRECTO em localStorage, sem a protecção contra escrever
+     por cima de um levantamento mais completo e sem avisar quando falhava.
+     Como este é o caminho mais usado de todos, era aqui que mais se perdia. */
+  try{ marcarAlteradoDesdeExportacao(); }catch(e){}
+  autoSave();
+  try{ pintarPainelLado(); }catch(e){}
   if(navigator.vibrate) navigator.vibrate(40);
   curQ++;renderQ();
 }
@@ -5081,11 +5115,51 @@ function importarLevantamento(){
         if(!confirm('Importar "'+(dados.nome||'sem nome')+'"'+(obj.exportado?' (exportado '+obj.exportado.slice(0,10)+')':'')+'? Substitui o projeto atual.')) return;
         Object.assign(D,dados);
         try{
-          const snap={nome:D.nome,morada:D.morada,ts:new Date().toLocaleString('pt-PT'),pergunta:0,data:JSON.stringify(D),answers:JSON.stringify({})};
-          localStorage.setItem('ce_ultimo',JSON.stringify(snap));
-          localStorage.setItem(recolhaKey(D.nome),JSON.stringify(snap));
+          const snap={nome:D.nome,morada:D.morada,ts:new Date().toLocaleString('pt-PT'),
+      pergunta:curQ,data:JSON.stringify(D),answers:JSON.stringify(answers)};
+    // caminho protegido: nunca escreve por cima de algo mais completo,
+    // e avisa se o armazenamento estiver cheio
+    const _peso=_pesoDoLevantamento(D);
+    let _ok=false;
+    try{ _ok=(_gravarSeguro(recolhaKey(D.nome),snap,_peso)!==false)|
+             (_gravarSeguro('ce_ultimo',snap,_peso)!==false); }
+    catch(e){ _avisarFalhaGravacao('O armazenamento do navegador está cheio.'); }
+    if(!_ok) _avisarFalhaGravacao('Não consegui gravar neste momento.');
         }catch(e){}
-        alert('✅ Levantamento "'+(D.nome||'—')+'" importado ('+(dados.divisoes||[]).length+' divisões). Usa o resumo para confirmar.');
+        /* RECONSTRUIR O QUESTIONÁRIO
+           Importar só enchia o D. As perguntas continuavam sem resposta e as
+           divisões sem as suas perguntas expandidas: ao voltar atrás parecia
+           tudo vazio, embora os dados lá estivessem. Reconstrói-se aqui. */
+        let _reconstruidas=0;
+        try{
+          answers=answers||{};
+          // o questionário pode ainda não existir (importar sem ter começado um
+          // projeto): constrói-se aqui, senão não há onde repor as respostas
+          if(!qList||!qList.length) qList=buildQs();
+          // 1. as perguntas simples voltam a mostrar o que está gravado em D
+          (qList||[]).forEach((q,i)=>{
+            if(!q||!q.key) return;
+            const v=D[q.key];
+            if(v===undefined||v===null||v==='') return;
+            if(Array.isArray(v)){ if(v.length){ answers[i]=v.join('|||'); _reconstruidas++; } }
+            else if(typeof v!=='object'){ answers[i]=String(v); _reconstruidas++; }
+          });
+          // 2. a lista de divisões e a ordem
+          const iDiv=(qList||[]).findIndex(q=>q&&q.key==='divisoes');
+          if(iDiv>=0&&(D.divisoes||[]).length) answers[iDiv]=D.divisoes.join('|||');
+          const iOrd=(qList||[]).findIndex(q=>q&&q.key==='ordem-divisoes');
+          if(iOrd>=0&&D.ordemDivisoes) answers[iOrd]=D.ordemDivisoes;
+          // 3. expandir as perguntas por divisão, senão não há por onde continuar
+          if((D.divisoes||[]).length){
+            _ultimaExpansaoDivisoesKey=null;
+            expandDivCompleto();
+          }
+          try{ expandPe(); }catch(e){}
+        }catch(e){}
+        try{ autoSave(); }catch(e){}
+        alert('✅ "'+(D.nome||'—')+'" importado\n\n'+
+          (dados.divisoes||[]).length+' divisões · '+_reconstruidas+' respostas repostas\n\n'+
+          'Podes andar para trás e para a frente no questionário — o que estava medido está lá.');
         try{buildSum();show('scr-sum');}catch(e){}
       }catch(e){alert('Erro ao importar: '+e.message);}
     };
@@ -5144,6 +5218,8 @@ function checklistFimObra(){
 
 function goSum(){
   const q=qList[curQ];if(q&&q.key) saveToD(q.key,answers[curQ]||'');
+  // gravar ANTES de sair do questionário: a última resposta perdia-se
+  autoSave();
   if(!verificarAlertas()) return;
   libertarWakeLock();
   try{buildSum();}catch(e){alert('Erro no resumo: '+e.message);console.error(e);}
@@ -13295,6 +13371,19 @@ function gerarKML(){
 // ═══════════════════════════════════════
 // Verificar sessão interrompida ao carregar
 window.addEventListener('DOMContentLoaded',()=>{
+  try{
+    // num ecrã largo o modo duplo é o que faz sentido; respeita-se a escolha
+    // anterior se já houver uma
+    let guardado=null;
+    try{ guardado=localStorage.getItem('ce_modo_duplo'); }catch(e){}
+    const largo=window.innerWidth>=900;
+    if(guardado==='1'||(guardado===null&&largo)){
+      document.body.classList.add('duplo');
+      const b=document.getElementById('btDuplo');
+      if(b){ b.textContent='▤'; b.title='Voltar a uma coluna'; }
+      pintarPainelLado();
+    }
+  }catch(e){}
   try{renderPerfis();}catch(e){}
   try{
     const raw=localStorage.getItem('ce_ultimo');
@@ -13397,8 +13486,14 @@ function guardarAgora(){
   try{
     const snap={nome:D.nome,morada:D.morada,ts:new Date().toLocaleString('pt-PT'),
       pergunta:curQ,data:JSON.stringify(D),answers:JSON.stringify(answers)};
-    localStorage.setItem(recolhaKey(D.nome),JSON.stringify(snap));
-    localStorage.setItem('ce_ultimo',JSON.stringify(snap));
+    // caminho protegido: nunca escreve por cima de algo mais completo,
+    // e avisa se o armazenamento estiver cheio
+    const _peso=_pesoDoLevantamento(D);
+    let _ok=false;
+    try{ _ok=(_gravarSeguro(recolhaKey(D.nome),snap,_peso)!==false)|
+             (_gravarSeguro('ce_ultimo',snap,_peso)!==false); }
+    catch(e){ _avisarFalhaGravacao('O armazenamento do navegador está cheio.'); }
+    if(!_ok) _avisarFalhaGravacao('Não consegui gravar neste momento.');
     const btn=event&&event.target;
     if(btn&&btn.tagName==='BUTTON'){
       const orig=btn.textContent;
@@ -13482,6 +13577,67 @@ function _libertarEspaco(){
     return n;
   }catch(e){ return 0; }
 }
+/* ══════════ PAINEL LATERAL (ecrãs largos) ══════════
+   Mostra o que se anda sempre a consultar durante o levantamento: quantas
+   divisões estão feitas, as medidas de cada uma, e as fotos já tiradas. Num
+   Fold desdobrado isto fica ao lado da pergunta — deixa de ser preciso andar
+   para trás para conferir. */
+function alternarDuplo(){
+  const on=document.body.classList.toggle('duplo');
+  try{ localStorage.setItem('ce_modo_duplo',on?'1':'0'); }catch(e){}
+  const b=document.getElementById('btDuplo');
+  if(b){ b.textContent=on?'▤':'▥'; b.title=on?'Voltar a uma coluna':'Usar o ecrã todo'; }
+  if(on) pintarPainelLado();
+  window.dispatchEvent(new Event('resize'));
+}
+function _fotoSrcRapida(f){
+  if(!f) return null;
+  if(typeof f==='string'&&f.indexOf('data:')===0) return f;
+  if(f.dataURL) return f.dataURL;
+  if(f.url) return f.url;
+  return null;
+}
+function pintarPainelLado(){
+  const el=document.getElementById('painel-lado');
+  if(!el||!document.body.classList.contains('duplo')) return;
+  const divs=(D.divisoes||[]);
+  const dd=n=>D.divisoesDados[n]||{};
+  const medidasDe=n=>Object.entries(dd(n).trocos||{})
+    .filter(([,v])=>v&&String(v[0]||'').trim())
+    .map(([o,v])=>o+' '+String(v[0]).replace('.',','));
+  const feitas=divs.filter(n=>medidasDe(n).length).length;
+  let nF=0, thumbs=[];
+  divs.forEach(n=>(dd(n).fotos||[]).forEach(f=>{
+    nF++; const src=_fotoSrcRapida(f); if(src&&thumbs.length<12) thumbs.push(src);
+  }));
+  (D.fotoEtiquetas||[]).forEach(f=>{
+    nF++; const src=_fotoSrcRapida(f); if(src&&thumbs.length<12) thumbs.push(src);
+  });
+  const esc=x=>String(x==null?'':x).replace(/[&<>"]/g,c=>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  let h='';
+  h+='<div class="pl-sec"><div class="pl-tit">'+esc(D.nome||'Levantamento')+'</div>'+
+     '<div class="pl-lin"><b>Divisões</b><span>'+feitas+' de '+divs.length+' medidas</span></div>'+
+     (D.tipologia?'<div class="pl-lin"><b>Tipologia</b><span>'+esc(D.tipologia)+'</span></div>':'')+
+     (D.pisos>1?'<div class="pl-lin"><b>Pisos</b><span>'+D.pisos+'</span></div>':'')+
+     '<div class="pl-lin"><b>Fotos</b><span>'+nF+'</span></div></div>';
+  if(divs.length){
+    h+='<div class="pl-sec"><div class="pl-tit">Medidas por divisão</div>';
+    divs.forEach(n=>{
+      const m=medidasDe(n);
+      const piso=(dd(n).piso||'').trim();
+      h+='<div class="pl-lin"><b>'+esc(n)+(piso?' <span style="opacity:.6">('+esc(piso)+')</span>':'')+
+         '</b><span>'+(m.length?esc(m.join(' · ')):'—')+'</span></div>';
+    });
+    h+='</div>';
+  }
+  if(thumbs.length){
+    h+='<div class="pl-sec"><div class="pl-tit">Fotos ('+nF+')</div><div class="pl-fot">'+
+       thumbs.map(s2=>'<img src="'+s2+'" alt="">').join('')+'</div></div>';
+  }
+  el.innerHTML=h;
+}
+
 function autoSave(){
   let snap,peso;
   try{
@@ -13523,8 +13679,14 @@ function saveRecolha(){
   try{
     const snap={nome:D.nome,morada:D.morada,ts:new Date().toLocaleString('pt-PT'),
       pergunta:curQ,concluido:true,data:JSON.stringify(D),answers:JSON.stringify(answers)};
-    localStorage.setItem(recolhaKey(D.nome),JSON.stringify(snap));
-    localStorage.setItem('ce_ultimo',JSON.stringify(snap));
+    // caminho protegido: nunca escreve por cima de algo mais completo,
+    // e avisa se o armazenamento estiver cheio
+    const _peso=_pesoDoLevantamento(D);
+    let _ok=false;
+    try{ _ok=(_gravarSeguro(recolhaKey(D.nome),snap,_peso)!==false)|
+             (_gravarSeguro('ce_ultimo',snap,_peso)!==false); }
+    catch(e){ _avisarFalhaGravacao('O armazenamento do navegador está cheio.'); }
+    if(!_ok) _avisarFalhaGravacao('Não consegui gravar neste momento.');
     alert('Recolha guardada: '+snap.nome+' ('+snap.ts+')');
   }catch(e){alert('Erro: '+e.message);}
 }
