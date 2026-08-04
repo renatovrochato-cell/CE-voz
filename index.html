@@ -457,7 +457,7 @@ const DIVS_BASE=[
 // VERSÃO — fonte única (selo no ecrã inicial + cabeçalho do TXT exportado).
 // Subir aqui a cada alteração ao ficheiro.
 // ═══════════════════════════════════════
-const APP_VERSION='v2026.08.04-FIX161';
+const APP_VERSION='v2026.08.04-FIX162';
 
 // ═══════════════════════════════════════
 // ESTADO
@@ -13597,6 +13597,74 @@ function _fotoSrcRapida(f){
   if(f.url) return f.url;
   return null;
 }
+/* ══════════ PLANTA AO LADO ══════════
+   Num ecrã largo, a ferramenta de planta abre no painel ao lado, com o
+   levantamento já carregado. O que se guarda lá volta para cá pela mesma via —
+   não é preciso exportar de um lado e importar do outro. */
+let _plantaAberta=false, _plantaPronta=false;
+window.addEventListener('message', ev=>{
+  const m=ev.data;
+  if(!m||typeof m!=='object') return;
+  if(m.tipo==='planta:pronta'){ _plantaPronta=true; enviarProjetoParaPlanta(); }
+  if(m.tipo==='planta:layout'&&m.layout){
+    D.plantaLayout=m.layout;
+    autoSave();
+    const n=(m.layout.blocos||[]).length;
+    try{
+      const el=document.getElementById('pl-planta-estado');
+      if(el) el.textContent='✅ Planta guardada aqui: '+n+' blocos, '+
+        Object.keys(m.layout.ce||{}).length+' divisões com envolvente.';
+    }catch(e){}
+  }
+});
+function enviarProjetoParaPlanta(){
+  const f=document.getElementById('pl-planta-frame');
+  if(!f||!f.contentWindow||!_plantaPronta) return;
+  try{
+    f.contentWindow.postMessage({tipo:'ce-voz:projeto',
+      proj:{D:JSON.parse(JSON.stringify(D))}},'*');
+  }catch(e){}
+}
+function abrirPlantaAoLado(){
+  const el=document.getElementById('painel-lado');
+  if(!el) return;
+  if(_plantaAberta){                       // fechar e voltar ao painel normal
+    _plantaAberta=false; _plantaPronta=false;
+    pintarPainelLado();
+    return;
+  }
+  if(!(D.divisoes||[]).length){
+    alert('Ainda não há divisões no levantamento.\n\n'+
+      'Faz a lista das divisões primeiro — a planta precisa de saber o que desenhar.');
+    return;
+  }
+  _plantaAberta=true; _plantaPronta=false;
+  el.innerHTML=
+    '<div class="pl-sec" style="padding:9px 11px">'+
+      '<div style="display:flex;gap:8px;align-items:center;justify-content:space-between">'+
+        '<div class="pl-tit" style="margin:0">Planta interativa</div>'+
+        '<button onclick="abrirPlantaAoLado()" style="background:var(--bg3);color:var(--tx);'+
+          'border:1px solid var(--br);border-radius:8px;padding:7px 11px;font-size:12px;'+
+          'min-height:36px;cursor:pointer">✕ Fechar</button>'+
+      '</div>'+
+      '<div id="pl-planta-estado" style="font-size:11.5px;color:var(--tx2);margin-top:5px;'+
+        'line-height:1.4">A abrir… O levantamento é enviado sozinho. '+
+        'Quando guardares na planta, volta para aqui.</div>'+
+    '</div>'+
+    '<iframe id="pl-planta-frame" src="planta-interativa.html" '+
+      'style="flex:1;width:100%;border:1px solid var(--br);border-radius:12px;'+
+      'background:var(--bg2);min-height:60vh"></iframe>';
+  // se a planta não responder (ficheiro em falta), dizer porquê
+  setTimeout(()=>{
+    if(_plantaAberta&&!_plantaPronta){
+      const e2=document.getElementById('pl-planta-estado');
+      if(e2) e2.innerHTML='<span style="color:var(--am)">Não consegui abrir a planta. '+
+        'Confirma que o ficheiro <b>planta-interativa.html</b> está na mesma pasta '+
+        'que esta app.</span>';
+    }
+  },4000);
+}
+
 function pintarPainelLado(){
   const el=document.getElementById('painel-lado');
   if(!el||!document.body.classList.contains('duplo')) return;
@@ -13635,6 +13703,12 @@ function pintarPainelLado(){
     h+='<div class="pl-sec"><div class="pl-tit">Fotos ('+nF+')</div><div class="pl-fot">'+
        thumbs.map(s2=>'<img src="'+s2+'" alt="">').join('')+'</div></div>';
   }
+  h+='<button onclick="abrirPlantaAoLado()" style="background:var(--ac);color:#04140c;'+
+     'border:none;border-radius:11px;padding:13px;font-weight:800;font-size:14px;'+
+     'cursor:pointer;min-height:48px">📐 Abrir a planta aqui ao lado</button>'+
+     '<div style="font-size:11.5px;color:var(--tx2);line-height:1.45;text-align:center">'+
+     'Desenha a planta enquanto continuas o levantamento. '+
+     (D.plantaLayout?'Já há uma planta guardada neste processo.':'')+'</div>';
   el.innerHTML=h;
 }
 
