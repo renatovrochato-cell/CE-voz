@@ -422,7 +422,7 @@ const DIVS_BASE=[
 // VERSÃO — fonte única (selo no ecrã inicial + cabeçalho do TXT exportado).
 // Subir aqui a cada alteração ao ficheiro.
 // ═══════════════════════════════════════
-const APP_VERSION='v2026.08.03-FIX152';
+const APP_VERSION='v2026.08.04-FIX158';
 
 // ═══════════════════════════════════════
 // ESTADO
@@ -954,6 +954,28 @@ function show(id){
 
 async function iniciar(_restoreCurQ, _restoreAnswers){
   const isRestore=_restoreAnswers!==undefined;
+  /* TRAVÃO ANTES DE COMEÇAR DE NOVO
+     Começar um projeto novo por engano — depois de a app recarregar, por
+     exemplo — deitava fora o levantamento em curso. Pergunta-se antes. */
+  if(!isRestore){
+    try{
+      const raw=localStorage.getItem('ce_ultimo');
+      if(raw){
+        const a=JSON.parse(raw);
+        const Da=typeof a.data==='string'?JSON.parse(a.data):a.data;
+        const peso=_pesoDoLevantamento(Da);
+        if(peso>=10){
+          const nD=(Da.divisoes||[]).length;
+          if(!confirm('ATENÇÃO — há um levantamento por acabar:\n\n'+
+            '  '+(Da.nome||a.nome||'(sem nome)')+'\n'+
+            '  '+nD+' divisões · gravado '+(a.ts||'?')+'\n\n'+
+            'Começar um NOVO apaga-o do ecrã (fica gravado, mas tens de o ir buscar '+
+            'a "Continuar recolha").\n\nOK = começar novo · Cancelar = voltar atrás'))
+            return;
+        }
+      }
+    }catch(e){}
+  }
   D.nome=document.getElementById('start-nome').value.trim()||'Projeto';
   D.morada=document.getElementById('start-morada').value.trim();
   document.getElementById('hdr-proj').textContent=D.nome;
@@ -2026,6 +2048,28 @@ function renderCompInputs(q){
   const dd=D.divisoesDados[q.div];
   const fazParedes=(D.levParedes||'sim').toLowerCase().includes('sim');
 
+  /* ── ORIENTAÇÕES LIDAS DA PLANTA ──
+     Aparecem em cima, antes de tudo: é a informação que evita andar a pensar
+     "esta parede dá para onde?" com a bússola na mão. São SUGESTÃO — só se
+     preenchem os troços que ainda estiverem vazios, e o que já mediste nunca é
+     tocado. */
+  if(dd.orientsPlanta&&dd.orientsPlanta.length){
+    const oSec=document.createElement('div');
+    oSec.style.cssText='margin-bottom:12px;padding:10px 12px;background:#132b1f;'+
+      'border:1px solid var(--ac);border-radius:9px';
+    const oTit=document.createElement('div');
+    oTit.style.cssText='font-size:12px;color:var(--ac);font-weight:700;margin-bottom:4px';
+    oTit.textContent='📐 Da planta: paredes exteriores a '+dd.orientsPlanta.join(', ');
+    oSec.appendChild(oTit);
+    const oSub=document.createElement('div');
+    oSub.style.cssText='font-size:11.5px;color:var(--tx2);line-height:1.45';
+    oSub.textContent=(D.norteGrausPlanta!=null)
+      ? ('Lido com o norte a '+Math.round(D.norteGrausPlanta)+'° na planta. Confirma no local antes de medir.')
+      : 'Confirma no local antes de medir.';
+    oSec.appendChild(oSub);
+    wrap.appendChild(oSec);
+  }
+
   // ── FOTOS DA DIVISÃO — antes de qualquer medida ──
   if(!dd.fotos) dd.fotos=[];
   const fotoSec=document.createElement('div');
@@ -3080,7 +3124,17 @@ function _chaveOrdemDiv(n){
     .toLowerCase().replace(/\s+/g,' ').trim();
 }
 function divisoesComOrdemEscolhida(){
-  const base=parseDivs(getAns('divisoes'));
+  /* A BASE SÃO AS DIVISÕES QUE EXISTEM, não a resposta a uma pergunta.
+     parseDivs('') devolve ['Sala','Cozinha','Quarto 1','WC'] — um valor por
+     omissão para quem ainda não respondeu nada. Mas quando as divisões vêm da
+     PLANTA (ou de um projeto importado), getAns('divisoes') está vazio e a base
+     caía nesse valor por omissão: a ordem escolhida era aplicada a quatro
+     divisões inventadas e as reais desapareciam.
+     É esta a causa da ordem trocada que já apareceu três vezes. */
+  const resp=getAns('divisoes');
+  const base=(String(resp||'').trim())
+    ? parseDivs(resp)
+    : ((D.divisoes||[]).length ? D.divisoes.slice() : parseDivs(''));
   const ordemResp=getAns('ordem-divisoes')||D.ordemDivisoes||'';
   if(!ordemResp) return base;
   const ordem=ordemResp.split(',').map(s=>s.trim()).filter(Boolean);
@@ -5568,6 +5622,7 @@ const ORDEM_SECCOES_TXT=[
   'ÁREAS DOS COMPARTIMENTOS (Apav)',
   'CONTROLO — COMPRIMENTOS POR ORIENTAÇÃO (verificação)',
   'ELEMENTOS CONSTRUTIVOS',
+  'COTAS DO PROJETO — PERÍMETRO EXTERIOR',
   'PAREDE EXTERIOR — U SUGERIDO',
   'COBERTURAS',
   'PAREDES EXTERIORES — SOLUÇÕES CORRENTES E PTP',
@@ -6743,6 +6798,52 @@ function buildTxt(){
            'quando há mais do que uma. Um desvão não habitado NÃO é cobertura exterior:\n'+
            'a envolvente é a esteira por baixo dele, com b_tr da Tabela 22.\n';
       }
+    }
+
+    /* ── COTAS LIDAS DA PLANTA ──
+       O perímetro exterior por orientação, tirado das linhas de cota do
+       desenho. Serve para conferir o que se mediu com a fita: se a soma dos
+       troços medidos numa orientação não bater com a cota do projeto, há uma
+       parede por medir ou uma medida errada. */
+    if(D.cotasPlanta&&Object.keys(D.cotasPlanta).length){
+      t+=sep('COTAS DO PROJETO — PERÍMETRO EXTERIOR');
+      Object.entries(D.cotasPlanta).forEach(([piso,ors])=>{
+        if(Object.keys(D.cotasPlanta).length>1||piso!=='—') t+='['+piso+']\n';
+        Object.entries(ors).forEach(([orient,c])=>{
+          const medido=(D.divisoes||[]).reduce((sum,d)=>{
+            const arr=((D.divisoesDados[d]||{}).trocos||{})[orient]||[];
+            return sum+arr.reduce((a,v)=>a+(parseFloat(String(v).replace(',','.'))||0),0);
+          },0);
+          t+='  '+orient.padEnd(8);
+          t+=c.total?('projeto '+c.total.toFixed(2).replace('.',',')+' m'):'projeto —      ';
+          if(medido>0){
+            t+='   medido '+medido.toFixed(2).replace('.',',')+' m';
+            if(c.total){
+              const dif=medido-c.total;
+              const pct=Math.abs(dif)/c.total*100;
+              t+='   '+(pct<3?'✓':'⚠ ')+(dif>=0?'+':'')+dif.toFixed(2).replace('.',',')+' m';
+              if(pct>=3) t+=' ('+pct.toFixed(0)+'%)';
+            }
+          } else t+='   (por medir)';
+          t+='\n';
+          if(c.parciais&&c.parciais.length){
+            const somaP=c.parciais.reduce((a,b)=>a+b,0);
+            t+='           parciais: '+c.parciais.map(v=>v.toFixed(2).replace('.',',')).join(' + ')+
+               ' = '+somaP.toFixed(2).replace('.',',')+' m';
+            // as parciais têm de somar a total; se não somam, faltou ler alguma
+            if(c.total&&Math.abs(somaP-c.total)>0.05)
+              t+='   ⚠ não fecha com a total ('+c.total.toFixed(2).replace('.',',')+
+                 ' m) — falta ler alguma cota';
+            t+='\n';
+          }
+        });
+      });
+      t+='\nAs cotas do projeto são o perímetro EXTERIOR (ao tosco ou ao acabado, conforme\n'+
+         'o desenho). Os troços medidos são pelo INTERIOR de cada compartimento, por isso\n'+
+         'a diferença de uma espessura de parede por cada canto é normal. Uma diferença\n'+
+         'grande é sinal de parede por medir.\n'+
+         'As parciais NÃO foram atribuídas a divisões — uma cota parcial não corresponde\n'+
+         'necessariamente a um compartimento. Usa-as para conferir.\n';
     }
 
     t+=sep('PAREDES EXTERIORES — SOLUÇÕES CORRENTES E PTP');
@@ -9546,6 +9647,44 @@ async function _blocosParaModelo(dataURL,mediaType){
   return [{type:'image',source:{type:'base64',media_type:mt,data:url.split(',')[1]}}];
 }
 
+/* ══════════ ORIENTAÇÃO DAS PAREDES A PARTIR DA PLANTA ══════════
+   O modelo devolve, por divisão, que lados da IMAGEM dão para fora ("cima",
+   "baixo", "esquerda", "direita") e o ângulo para onde aponta o norte. Com as
+   duas coisas sabe-se a orientação real de cada parede: se o norte aponta para
+   BAIXO na planta (180°), o lado de cima da imagem é o SUL.
+   É esta a conta que se faz à mão em cada levantamento. */
+const LADO_GRAUS={cima:0,direita:90,baixo:180,esquerda:270};
+const ROSA=[[0,'Norte'],[45,'NE'],[90,'Este'],[135,'SE'],
+            [180,'Sul'],[225,'SO'],[270,'Oeste'],[315,'NO']];
+function orientDeLado(lado,norteGraus){
+  const base=LADO_GRAUS[String(lado||'').toLowerCase().trim()];
+  if(base===undefined) return null;
+  // Number(null) e Number('') dão ZERO — e zero é "norte para cima". Sem esta
+  // guarda, uma planta sem seta do norte era tratada como se o norte estivesse
+  // em cima, e as orientações saíam todas erradas com ar de certas.
+  if(norteGraus===null||norteGraus===undefined||norteGraus==='') return null;
+  const n=Number(norteGraus);
+  if(!isFinite(n)) return null;
+  // azimute real do lado = direção na imagem − direção do norte na imagem
+  const az=((base-n)%360+360)%360;
+  let melhor=ROSA[0], d=999;
+  ROSA.forEach(([g,nome])=>{
+    const dd=Math.min(Math.abs(az-g),360-Math.abs(az-g));
+    if(dd<d){ d=dd; melhor=[g,nome]; }
+  });
+  return melhor[1];
+}
+// Só as 4 principais quando o norte está alinhado com a planta; as 8 quando
+// está a 45°. Devolve o conjunto de orientações que uma divisão tem para fora.
+function orientsDaDivisao(paredes,norteGraus){
+  const out=[];
+  (paredes||[]).forEach(l=>{
+    const o=orientDeLado(l,norteGraus);
+    if(o&&!out.includes(o)) out.push(o);
+  });
+  return out;
+}
+
 async function identificarAreasPlanta(dataURL,mediaType){
   const blocosFicheiro=await _blocosParaModelo(dataURL,mediaType);
   const resp=await fetch(ANTHROPIC_PROXY_URL,{
@@ -9553,7 +9692,7 @@ async function identificarAreasPlanta(dataURL,mediaType){
     body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:1000,
       messages:[{role:'user',content:[
         ...blocosFicheiro,
-        {type:'text',text:'Esta imagem é uma planta/esboço técnico de um imóvel (moradia ou apartamento), com os nomes dos compartimentos e as respetivas áreas escritas dentro ou perto de cada divisão (normalmente em m² ou m2). Lê CUIDADOSAMENTE cada compartimento desenhado e a área anotada.\n\nMUITO IMPORTANTE: em Portugal, plantas e cadernetas distinguem frequentemente "área bruta" (inclui paredes/elementos estruturais, medida ao eixo ou pelo perímetro exterior) de "área útil" (só o espaço interior utilizável, excluindo paredes — é o que interessa para o certificado energético). NUNCA presumas que um valor é área útil só porque não tem etiqueta — verifica se a planta indica explicitamente "bruta"/"Ab" ou "útil"/"Au" junto a cada valor ou num total. Só classifica como "util" quando a planta o disser explicitamente (rótulo "útil", "Au", ou side explicitamente distinto de "bruta"). Caso não haja qualquer indicação de bruta/útil, classifica como "indefinido" — NUNCA assumas "util" por defeito.\n\nResponde APENAS com JSON no formato: {"tipo_geral": "util"|"bruta"|"indefinido"|"misto" (indica se a planta, no seu conjunto, rotula as áreas como brutas, úteis, não indica de todo, ou tem uma mistura dos dois), "divisoes":[{"nome":"nome do compartimento tal como está escrito, ex: Sala, Quarto 1, Cozinha, WC","area":valor numérico em m² (só o número, ex: 18.5),"tipo":"util"|"bruta"|"indefinido" (classificação individual desta área, seguindo a mesma regra)}], "area_total_indicada": valor numérico se a planta já mostrar um total geral escrito explicitamente, ou null se não houver, "area_total_tipo": "util"|"bruta"|"indefinido" (classificação do total, se existir)}. Inclui TODOS os compartimentos com área legível, incluindo arrumos/despensas/varandas/marquises se tiverem área indicada. Se a área de algum compartimento estiver ilegível ou não numérica, não o incluas na lista. Não inventes valores. Responde apenas com JSON, sem texto adicional nem blocos de código.'}
+        {type:'text',text:'Esta imagem é uma planta/esboço técnico de um imóvel (moradia ou apartamento), com os nomes dos compartimentos e as respetivas áreas escritas dentro ou perto de cada divisão (normalmente em m² ou m2). Lê CUIDADOSAMENTE cada compartimento desenhado e a área anotada.\n\nIDENTIFICA O PISO desta planta. Procura no título, na legenda ou na etiqueta do desenho: PISO 0, PISO 1, R/CHÃO, RÉS-DO-CHÃO, 1º ANDAR, CAVE, SÓTÃO. Devolve-o no campo piso, numa destas formas exactas: Cave, R/C, 1º andar, 2º andar, 3º andar. PISO 0 e R/CHÃO são R/C; PISO 1 é 1º andar. Se não identificares, devolve piso vazio.\n\nMUITO IMPORTANTE: em Portugal, plantas e cadernetas distinguem frequentemente "área bruta" (inclui paredes/elementos estruturais, medida ao eixo ou pelo perímetro exterior) de "área útil" (só o espaço interior utilizável, excluindo paredes — é o que interessa para o certificado energético). NUNCA presumas que um valor é área útil só porque não tem etiqueta — verifica se a planta indica explicitamente "bruta"/"Ab" ou "útil"/"Au" junto a cada valor ou num total. Só classifica como "util" quando a planta o disser explicitamente (rótulo "útil", "Au", ou side explicitamente distinto de "bruta"). Caso não haja qualquer indicação de bruta/útil, classifica como "indefinido" — NUNCA assumas "util" por defeito.\n\nResponde APENAS com JSON no formato: {"piso": "Cave"|"R/C"|"1º andar"|"2º andar"|"3º andar"|"" (o piso desta planta, lido do título ou da legenda; vazio se não identificares), "cotas_exteriores": {"cima":{"total":valor da cota TOTAL desse lado do contorno, em metros, ou null,"parciais":[lista das cotas parciais desse lado, na ordem em que aparecem, em metros]},"baixo":{...},"esquerda":{...},"direita":{...}} — lê as linhas de cota desenhadas nas MARGENS da planta, fora do contorno do edifício. A cota total é a maior, normalmente na linha mais afastada; as parciais são as da linha mais próxima do edifício e somam a total. Se um lado não tiver cotas, devolve {"total":null,"parciais":[]}, "norte_graus": ângulo em graus para onde aponta a seta do NORTE na planta, medido no sentido dos ponteiros do relógio a partir de CIMA da imagem (0 = norte para cima, 90 = norte para a direita, 180 = norte para baixo, 270 = norte para a esquerda); null se não houver seta ou rosa-dos-ventos, "tipo_geral": "util"|"bruta"|"indefinido"|"misto" (indica se a planta, no seu conjunto, rotula as áreas como brutas, úteis, não indica de todo, ou tem uma mistura dos dois), "divisoes":[{"nome":"nome do compartimento tal como está escrito, ex: Sala, Quarto 1, Cozinha, WC","area":valor numérico em m² (só o número, ex: 18.5),"tipo":"util"|"bruta"|"indefinido" (classificação individual desta área, seguindo a mesma regra),"paredes_exteriores":[lista dos lados deste compartimento que dão para o EXTERIOR do edifício, cada um como "cima"|"baixo"|"esquerda"|"direita" conforme aparecem NA IMAGEM. Um lado que confine com outro compartimento, com escadas ou com espaço interior NÃO entra. Lista vazia se o compartimento for totalmente interior]}], "area_total_indicada": valor numérico se a planta já mostrar um total geral escrito explicitamente, ou null se não houver, "area_total_tipo": "util"|"bruta"|"indefinido" (classificação do total, se existir)}. Inclui TODOS os compartimentos com área legível, incluindo arrumos/despensas/varandas/marquises se tiverem área indicada. Se a área de algum compartimento estiver ilegível ou não numérica, não o incluas na lista. Não inventes valores. Responde apenas com JSON, sem texto adicional nem blocos de código.'}
       ]}]})
   });
   if(resp.status===401) throw new Error('proxy recusou o pedido (401) — o segredo da app não corresponde ao APP_SHARED_SECRET configurado no Cloudflare Worker. Atualiza o código e a variável do Worker.');
@@ -9582,7 +9721,65 @@ function renderPlantaAreasLista(){
   const totalLinha=(D.areaUtilPlantaTotal!=null)
     ?`<div style="display:flex;justify-content:space-between;font-size:13px;font-weight:700;margin-top:6px;padding-top:6px;border-top:1px solid var(--br)"><span>TOTAL (útil)</span><span style="color:var(--ac)">${D.areaUtilPlantaTotal.toFixed(2)} m²</span></div>`
     :`<div style="font-size:11px;color:var(--red);margin-top:6px;padding-top:6px;border-top:1px solid var(--br)">⚠️ Nenhum total aplicado automaticamente — confirma útil vs. bruta manualmente</div>`;
-  box.innerHTML=`<div style="font-size:11px;color:var(--tx2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Áreas extraídas da planta</div>${linhas}${totalLinha}`;
+  /* Botão para levar isto para o levantamento: cria as divisões, mete as áreas
+     e as orientações lidas, e deixa a ordem de visita para o utilizador. É a
+     parte que se estava a fazer à mão, compartimento a compartimento. */
+  const interiores=divs.filter(d=>!isAreaExterior(d.nome));
+  const comOrient=interiores.filter(d=>d.orients&&d.orients.length).length;
+  const btn=interiores.length
+    ? `<button onclick="usarCompartimentosDaPlanta()" style="width:100%;margin-top:9px;padding:11px;
+        background:var(--ac);color:#000;border:none;border-radius:9px;font-weight:800;font-size:13px">
+        ⤓ Usar estes ${interiores.length} compartimentos no levantamento</button>
+       <div style="font-size:11px;color:var(--tx2);margin-top:5px;line-height:1.4">
+        Cria as divisões com a área${comOrient?' e a orientação das paredes':''} já preenchidas.
+        ${comOrient?('Orientações lidas em '+comOrient+' divisão(ões). '):''}Só tens de escolher a ordem de visita.</div>`
+    : '';
+  box.innerHTML=`<div style="font-size:11px;color:var(--tx2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Áreas extraídas da planta</div>${linhas}${totalLinha}${btn}`;
+}
+
+/* Cria as divisões do levantamento a partir do que foi lido da planta.
+   Não apaga nada: divisões que já existam ficam, só recebem os dados que
+   faltavam. O que já estiver medido no local nunca é substituído — a planta é
+   uma sugestão, a fita métrica é que manda. */
+function usarCompartimentosDaPlanta(){
+  const lidas=(D.areasPlanta||[]).filter(d=>!isAreaExterior(d.nome));
+  if(!lidas.length) return;
+  const antesN=(D.divisoes||[]).length;
+  D.divisoes=D.divisoes||[]; D.divisoesDados=D.divisoesDados||{};
+  let novas=0, comArea=0, comOrient=0;
+  lidas.forEach(d=>{
+    let nome=(D.divisoes).find(x=>chaveMatchDivisao(x)===chaveMatchDivisao(d.nome));
+    if(!nome){
+      nome=String(d.nome).trim();
+      D.divisoes.push(nome);
+      novas++;
+    }
+    const dd=D.divisoesDados[nome]=D.divisoesDados[nome]||
+      {comprimentos:{},trocos:{},envInt:{},envIntTrocos:{},vaos:[],fotos:[],areaRect:[],obs:''};
+    if(d.piso&&!dd.piso) dd.piso=d.piso;
+    // a área da planta só entra se não houver medida no local
+    const _medidoNoLocal=Object.values(dd.trocos||{}).some(v=>v&&String(v[0]||'').trim())||
+      (dd.areaRect||[]).some(r=>parseFloat(r.c)>0);
+    if(d.tipo==='util'&&!_medidoNoLocal&&!dd.areaUtil){
+      dd.areaUtil=Number(d.area).toFixed(2);
+      dd.areaOrigem='planta';
+      comArea++;
+    }
+    if(d.orients&&d.orients.length){ dd.orientsPlanta=d.orients; comOrient++; }
+  });
+  D.ordemDivisoes='';                       // a ordem de visita é escolha do utilizador
+  autoSave();
+  try{ renderPlantaAreasLista(); }catch(e){}
+  const st=document.getElementById('planta-status');
+  if(st){
+    st.style.display='block'; st.style.color='var(--ac)';
+    st.textContent='✅ '+novas+' divisão(ões) criada(s)'+
+      (antesN?(' (já tinhas '+antesN+')'):'')+
+      (comArea?(' · área preenchida em '+comArea):'')+
+      (comOrient?(' · orientações em '+comOrient):'')+
+      '. Vai ao ecrã das divisões escolher a ORDEM por que as vais visitar.';
+  }
+  return {novas,comArea,comOrient};
 }
 
 async function anexarPlanta(){
@@ -9618,7 +9815,10 @@ async function anexarPlanta(){
       // metade da casa.
       const jaTinha=(D.areasPlanta||[]).slice();
       const nomeFonte=file.name||'planta';
-      divisoes.forEach(d=>{d.fonte=nomeFonte;});
+      // o piso que o modelo leu no título da planta acompanha cada divisão:
+      // com duas plantas de pisos diferentes é isto que as distingue
+      const pisoLido=String(obj.piso||'').trim();
+      divisoes.forEach(d=>{d.fonte=nomeFonte; if(pisoLido) d.piso=pisoLido;});
       const chave=n=>chaveMatchDivisao(n)||String(n||'').toLowerCase().trim();
       const repetidos=[];
       const juntas=jaTinha.slice();
@@ -9630,6 +9830,69 @@ async function anexarPlanta(){
         } else juntas.push(nova);
       });
       D.areasPlanta=juntas;
+      /* Passar o piso lido para as divisões do levantamento. Sem isto, uma
+         moradia levantada com duas plantas ficava com tudo no mesmo piso —
+         e daí saíam as PTL de cobertura e pavimento térreo erradas. */
+      let _pisosAtrib=0;
+      juntas.filter(d=>d.piso).forEach(d=>{
+        const alvo=(D.divisoes||[]).find(x=>chaveMatchDivisao(x)===chaveMatchDivisao(d.nome));
+        const dd=alvo?D.divisoesDados[alvo]:null;
+        if(dd&&dd.piso!==d.piso){ dd.piso=d.piso; _pisosAtrib++; }
+      });
+      /* ORIENTAÇÕES PRÉ-PREENCHIDAS
+         Guarda-se a orientação de cada parede exterior lida da planta. Fica em
+         `orientsPlanta` e é usada como sugestão nas perguntas do levantamento —
+         não sobrepõe nada que já esteja medido. */
+      /* COTAS DO CONTORNO
+         As linhas de cota nas margens dão o perímetro exterior por lado. Com o
+         norte, sabe-se a que orientação corresponde cada lado — e as parciais
+         são os troços de fachada, que é o que se anda a medir com a fita.
+         Guarda-se por orientação e por piso, para conferência: NÃO se preenche
+         nenhum troço automaticamente, porque uma cota parcial não corresponde
+         necessariamente a uma divisão. */
+      const _norte=Number(obj.norte_graus);
+      if(obj.cotas_exteriores&&isFinite(_norte)){
+        D.cotasPlanta=D.cotasPlanta||{};
+        const piso=String(obj.piso||'').trim()||'—';
+        const porOrient={};
+        Object.entries(obj.cotas_exteriores).forEach(([lado,c])=>{
+          const o=c?orientDeLado(lado,_norte):null;
+          if(o){
+            const parciais=(c.parciais||[]).map(Number).filter(v=>isFinite(v)&&v>0);
+            const total=isFinite(Number(c.total))?Number(c.total):null;
+            if(total||parciais.length) porOrient[o]={total,parciais,lado};
+          }
+        });
+        if(Object.keys(porOrient).length) D.cotasPlanta[piso]=porOrient;
+      }
+      let _orientAtrib=0;
+      if(isFinite(_norte)){
+        D.norteGrausPlanta=_norte;
+        juntas.filter(d=>(d.paredes_exteriores||[]).length).forEach(d=>{
+          const os=orientsDaDivisao(d.paredes_exteriores,_norte);
+          if(os.length){
+            d.orients=os;
+            const alvo=(D.divisoes||[]).find(x=>chaveMatchDivisao(x)===chaveMatchDivisao(d.nome));
+            const dd=alvo?D.divisoesDados[alvo]:null;
+            if(dd){ dd.orientsPlanta=os; _orientAtrib++; }
+          }
+        });
+        // as orientações do fogo saem da união de todas
+        const todas=[...new Set(juntas.flatMap(d=>d.orients||[]))];
+        if(todas.length&&!(D.orientacoesConfirmadas||[]).length) D.orientacoesConfirmadas=todas;
+      }
+      const msgOrient=_orientAtrib
+        ? ' · orientações lidas da planta em '+_orientAtrib+' divisão(ões)'+
+          (isFinite(_norte)?(' (norte a '+Math.round(_norte)+'° na imagem)'):'')
+        : '';
+      const _pisosDistintos=[...new Set(juntas.map(d=>d.piso).filter(Boolean))];
+      if(_pisosDistintos.length>1&&(parseInt(D.pisos)||1)<_pisosDistintos.length){
+        D.pisos=_pisosDistintos.length;
+      }
+      const msgPiso=_pisosAtrib
+        ? ' · piso atribuído a '+_pisosAtrib+' divisão(ões)'+
+          (_pisosDistintos.length>1?(' ('+_pisosDistintos.join(', ')+')'):'')
+        : '';
       const fontes=[...new Set(juntas.map(d=>d.fonte).filter(Boolean))];
       const msgJuntar=jaTinha.length
         ?` · juntei aos ${jaTinha.length} compartimentos que já tinhas (${fontes.length} ficheiro(s) no total)`+
@@ -9642,7 +9905,7 @@ async function anexarPlanta(){
       // qualquer soma abaixo.
       const exteriores=juntas.filter(d=>isAreaExterior(d.nome));
       const interiores=juntas.filter(d=>!isAreaExterior(d.nome));
-      const msgExtra=(exteriores.length
+      const msgExtra=msgPiso+msgOrient+(exteriores.length
         ?` (excluí ${exteriores.map(d=>d.nome+' '+d.area.toFixed(2)+'m²').join(', ')} — área exterior, não conta para a área útil)`
         :'')+msgJuntar;
 
@@ -13145,13 +13408,115 @@ function guardarAgora(){
   }catch(e){alert('Erro ao guardar: '+e.message);}
 }
 
-function autoSave(){
+/* NUNCA GRAVAR VAZIO POR CIMA DE CHEIO
+   Um levantamento completo foi perdido assim: a app recarregou (chamada de
+   telefone, o sistema descarrega a página), voltou ao ecrã inicial, e a
+   gravação seguinte escreveu um D vazio por cima do que estava. O nome também
+   conta: basta um espaço ou um acento diferente para a chave mudar e o antigo
+   ficar órfão.
+   Regra: uma gravação com MENOS conteúdo do que a que já lá está não substitui
+   — é arquivada à parte, com a hora, e nunca se perde nada. */
+function _pesoDoLevantamento(D2){
+  if(!D2||typeof D2!=='object') return -1;
+  let p=(D2.divisoes||[]).length*10;
+  Object.values(D2.divisoesDados||{}).forEach(dd=>{
+    p+=Object.values(dd.trocos||{}).filter(v=>v&&String(v[0]||'').trim()).length*3;
+    p+=(dd.vaos||[]).length*2+(dd.fotos||[]).length;
+  });
+  p+=(D2.fotosAlcado||[]).length+(D2.fotoEtiquetas||[]).length+(D2.unidadesExtFotos||[]).length;
+  if(D2.moradaCaderneta) p+=2;
+  return p;
+}
+function _gravarSeguro(chave,snap,pesoNovo){
   try{
-    const snap={nome:D.nome,morada:D.morada,ts:new Date().toLocaleString('pt-PT'),
-      pergunta:curQ,data:JSON.stringify(D),answers:JSON.stringify(answers)};
-    localStorage.setItem(recolhaKey(D.nome),JSON.stringify(snap));
-    localStorage.setItem('ce_ultimo',JSON.stringify(snap));
+    const antigoRaw=localStorage.getItem(chave);
+    if(antigoRaw){
+      let pesoAntigo=-1;
+      try{
+        const a=JSON.parse(antigoRaw);
+        pesoAntigo=_pesoDoLevantamento(typeof a.data==='string'?JSON.parse(a.data):a.data);
+      }catch(e){}
+      // só se perde trabalho se o novo tiver MENOS. Nesse caso, arquiva-se o antigo.
+      if(pesoAntigo>0&&pesoNovo<pesoAntigo){
+        // NÃO substituir é uma decisão, não uma falha: o trabalho continua gravado
+        const arq='ce_arquivo_'+Date.now().toString(36)+'_'+chave.slice(0,40);
+        try{ localStorage.setItem(arq,antigoRaw); }catch(e){}
+        try{ localStorage.setItem('ce_ultimo_cheio',antigoRaw); }catch(e){}
+        return 'protegido';           // o antigo, mais completo, fica
+      }
+    }
+    localStorage.setItem(chave,JSON.stringify(snap));
+    return true;
+  }catch(e){
+    // deixar a exceção subir: quem chama tem de saber que NÃO gravou
+    throw e;
+  }
+}
+/* A GRAVAÇÃO NUNCA PODE FALHAR EM SILÊNCIO.
+   Estava dentro de um catch vazio: se o armazenamento enchesse — e o limite é
+   de uns 5 MB — cada gravação falhava sem uma palavra, e o levantamento
+   continuava só na memória. Bastava a app recarregar para desaparecer tudo.
+   Agora: avisa à primeira falha, tenta libertar espaço, e se não conseguir
+   grava o essencial (sem histórico) para salvar o que dá. */
+let _falhaGravacaoAvisada=false;
+function _avisarFalhaGravacao(msg){
+  if(_falhaGravacaoAvisada) return;
+  _falhaGravacaoAvisada=true;
+  try{
+    alert('⚠️ NÃO CONSIGO GRAVAR NO TELEMÓVEL\n\n'+msg+'\n\n'+
+      'O levantamento está só na memória: se fechares a app, PERDE-SE.\n\n'+
+      'Exporta AGORA (ecrã Exportar → Partilhar) antes de continuares.');
   }catch(e){}
+  try{
+    const st=document.getElementById('pacote-status');
+    if(st){st.style.display='block';st.style.color='var(--am)';
+      st.textContent='⚠️ Gravação a falhar — exporta já, o trabalho está só na memória.';}
+  }catch(e){}
+}
+function _libertarEspaco(){
+  // apagar arquivos antigos, do mais velho para o mais novo
+  try{
+    const arq=Object.keys(localStorage).filter(k=>k.startsWith('ce_arquivo_')).sort();
+    let n=0;
+    while(arq.length>3&&n<20){ localStorage.removeItem(arq.shift()); n++; }
+    return n;
+  }catch(e){ return 0; }
+}
+function autoSave(){
+  let snap,peso;
+  try{
+    snap={nome:D.nome,morada:D.morada,ts:new Date().toLocaleString('pt-PT'),
+      pergunta:curQ,data:JSON.stringify(D),answers:JSON.stringify(answers)};
+    peso=_pesoDoLevantamento(D);
+  }catch(e){ _avisarFalhaGravacao('Não consegui preparar os dados: '+e.message); return false; }
+
+  // 'protegido' significa que o que lá está é MELHOR — isso é sucesso, não falha.
+  // Só é falha quando nem gravou nem protegeu nada.
+  const tentar=()=>{
+    const a=_gravarSeguro(recolhaKey(D.nome),snap,peso);
+    const b=_gravarSeguro('ce_ultimo',snap,peso);
+    return (a===true||b===true||a==='protegido'||b==='protegido');
+  };
+  try{
+    if(tentar()) return true;
+    // não gravou: pode ser falta de espaço — libertar e tentar outra vez
+    if(_libertarEspaco()&&tentar()) return true;
+    // último recurso: gravar sem o histórico, que é o que mais cresce
+    const semHist={...snap};
+    try{
+      const D2=JSON.parse(snap.data); D2._hist=[];
+      semHist.data=JSON.stringify(D2);
+    }catch(e){}
+    if(_gravarSeguro(recolhaKey(D.nome),semHist,peso)||
+       _gravarSeguro('ce_ultimo',semHist,peso)) return true;
+    _avisarFalhaGravacao('O armazenamento do navegador está cheio ou bloqueado.');
+    return false;
+  }catch(e){
+    if(String(e&&e.name).indexOf('Quota')>=0||/quota|exceeded|full/i.test(String(e&&e.message)))
+      _avisarFalhaGravacao('O armazenamento do navegador está CHEIO.');
+    else _avisarFalhaGravacao('Erro ao gravar: '+(e&&e.message||e));
+    return false;
+  }
 }
 
 function saveRecolha(){
