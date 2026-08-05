@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>CE Voz · Planta interativa</title>
+<link rel="manifest" id="planta-manifest"><title>CE Voz · Planta interativa</title>
 <style>
 :root{
   /* papel técnico — legível ao sol, sem brilho */
@@ -545,7 +545,7 @@ Ver tudo</button>
   window.addEventListener('online',aviso);
 })();
 "use strict";
-const PLANTA_VERSAO='v1.23.0 (2026-08-04)';
+const PLANTA_VERSAO='v1.25.0 (2026-08-04)';
 /* ══════════════════════════════════════════════════════════════════
    CE Voz · motor de planta interativa
    Fonte de verdade: o levantamento (D). A planta é uma camada de
@@ -5957,7 +5957,48 @@ if(DENTRO_DA_APP){
    Esconde cabeçalho e painéis: fica só o desenho e a coluna de ferramentas. Em
    Android pede também o ecrã inteiro ao sistema, para sair a barra de estado.
    Sai com o mesmo botão ou com Esc. */
+/* ══════════ INSTALAR COMO APLICAÇÃO ══════════
+   Sem manifest, o Chrome cria só um ATALHO: abre na mesma dentro do browser,
+   com a barra de endereço a roubar altura. Com manifest e display:standalone,
+   passa a abrir como aplicação, em ecrã inteiro e com ícone próprio.
+   O manifest é gerado em memória (Blob) para o programa continuar a ser um
+   único ficheiro — não é preciso mais nada no repositório. */
+(function(){
+  const icone=(tam,cor)=>{
+    const svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+tam+'" height="'+tam+'" viewBox="0 0 192 192">'+
+      '<rect width="192" height="192" rx="42" fill="#16202A"/>'+
+      '<g fill="none" stroke="'+cor+'" stroke-width="9" stroke-linejoin="round">'+
+      '<path d="M34 46h58v52H34zM100 46h58v34h-58zM100 88h58v58h-58zM34 106h58v40H34z"/></g>'+
+      '<g stroke="#FF6B6B" stroke-width="11" stroke-linecap="square">'+
+      '<path d="M34 46h124M34 146h58"/></g></svg>';
+    return 'data:image/svg+xml;base64,'+btoa(unescape(encodeURIComponent(svg)));
+  };
+  try{
+    const man={
+      name:'CE Voz — Planta', short_name:'Planta',
+      description:'Desenho da planta e da envolvente para certificados energéticos',
+      start_url:location.pathname, scope:location.pathname,
+      display:'standalone', orientation:'any',
+      background_color:'#0E1418', theme_color:'#16202A',
+      icons:[{src:icone(192,'#3ED598'),sizes:'192x192',type:'image/svg+xml',purpose:'any'},
+             {src:icone(512,'#3ED598'),sizes:'512x512',type:'image/svg+xml',purpose:'any'}],
+    };
+    const url=URL.createObjectURL(new Blob([JSON.stringify(man)],{type:'application/manifest+json'}));
+    const el=document.getElementById('planta-manifest');
+    if(el) el.setAttribute('href',url);
+  }catch(e){}
+})();
+
 function alternarCheio(){
+  /* Dentro da app CE Voz, o ecrã inteiro do sistema não serve: um iframe pode
+     não ter permissão, e mesmo tendo, o utilizador ficava sem o botão de sair.
+     Pede-se antes à app que expanda o painel — o resultado é o mesmo e sem
+     depender de permissões. */
+  if(DENTRO_DA_APP){
+    try{ window.parent.postMessage({tipo:'planta:pedir-cheio'},'*'); }catch(e){}
+    setTimeout(()=>{ try{ ajustarTela(); pintar(); }catch(e){} },140);
+    return;
+  }
   const on=document.body.classList.toggle('cheio');
   if(on) document.body.classList.remove('painel-esq','painel-dir');
   const b=document.getElementById('btCheio');
