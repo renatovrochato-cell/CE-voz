@@ -467,7 +467,7 @@ const DIVS_BASE=[
 // VERSÃO — fonte única (selo no ecrã inicial + cabeçalho do TXT exportado).
 // Subir aqui a cada alteração ao ficheiro.
 // ═══════════════════════════════════════
-const APP_VERSION='v2026.08.04-FIX163';
+const APP_VERSION='v2026.08.04-FIX164';
 
 // ═══════════════════════════════════════
 // ESTADO
@@ -13036,6 +13036,10 @@ function instalarManifest(){
       orientation:'portrait',
       background_color:'#0f0f0f',
       theme_color:'#0f0f0f',
+      /* O `id` é o que distingue duas aplicações instaladas. Sem ele, o Chrome
+         identifica-as pelo start_url — e como a CE Voz e a planta vivem na
+         mesma pasta, instalar uma SUBSTITUÍA a outra. Cada uma tem agora o seu. */
+      id:location.pathname.replace(/[^/]*$/,'')+'ce-voz-app',
       start_url:location.pathname,
       scope:location.pathname.replace(/[^/]*$/,''),
       icons:[],
