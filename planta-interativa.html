@@ -63,17 +63,12 @@ input[type=file]{display:none}
 main{display:grid;grid-template-columns:250px 1fr 300px;min-height:0}
 
 /* ══════════════ ECRÃS DE TOQUE ══════════════
-   Num telemóvel — e sobretudo num Fold, onde há ecrã de sobra — o problema não
-   era falta de espaço, era a distribuição: dois painéis laterais fixos comiam
-   550 px, o cabeçalho ocupava altura a mais com botões que quase não se usam, e
-   as ferramentas de desenho, que são as que se usam a toda a hora, ficavam
-   numas caixinhas de 30 px em cima do desenho.
-   Aqui invertem-se as prioridades:
-     · as ferramentas passam para uma COLUNA à esquerda, com 56 px de alvo
-     · os painéis laterais deixam de ser fixos: abrem por cima quando se pedem
-     · o cabeçalho encolhe para o essencial
-     · o resto do ecrã é todo para desenhar
-   `pointer:coarse` é o dedo; num rato mantém-se o layout de secretária. */
+   A primeira tentativa pôs os botões em quadrados de 54 px e cortou os
+   rótulos — ficaram 28 símbolos sem nome, impossíveis de decifrar. Os rótulos
+   JÁ existiam no HTML ("✏ Contorno", "📏 Medir"); o erro foi escondê-los.
+   Agora cada ferramenta é uma linha com o ícone em cima e o nome por baixo,
+   numa coluna de 86 px. Ocupa mais 26 px de largura e poupa adivinhação.
+   `pointer:coarse` é o dedo; em rato mantém-se o layout de secretária. */
 @media (pointer:coarse){
   header{padding:5px 9px;gap:8px;min-height:46px}
   header .tit{font-size:14px}
@@ -90,35 +85,43 @@ main{display:grid;grid-template-columns:250px 1fr 300px;min-height:0}
   body.painel-esq main>.corpo:first-of-type{left:0;border-right:1px solid var(--linha)}
   body.painel-dir main>.corpo:last-of-type{right:0;border-left:1px solid var(--linha)}
 
-  /* ferramentas: coluna à esquerda, alvos de dedo */
+  /* ── coluna de ferramentas, com NOME em cada uma ── */
   .barra{
-    position:absolute;left:0;top:0;bottom:0;width:60px;
-    display:flex;flex-direction:column;flex-wrap:nowrap;gap:3px;
-    padding:5px 2px;border-radius:0;overflow-y:auto;overscroll-behavior:contain;
-    background:rgba(27,36,44,.97);border-right:1px solid var(--linha);border-width:0 1px 0 0;
-    box-shadow:2px 0 14px rgba(0,0,0,.35);scrollbar-width:none}
+    position:absolute;left:0;top:0;bottom:0;width:86px;
+    display:flex;flex-direction:column;flex-wrap:nowrap;gap:2px;
+    padding:6px 4px 14px;border-radius:0;overflow-y:auto;overscroll-behavior:contain;
+    background:rgba(27,36,44,.98);border:0;border-right:1px solid var(--linha);
+    box-shadow:2px 0 16px rgba(0,0,0,.4);scrollbar-width:none}
   .barra::-webkit-scrollbar{display:none}
   .barra button{
-    min-height:54px;min-width:54px;width:54px;padding:0;
-    font-size:21px;line-height:1;border-radius:11px;
-    display:flex;align-items:center;justify-content:center;flex:0 0 auto}
-  .barra .sep{height:1px;background:var(--linha);margin:3px 6px;flex:0 0 auto}
-  /* o desenho começa depois da coluna */
-  #tabuleiro{padding-left:60px}
-  #escalaBarra,#dica{left:68px}
-  #btPainelEsq,#btPainelDir{display:inline-flex}
+    min-height:56px;width:78px;padding:6px 2px 5px;flex:0 0 auto;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+    font-size:9.5px;line-height:1.15;font-weight:600;letter-spacing:.01em;
+    text-align:center;white-space:normal;word-break:break-word;
+    border-radius:12px;overflow:hidden}
+  /* o primeiro caracter — o ícone — fica grande; o resto é o nome */
+  .barra button::first-line{font-size:22px;line-height:1.5}
+  .barra button.on{outline:2px solid var(--ac);outline-offset:-2px}
+  .barra .sep{height:1px;background:var(--linha);margin:5px 10px;flex:0 0 auto}
+  /* os pares de sinais ficam lado a lado, não ocupam duas linhas cada */
+  .barra .par{display:flex;gap:2px;flex:0 0 auto}
+  .barra .par button{width:38px;min-height:44px;font-size:17px}
+
+  #tabuleiro{padding-left:86px}
+  #escalaBarra,#dica{left:94px}
+  #btPainelEsq,#btPainelDir,#btCheio{display:inline-flex}
 }
 @media (pointer:coarse) and (min-width:820px){
-  /* Fold desdobrado: cabe a coluna de ferramentas E um painel fixo */
-  .barra{width:66px}
-  .barra button{min-height:58px;min-width:58px;width:58px;font-size:23px}
-  #tabuleiro{padding-left:66px}
-  #escalaBarra,#dica{left:74px}
+  /* Fold desdobrado: cabe a coluna E um painel fixo ao lado */
   body.painel-dir main{grid-template-columns:1fr 330px}
   body.painel-dir main>.corpo:last-of-type{position:static;width:auto;
     box-shadow:none;display:block}
 }
-#btPainelEsq,#btPainelDir{display:none}
+/* ── ecrã inteiro: só o desenho ── */
+body.cheio header,body.cheio main>.corpo{display:none !important}
+body.cheio main{grid-template-columns:1fr}
+body.cheio #btCheio{position:fixed;top:8px;right:8px;z-index:70;display:inline-flex}
+#btPainelEsq,#btPainelDir,#btCheio{display:none}
 body.painel-esq #btPainelEsq,body.painel-dir #btPainelDir{background:var(--ac);color:#04140c}
 aside{background:var(--chrome-2);overflow-y:auto;display:flex;flex-direction:column;min-height:0}
 aside.esq{border-right:1px solid var(--linha)}
@@ -290,6 +293,8 @@ table.bal tr.tot td{border-top:1px solid var(--linha);padding-top:4px}
   <div class="marca tit">CE Voz <span class="esconde-toque">·</span> <span class="esconde-toque">Planta</span> <span id="versao" style="font-weight:400;letter-spacing:0;text-transform:none;color:var(--texto-2)"></span></div>
   <div class="ficheiro" id="fich">—</div>
   <div class="acoes">
+    <button id="btCheio" onclick="alternarCheio()" title="Ecrã inteiro: só o desenho"
+      style="min-height:40px;padding:7px 11px;font-size:17px">⛶</button>
     <button id="btPainelEsq" onclick="alternarPainel('esq')" title="Divisões e balanço"
       style="min-height:40px;padding:7px 11px;font-size:17px">☰</button>
     <button id="btPainelDir" onclick="alternarPainel('dir')" title="Detalhes e envolventes"
@@ -329,39 +334,65 @@ table.bal tr.tot td{border-top:1px solid var(--linha);padding-top:4px}
   <div class="tela" id="tela">
     <svg id="svg"></svg>
     <div class="barra">
-      <button id="btDesfazer" title="Desfazer (Ctrl+Z)">↶</button>
-      <button id="btRefazer" title="Refazer (Ctrl+Shift+Z)">↷</button>
+      <button id="btDesfazer" title="Desfazer (Ctrl+Z)">↶
+Desfazer</button>
+      <button id="btRefazer" title="Refazer (Ctrl+Shift+Z)">↷
+Refazer</button>
       <div class="sep"></div>
-      <span class="sep"></span><button id="btJuntar" title="Arrastar um rectângulo para ACRESCENTAR à divisão (roupeiro, nicho)">＋</button>
-      <button id="btCortar" title="Arrastar um rectângulo para CORTAR da divisão">－</button>
-      <button id="btDesenhar" title="Redesenhar o contorno todo, canto a canto">✏ Contorno</button>
-      <button id="btMedir" title="Medir uma distância na planta (dois cliques)">📏 Medir</button>
-      <button id="btEspessura" title="Desenhar as paredes com espessura (só representação — não altera áreas)">▤ Paredes</button>
-      <button id="btCota" title="Marcar uma cota que fica desenhada">↔ Cota</button>
-      <button id="btAbrir" title="Afastar os compartimentos para caber a divisória de 15 cm (as áreas não mudam)">⇔ Abrir p/ paredes</button>
-      <button id="btLimpar" title="Encontrar e apagar restos: blocos minúsculos e tiras sobrantes">🧹 Restos</button>
-      <span class="sep"></span><button id="btOrto" class="on" title="Ortogonal: só horizontais e verticais (Shift inverte). Como no ZWCAD.">⊥ Orto</button>
-      <button id="btArco" title="Próximo troço em arco: clica o ponto por onde passa e depois o fim">◜ Arco</button>
-      <button id="btCirculo" title="Divisão circular: arrasta do centro para o bordo">○ Círculo</button>
-      <button id="btFechar" title="Fechar o contorno (Enter)" hidden>Fechar</button>
+      <span class="sep"></span><button id="btJuntar" title="Arrastar um rectângulo para ACRESCENTAR à divisão (roupeiro, nicho)">＋
+Juntar</button>
+      <button id="btCortar" title="Arrastar um rectângulo para CORTAR da divisão">－
+Cortar</button>
+      <button id="btDesenhar" title="Redesenhar o contorno todo, canto a canto">✏
+Contorno</button>
+      <button id="btMedir" title="Medir uma distância na planta (dois cliques)">📏
+Medir</button>
+      <button id="btEspessura" title="Desenhar as paredes com espessura (só representação — não altera áreas)">▤
+Paredes</button>
+      <button id="btCota" title="Marcar uma cota que fica desenhada">↔
+Cota</button>
+      <button id="btAbrir" title="Afastar os compartimentos para caber a divisória de 15 cm (as áreas não mudam)">⇔
+Abrir paredes</button>
+      <button id="btLimpar" title="Encontrar e apagar restos: blocos minúsculos e tiras sobrantes">🧹
+Restos</button>
+      <span class="sep"></span><button id="btOrto" class="on" title="Ortogonal: só horizontais e verticais (Shift inverte). Como no ZWCAD.">⊥
+Orto</button>
+      <button id="btArco" title="Próximo troço em arco: clica o ponto por onde passa e depois o fim">◜
+Arco</button>
+      <button id="btCirculo" title="Divisão circular: arrasta do centro para o bordo">○
+Círculo</button>
+      <button id="btFechar" title="Fechar o contorno (Enter)" hidden>⊠
+Fechar</button>
       <div class="sep"></div>
-      <button id="btModo" title="Arrastar a divisão inteira ou só um bloco">Mover: divisão</button>
-      <button id="btTudo" title="Seleccionar todas as divisões (Ctrl+A) — Shift+clique junta ou tira uma">▣ Tudo</button>
-      <button id="btRodar" title="Rodar 90° (tecla R · Shift+R ao contrário). Com uma divisão escolhida, as pegas ⟲ ⟳ nos cantos fazem o mesmo.">⟳ 90°</button>
+      <button id="btModo" title="Arrastar a divisão inteira ou só um bloco">⇱
+Mover</button><!--modo-->/button>
+      <button id="btTudo" title="Seleccionar todas as divisões (Ctrl+A) — Shift+clique junta ou tira uma">▣
+Tudo</button>
+      <button id="btRodar" title="Rodar 90° (tecla R · Shift+R ao contrário). Com uma divisão escolhida, as pegas ⟲ ⟳ nos cantos fazem o mesmo.">⟳
+90°</button>
       <div class="sep"></div>
-      <span class="sep"></span><button id="btEnv" title="Propor as paredes de edifício adjacente e circulação comum a partir das medidas">Envolventes</button>
-      <button id="btDiv" title="Classificar como divisória interior as paredes viradas para outra divisão">Divisórias</button>
+      <span class="sep"></span><button id="btEnv" title="Propor as paredes de edifício adjacente e circulação comum a partir das medidas">▭
+Envolventes</button>
+      <button id="btDiv" title="Classificar como divisória interior as paredes viradas para outra divisão">┼
+Divisórias</button>
       <div class="sep"></div>
-      <button id="btCE" title="Vista da envolvente para o relatório do CE">◧ Envolvente CE</button>
-      <button id="btZona" title="Marcar uma parte do pavimento ou da cobertura com outra condição fronteira" hidden>▦ Zona</button>
-      <button id="btPincel" title="Pintar paredes com a condição fronteira escolhida (Ctrl+clique escolhe a cor)" hidden>🖌</button>
-      <button id="btCotas" class="on">Cotas</button>
-      <button id="btOrient" class="on">Orientações</button>
-      <button id="btSol">Sol</button>
+      <button id="btCE" title="Vista da envolvente para o relatório do CE">◧
+Vista CE</button>
+      <button id="btZona" title="Marcar uma parte do pavimento ou da cobertura com outra condição fronteira" hidden>▦
+Zona</button>
+      <button id="btPincel" title="Pintar paredes com a condição fronteira escolhida (Ctrl+clique escolhe a cor)" hidden>🖌
+Pincel</button>
+      <button id="btCotas" class="on">⇥
+Cotas</button>
+      <button id="btOrient" class="on">🧭
+Orientações</button>
+      <button id="btSol">☀
+Sol</button>
       <div class="sep"></div>
-      <button id="btZoomIn">+</button>
-      <button id="btZoomOut">−</button>
-      <button id="btEnquadrar" title="Ajustar o zoom para ver a planta toda">⤢ Ver tudo</button>
+      <span class="par"><button id="btZoomIn">+</button>
+      <button id="btZoomOut">−</button></span>
+      <button id="btEnquadrar" title="Ajustar o zoom para ver a planta toda">⤢
+Ver tudo</button>
     </div>
     <div class="exemplo" id="avisoExemplo" hidden>
       <div><b>Isto é um exemplo</b> <span id="exemploNome"></span> — abre o teu <b>_levantamento.json</b>.</div>
@@ -514,7 +545,7 @@ table.bal tr.tot td{border-top:1px solid var(--linha);padding-top:4px}
   window.addEventListener('online',aviso);
 })();
 "use strict";
-const PLANTA_VERSAO='v1.22.0 (2026-08-04)';
+const PLANTA_VERSAO='v1.23.0 (2026-08-04)';
 /* ══════════════════════════════════════════════════════════════════
    CE Voz · motor de planta interativa
    Fonte de verdade: o levantamento (D). A planta é uma camada de
@@ -4495,7 +4526,7 @@ alt('btFechar',()=>fecharPoli());
 alt('btModo',()=>{
   modoBloco=!modoBloco;
   const b=document.getElementById('btModo');
-  b.textContent='Mover: '+(modoBloco?'bloco':'divisão'); b.classList.toggle('on',modoBloco);
+  b.textContent='⇱\n'+(modoBloco?'Bloco':'Divisão'); b.classList.toggle('on',modoBloco);
   // as pegas de redimensionar só existem com um bloco escolhido; ao passar para
   // "divisão" tinham de desaparecer, senão continuavam a apanhar o rato
   if(!modoBloco&&sel.t==='bloco'){
@@ -5922,6 +5953,31 @@ if(DENTRO_DA_APP){
    No toque, os dois painéis laterais ocupavam 550 px permanentes. Passam a
    abrir por cima do desenho e fecham-se com o mesmo botão, com Esc, ou tocando
    fora. Nunca ficam os dois abertos ao mesmo tempo. */
+/* ECRÃ INTEIRO
+   Esconde cabeçalho e painéis: fica só o desenho e a coluna de ferramentas. Em
+   Android pede também o ecrã inteiro ao sistema, para sair a barra de estado.
+   Sai com o mesmo botão ou com Esc. */
+function alternarCheio(){
+  const on=document.body.classList.toggle('cheio');
+  if(on) document.body.classList.remove('painel-esq','painel-dir');
+  const b=document.getElementById('btCheio');
+  if(b){ b.textContent=on?'⛶':'⛶'; b.title=on?'Sair do ecrã inteiro':'Ecrã inteiro: só o desenho'; }
+  try{
+    if(on&&document.documentElement.requestFullscreen)
+      document.documentElement.requestFullscreen().catch(()=>{});
+    else if(!on&&document.fullscreenElement&&document.exitFullscreen)
+      document.exitFullscreen().catch(()=>{});
+  }catch(e){}
+  setTimeout(()=>{ try{ ajustarTela(); pintar(); }catch(e){} },60);
+}
+document.addEventListener('fullscreenchange',()=>{
+  // sair pelo gesto do sistema tem de repor o layout
+  if(!document.fullscreenElement&&document.body.classList.contains('cheio')){
+    document.body.classList.remove('cheio');
+    setTimeout(()=>{ try{ ajustarTela(); pintar(); }catch(e){} },60);
+  }
+});
+
 function alternarPainel(lado){
   const cls='painel-'+lado, outro='painel-'+(lado==='esq'?'dir':'esq');
   document.body.classList.remove(outro);
@@ -5933,9 +5989,10 @@ function fecharPaineis(){
   setTimeout(()=>{ try{ ajustarTela(); pintar(); }catch(e){} },40);
 }
 document.addEventListener('keydown',ev=>{
-  if(ev.key==='Escape'&&
-     (document.body.classList.contains('painel-esq')||
-      document.body.classList.contains('painel-dir'))) fecharPaineis();
+  if(ev.key!=='Escape') return;
+  if(document.body.classList.contains('cheio')){ alternarCheio(); return; }
+  if(document.body.classList.contains('painel-esq')||
+     document.body.classList.contains('painel-dir')) fecharPaineis();
 },true);
 // tocar no desenho fecha o painel aberto
 document.addEventListener('pointerdown',ev=>{
@@ -6395,7 +6452,7 @@ if(DEMO){ nomeFich='URBª MONTE DA BEMPOSTA Lote 19, R C B_levantamento.json'; c
 
 // exposto para testes
 if(typeof window!=='undefined'){
-  window.__planta={get L(){return L;},get proj(){return proj;},carregar,autoLayout,auditar,balanco,relatorioHTML,pdfEnvolvente,alternarPainel,fecharPaineis,enviarLayoutParaApp,DENTRO_DA_APP,marcarAlterado,get porGuardar(){return _porGuardar;},empurrarVizinhos,get vaosSemParede(){return _vaosSemParede;},autoColocarVaos,recolocarVaos,guardarJSON,encostarDivisaoLargada,LIMITE_ENCOSTO,comprimirParaOrcamento,bytesDataURL,PDF_MAX_BYTES,ESP_INTERIOR,espExterior,espDaParede,abrirParaParedes,areaBrutaEstimada,areaBrutaPorPiso,juncoes,marcarFachadasAuto,paredeViradaParaDivisao,ceAutoPorPiso,get fila(){return filaColocar;},orientsMedidas,arrancarColocar,colocarNoPonto,pararColocar,separarPorPiso,pisoDaDivisao,linhasGrossas,divisoesDoFundo,fixarDivisoesDoFundo,recortarFundo,fundos,acrescentarFundo,trocarFundoAtivo,removerFundoAtivo,sincronizarFundo,get saltos(){return PARES_SALTOS;},set saltos(v){PARES_SALTOS=v;},estimarEscalaAutomatica,aplicarEscalaAutomatica,medidasDoLevantamento,conferirContraLevantamento,paredeInternaDaDivisao,colarBocado,encontrarRestos,apagarBlocos,copiarFormaPara,PLANTA_VERSAO,get espessura(){return espessura;},set espessura(v){espessura=v;},get orto(){return orto;},set orto(v){orto=v;},aplicarEmLote,planoParaExportar,resolverVars,__mascaraPronta,lerFormaDoDesenho,aplicarFormaLida,dilatar,erodir,fecharAberturas,alastrar,mancaParaRects,get mascara(){return mascaraFundo;},set mascara(v){mascaraFundo=v;},alinharParedes,fachadaMedida,encaixarDivisoes,zonas,areaPorCF,areaInterseccao,zonasDaDivisao,ajustarAreaDivisao,ajustarTodasAsAreas,abrirAreas,fecharAreas,picosDeLinha,melhorEncaixe,ajustarAoFundo,linhasFundoMetros,linhasDesenhadas,lerAreasColadas,gravarAreaUtil,cancelarTudo,divsSelecionadas,alternarNaSelecao,estaSelecionada,usarImagemFundo,receberFicheiroFundo,aplicarCF,porPincel,paredeDe,ceDiv,ceCorParede,cfParede,cfCor,cfDoTipo,marcarFraccaoRestantes,CF,encostarTudo,gravarEnvNoLevantamento,envDesenhadaPorTipo,abrirMenu,fecharMenu,limparEnvOrfas,pontosArco,ortogonal,contorno,areaBloco,caixa,dentroBloco,pontoParede,editarForma,normalizarDivisao,regiaoBooleana,celulasParaRects,decomporPoligono,areaPoligono,fecharOrtogonal,aplicarPoligono,relatorio,desfazer,refazer,guardarHist,posVao,migrarVaos,buracos,marcarDivisoriasAuto,DIVISORIA,rodar,numeracaoTXT,rotuloVao,calibrarFundo,set fundo(v){ if(!L) return; if(!v){L.fundos=[];L.fundoAtivo=0;L.fundo=null;return;} L.fundos=[v];L.fundoAtivo=0;L.fundo=v; },get fundo(){return L&&L.fundo;},marcarEnvolventesAuto,envObj,envSeg,paredes,vaosLivres,envDe,nomeOrient,parseM,desenhar,XJ,BEAR};
+  window.__planta={get L(){return L;},get proj(){return proj;},carregar,autoLayout,auditar,balanco,relatorioHTML,pdfEnvolvente,alternarPainel,alternarCheio,fecharPaineis,enviarLayoutParaApp,DENTRO_DA_APP,marcarAlterado,get porGuardar(){return _porGuardar;},empurrarVizinhos,get vaosSemParede(){return _vaosSemParede;},autoColocarVaos,recolocarVaos,guardarJSON,encostarDivisaoLargada,LIMITE_ENCOSTO,comprimirParaOrcamento,bytesDataURL,PDF_MAX_BYTES,ESP_INTERIOR,espExterior,espDaParede,abrirParaParedes,areaBrutaEstimada,areaBrutaPorPiso,juncoes,marcarFachadasAuto,paredeViradaParaDivisao,ceAutoPorPiso,get fila(){return filaColocar;},orientsMedidas,arrancarColocar,colocarNoPonto,pararColocar,separarPorPiso,pisoDaDivisao,linhasGrossas,divisoesDoFundo,fixarDivisoesDoFundo,recortarFundo,fundos,acrescentarFundo,trocarFundoAtivo,removerFundoAtivo,sincronizarFundo,get saltos(){return PARES_SALTOS;},set saltos(v){PARES_SALTOS=v;},estimarEscalaAutomatica,aplicarEscalaAutomatica,medidasDoLevantamento,conferirContraLevantamento,paredeInternaDaDivisao,colarBocado,encontrarRestos,apagarBlocos,copiarFormaPara,PLANTA_VERSAO,get espessura(){return espessura;},set espessura(v){espessura=v;},get orto(){return orto;},set orto(v){orto=v;},aplicarEmLote,planoParaExportar,resolverVars,__mascaraPronta,lerFormaDoDesenho,aplicarFormaLida,dilatar,erodir,fecharAberturas,alastrar,mancaParaRects,get mascara(){return mascaraFundo;},set mascara(v){mascaraFundo=v;},alinharParedes,fachadaMedida,encaixarDivisoes,zonas,areaPorCF,areaInterseccao,zonasDaDivisao,ajustarAreaDivisao,ajustarTodasAsAreas,abrirAreas,fecharAreas,picosDeLinha,melhorEncaixe,ajustarAoFundo,linhasFundoMetros,linhasDesenhadas,lerAreasColadas,gravarAreaUtil,cancelarTudo,divsSelecionadas,alternarNaSelecao,estaSelecionada,usarImagemFundo,receberFicheiroFundo,aplicarCF,porPincel,paredeDe,ceDiv,ceCorParede,cfParede,cfCor,cfDoTipo,marcarFraccaoRestantes,CF,encostarTudo,gravarEnvNoLevantamento,envDesenhadaPorTipo,abrirMenu,fecharMenu,limparEnvOrfas,pontosArco,ortogonal,contorno,areaBloco,caixa,dentroBloco,pontoParede,editarForma,normalizarDivisao,regiaoBooleana,celulasParaRects,decomporPoligono,areaPoligono,fecharOrtogonal,aplicarPoligono,relatorio,desfazer,refazer,guardarHist,posVao,migrarVaos,buracos,marcarDivisoriasAuto,DIVISORIA,rodar,numeracaoTXT,rotuloVao,calibrarFundo,set fundo(v){ if(!L) return; if(!v){L.fundos=[];L.fundoAtivo=0;L.fundo=null;return;} L.fundos=[v];L.fundoAtivo=0;L.fundo=v; },get fundo(){return L&&L.fundo;},marcarEnvolventesAuto,envObj,envSeg,paredes,vaosLivres,envDe,nomeOrient,parseM,desenhar,XJ,BEAR};
 }
 </script>
 </body>
