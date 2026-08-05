@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<link rel="manifest" id="planta-manifest"><title>CE Voz · Planta interativa</title>
+<link rel="manifest" href="manifest-planta.json"><title>CE Voz · Planta interativa</title>
 <style>
 :root{
   /* papel técnico — legível ao sol, sem brilho */
@@ -117,10 +117,17 @@ main{display:grid;grid-template-columns:250px 1fr 300px;min-height:0}
   body.painel-dir main>.corpo:last-of-type{position:static;width:auto;
     box-shadow:none;display:block}
 }
-/* ── ecrã inteiro: só o desenho ── */
-body.cheio header,body.cheio main>.corpo{display:none !important}
-body.cheio main{grid-template-columns:1fr}
-body.cheio #btCheio{position:fixed;top:8px;right:8px;z-index:70;display:inline-flex}
+/* ── ECRÃ INTEIRO: SÓ O DESENHO E AS FERRAMENTAS ──
+   Os painéis laterais são <aside>, não .corpo — a regra anterior não os
+   apanhava e continuavam à vista. Aqui esconde-se tudo o que é filho do body e
+   do main menos a tela, que é onde se desenha. */
+body.cheio>*:not(main){display:none !important}
+body.cheio main>*:not(#tela){display:none !important}
+body.cheio main{grid-template-columns:1fr;height:100vh}
+body.cheio #tela{width:100%;height:100%}
+body.cheio #btCheio{position:fixed;top:10px;right:10px;z-index:90;display:inline-flex;
+  background:rgba(27,36,44,.95);border:1px solid var(--linha);border-radius:10px;
+  padding:9px 13px;font-size:17px;box-shadow:0 3px 12px rgba(0,0,0,.45)}
 /* O ecrã inteiro faz falta em qualquer ecrã — num PC também se quer ver o
    desenho sem o cabeçalho. Só os botões dos painéis é que dependem do toque,
    porque em ecrã largo os painéis já estão à vista. */
@@ -549,7 +556,7 @@ Ver tudo</button>
   window.addEventListener('online',aviso);
 })();
 "use strict";
-const PLANTA_VERSAO='v1.26.1 (2026-08-04)';
+const PLANTA_VERSAO='v1.27.0 (2026-08-04)';
 /* ══════════════════════════════════════════════════════════════════
    CE Voz · motor de planta interativa
    Fonte de verdade: o levantamento (D). A planta é uma camada de
@@ -5961,41 +5968,10 @@ if(DENTRO_DA_APP){
    Esconde cabeçalho e painéis: fica só o desenho e a coluna de ferramentas. Em
    Android pede também o ecrã inteiro ao sistema, para sair a barra de estado.
    Sai com o mesmo botão ou com Esc. */
-/* ══════════ INSTALAR COMO APLICAÇÃO ══════════
-   Sem manifest, o Chrome cria só um ATALHO: abre na mesma dentro do browser,
-   com a barra de endereço a roubar altura. Com manifest e display:standalone,
-   passa a abrir como aplicação, em ecrã inteiro e com ícone próprio.
-   O manifest é gerado em memória (Blob) para o programa continuar a ser um
-   único ficheiro — não é preciso mais nada no repositório. */
-(function(){
-  const icone=(tam,cor)=>{
-    const svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+tam+'" height="'+tam+'" viewBox="0 0 192 192">'+
-      '<rect width="192" height="192" rx="42" fill="#16202A"/>'+
-      '<g fill="none" stroke="'+cor+'" stroke-width="9" stroke-linejoin="round">'+
-      '<path d="M34 46h58v52H34zM100 46h58v34h-58zM100 88h58v58h-58zM34 106h58v40H34z"/></g>'+
-      '<g stroke="#FF6B6B" stroke-width="11" stroke-linecap="square">'+
-      '<path d="M34 46h124M34 146h58"/></g></svg>';
-    return 'data:image/svg+xml;base64,'+btoa(unescape(encodeURIComponent(svg)));
-  };
-  try{
-    const man={
-      name:'CE Voz — Planta', short_name:'Planta',
-      description:'Desenho da planta e da envolvente para certificados energéticos',
-      /* `id` próprio: sem ele o Chrome identificava esta app pelo start_url e,
-         estando na mesma pasta da CE Voz, uma substituía a outra ao instalar. */
-      id:location.pathname.replace(/[^/]*$/,'')+'ce-planta-app',
-      start_url:location.pathname, scope:location.pathname,
-      display:'standalone', orientation:'any',
-      background_color:'#0E1418', theme_color:'#16202A',
-      icons:[{src:icone(192,'#3ED598'),sizes:'192x192',type:'image/svg+xml',purpose:'any'},
-             {src:icone(512,'#3ED598'),sizes:'512x512',type:'image/svg+xml',purpose:'any'}],
-    };
-    const url=URL.createObjectURL(new Blob([JSON.stringify(man)],{type:'application/manifest+json'}));
-    const el=document.getElementById('planta-manifest');
-    if(el) el.setAttribute('href',url);
-  }catch(e){}
-})();
-
+/* O manifest é agora um FICHEIRO real (manifest-planta.json), não um Blob.
+   Num Blob, o campo `id` é resolvido contra o URL blob: — que muda a cada
+   carregamento — e o Chrome deixava de distinguir esta app da CE Voz: instalar
+   uma substituía a outra. Com ficheiros reais, cada uma tem id fixo. */
 function alternarCheio(){
   /* Dentro da app CE Voz, o ecrã inteiro do sistema não serve: um iframe pode
      não ter permissão, e mesmo tendo, o utilizador ficava sem o botão de sair.

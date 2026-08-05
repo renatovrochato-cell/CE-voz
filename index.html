@@ -8,7 +8,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0f0f0f">
-<link rel="manifest" id="app-manifest">
+<link rel="manifest" href="manifest-ce-voz.json">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
 <meta name="apple-mobile-web-app-title" content="CE Voz">
@@ -467,7 +467,7 @@ const DIVS_BASE=[
 // VERSÃO — fonte única (selo no ecrã inicial + cabeçalho do TXT exportado).
 // Subir aqui a cada alteração ao ficheiro.
 // ═══════════════════════════════════════
-const APP_VERSION='v2026.08.04-FIX164';
+const APP_VERSION='v2026.08.04-FIX165';
 
 // ═══════════════════════════════════════
 // ESTADO
@@ -13061,8 +13061,13 @@ function instalarManifest(){
       ];
     }
     const blob=new Blob([JSON.stringify(manifest)],{type:'application/manifest+json'});
-    const link=document.getElementById('app-manifest');
-    if(link) link.href=URL.createObjectURL(blob);
+    /* Este gerador ficou desligado: o manifest passou a ser um FICHEIRO real
+       (manifest-ce-voz.json). Num Blob, o campo `id` resolve-se contra o URL
+       blob:, que muda a cada carregamento — e o Chrome deixava de distinguir a
+       CE Voz da planta: instalar uma substituía a outra no ecrã principal.
+       Fica aqui como recurso: se o ficheiro faltar, gera-se um em memória. */
+    const link=document.querySelector('link[rel="manifest"]');
+    if(link&&!link.getAttribute('href')) link.href=URL.createObjectURL(blob);
   }catch(e){ console.warn('Manifest não pôde ser gerado:',e); }
 }
 

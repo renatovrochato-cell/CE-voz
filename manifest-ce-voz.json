@@ -1,0 +1,27 @@
+{
+  "id": "/CE-voz/?app=ce-voz",
+  "name": "CE Voz — Levantamento",
+  "short_name": "CE Voz",
+  "description": "Levantamento de campo para certificados energéticos (SCE/REH/RECS)",
+  "start_url": "./index.html?app=ce-voz",
+  "scope": "./",
+  "display": "fullscreen",
+  "display_override": ["fullscreen", "standalone", "minimal-ui"],
+  "orientation": "portrait",
+  "background_color": "#0f0f0f",
+  "theme_color": "#0f0f0f",
+  "icons": [
+    {
+      "src": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxOTIiIGhlaWdodD0iMTkyIiB2aWV3Qm94PSIwIDAgMTkyIDE5MiI+PHJlY3Qgd2lkdGg9IjE5MiIgaGVpZ2h0PSIxOTIiIHJ4PSI0MiIgZmlsbD0iIzBmMGYwZiIvPjxnIGZpbGw9IiNGRkMxMDciPjxwYXRoIGQ9Ik05NiAzNmMtMTMgMC0yNCAxMS0yNCAyNHY0MGMwIDEzIDExIDI0IDI0IDI0czI0LTExIDI0LTI0VjYwYzAtMTMtMTEtMjQtMjQtMjR6Ii8+PHBhdGggZD0iTTU0IDk2djhjMCAyMyAxOSA0MiA0MiA0MnM0Mi0xOSA0Mi00MnYtOGgtMTZ2OGMwIDE0LTEyIDI2LTI2IDI2cy0yNi0xMi0yNi0yNnYtOEg1NHoiLz48cmVjdCB4PSI4OCIgeT0iMTQ0IiB3aWR0aD0iMTYiIGhlaWdodD0iMjIiIHJ4PSI0Ii8+PC9nPjwvc3ZnPg==",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI1MTIiIGhlaWdodD0iNTEyIiB2aWV3Qm94PSIwIDAgMTkyIDE5MiI+PHJlY3Qgd2lkdGg9IjE5MiIgaGVpZ2h0PSIxOTIiIHJ4PSI0MiIgZmlsbD0iIzBmMGYwZiIvPjxnIGZpbGw9IiNGRkMxMDciPjxwYXRoIGQ9Ik05NiAzNmMtMTMgMC0yNCAxMS0yNCAyNHY0MGMwIDEzIDExIDI0IDI0IDI0czI0LTExIDI0LTI0VjYwYzAtMTMtMTEtMjQtMjQtMjR6Ii8+PHBhdGggZD0iTTU0IDk2djhjMCAyMyAxOSA0MiA0MiA0MnM0Mi0xOSA0Mi00MnYtOGgtMTZ2OGMwIDE0LTEyIDI2LTI2IDI2cy0yNi0xMi0yNi0yNnYtOEg1NHoiLz48cmVjdCB4PSI4OCIgeT0iMTQ0IiB3aWR0aD0iMTYiIGhlaWdodD0iMjIiIHJ4PSI0Ii8+PC9nPjwvc3ZnPg==",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

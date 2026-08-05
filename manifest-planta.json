@@ -1,0 +1,31 @@
+{
+  "id": "/CE-voz/?app=planta",
+  "name": "CE Voz — Planta",
+  "short_name": "Planta",
+  "description": "Desenho da planta e da envolvente para certificados energéticos",
+  "start_url": "./planta-interativa.html?app=planta",
+  "scope": "./planta-interativa.html",
+  "display": "fullscreen",
+  "display_override": [
+    "fullscreen",
+    "standalone",
+    "minimal-ui"
+  ],
+  "orientation": "any",
+  "background_color": "#0E1418",
+  "theme_color": "#16202A",
+  "icons": [
+    {
+      "src": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxOTIiIGhlaWdodD0iMTkyIiB2aWV3Qm94PSIwIDAgMTkyIDE5MiI+PHJlY3Qgd2lkdGg9IjE5MiIgaGVpZ2h0PSIxOTIiIHJ4PSI0MiIgZmlsbD0iIzE2MjAyQSIvPjxnIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzNFRDU5OCIgc3Ryb2tlLXdpZHRoPSI5IiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMzQgNDZoNTh2NTJIMzR6TTEwMCA0Nmg1OHYzNGgtNTh6TTEwMCA4OGg1OHY1OGgtNTh6TTM0IDEwNmg1OHY0MEgzNHoiLz48L2c+PGcgc3Ryb2tlPSIjRkY2QjZCIiBzdHJva2Utd2lkdGg9IjExIiBzdHJva2UtbGluZWNhcD0ic3F1YXJlIj48cGF0aCBkPSJNMzQgNDZoMTI0TTM0IDE0Nmg1OCIvPjwvZz48L3N2Zz4=",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI1MTIiIGhlaWdodD0iNTEyIiB2aWV3Qm94PSIwIDAgMTkyIDE5MiI+PHJlY3Qgd2lkdGg9IjE5MiIgaGVpZ2h0PSIxOTIiIHJ4PSI0MiIgZmlsbD0iIzE2MjAyQSIvPjxnIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzNFRDU5OCIgc3Ryb2tlLXdpZHRoPSI5IiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMzQgNDZoNTh2NTJIMzR6TTEwMCA0Nmg1OHYzNGgtNTh6TTEwMCA4OGg1OHY1OGgtNTh6TTM0IDEwNmg1OHY0MEgzNHoiLz48L2c+PGcgc3Ryb2tlPSIjRkY2QjZCIiBzdHJva2Utd2lkdGg9IjExIiBzdHJva2UtbGluZWNhcD0ic3F1YXJlIj48cGF0aCBkPSJNMzQgNDZoMTI0TTM0IDE0Nmg1OCIvPjwvZz48L3N2Zz4=",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
