@@ -45,6 +45,16 @@ body.duplo #painel-lado .pl-lin span{color:var(--tx2);font-family:ui-monospace,m
 body.duplo #painel-lado .pl-fot{display:flex;gap:5px;flex-wrap:wrap}
 body.duplo #painel-lado .pl-fot img{width:54px;height:54px;object-fit:cover;
   border-radius:7px;border:1px solid var(--br)}
+/* PLANTA A OCUPAR O ECRÃ TODO
+   No painel lateral a planta fica com meia largura — chega para conferir, não
+   para desenhar. Este modo põe-na a ocupar tudo, sem sair da app: o
+   levantamento continua carregado e o que se guarda volta na mesma. */
+body.planta-cheia #app>.screen{display:none !important}
+body.planta-cheia #painel-lado{display:flex !important;position:fixed;inset:0;
+  z-index:80;padding:0;background:var(--bg)}
+body.planta-cheia #painel-lado .pl-sec{border-radius:0;border-width:0 0 1px}
+body.planta-cheia #pl-planta-frame{border:0;border-radius:0;flex:1;min-height:0}
+body.planta-cheia #btDuplo{display:none !important}
 #btDuplo{display:none}
 /* nos dobráveis a área útil pode estar dividida pelo vinco */
 @media (horizontal-viewport-segments:2){
@@ -457,7 +467,7 @@ const DIVS_BASE=[
 // VERSÃO — fonte única (selo no ecrã inicial + cabeçalho do TXT exportado).
 // Subir aqui a cada alteração ao ficheiro.
 // ═══════════════════════════════════════
-const APP_VERSION='v2026.08.04-FIX162';
+const APP_VERSION='v2026.08.04-FIX163';
 
 // ═══════════════════════════════════════
 // ESTADO
@@ -13625,11 +13635,35 @@ function enviarProjetoParaPlanta(){
       proj:{D:JSON.parse(JSON.stringify(D))}},'*');
   }catch(e){}
 }
+/* A planta ocupa o ecrã todo, dentro da app. Sai com o mesmo botão ou com Esc.
+   Não usa o ecrã inteiro do sistema: assim o botão de sair fica sempre à vista
+   e não se depende de permissões do iframe. */
+function alternarPlantaCheia(){
+  const on=document.body.classList.toggle('planta-cheia');
+  const b=document.getElementById('pl-btCheio');
+  if(b){ b.textContent=on?'⤡ Reduzir':'⛶ Ecrã todo';
+         b.title=on?'Voltar ao painel ao lado':'Pôr a planta a ocupar o ecrã todo'; }
+  // dar tempo ao layout antes de a planta se redimensionar
+  setTimeout(()=>{
+    const f=document.getElementById('pl-planta-frame');
+    try{ f&&f.contentWindow&&f.contentWindow.dispatchEvent(new Event('resize')); }catch(e){}
+  },80);
+}
+document.addEventListener('keydown',ev=>{
+  if(ev.key==='Escape'&&document.body.classList.contains('planta-cheia'))
+    alternarPlantaCheia();
+},true);
+// a planta pode pedir para crescer, a partir de dentro
+window.addEventListener('message',ev=>{
+  if(ev.data&&ev.data.tipo==='planta:pedir-cheio') alternarPlantaCheia();
+});
+
 function abrirPlantaAoLado(){
   const el=document.getElementById('painel-lado');
   if(!el) return;
   if(_plantaAberta){                       // fechar e voltar ao painel normal
     _plantaAberta=false; _plantaPronta=false;
+    document.body.classList.remove('planta-cheia');
     pintarPainelLado();
     return;
   }
@@ -13643,9 +13677,16 @@ function abrirPlantaAoLado(){
     '<div class="pl-sec" style="padding:9px 11px">'+
       '<div style="display:flex;gap:8px;align-items:center;justify-content:space-between">'+
         '<div class="pl-tit" style="margin:0">Planta interativa</div>'+
-        '<button onclick="abrirPlantaAoLado()" style="background:var(--bg3);color:var(--tx);'+
+        '<div style="display:flex;gap:6px">'+
+        '<button id="pl-btCheio" onclick="alternarPlantaCheia()" title="Pôr a planta a ocupar o ecrã todo" '+
+          'style="background:var(--ac);color:#04140c;border:none;border-radius:8px;'+
+          'padding:7px 12px;font-size:12.5px;font-weight:800;min-height:38px;'+
+          'cursor:pointer;white-space:nowrap">⛶ Ecrã todo</button>'+
+        '<button onclick="if(document.body.classList.contains(\'planta-cheia\'))alternarPlantaCheia();abrirPlantaAoLado()" '+
+          'style="background:var(--bg3);color:var(--tx);'+
           'border:1px solid var(--br);border-radius:8px;padding:7px 11px;font-size:12px;'+
-          'min-height:36px;cursor:pointer">✕ Fechar</button>'+
+          'min-height:38px;cursor:pointer">✕</button>'+
+        '</div>'+
       '</div>'+
       '<div id="pl-planta-estado" style="font-size:11.5px;color:var(--tx2);margin-top:5px;'+
         'line-height:1.4">A abrir… O levantamento é enviado sozinho. '+
