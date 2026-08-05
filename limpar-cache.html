@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="pt-PT">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Limpar cache — CE Voz</title>
+<style>
+  body{margin:0;background:#0E1418;color:#E6EDF2;padding:18px;
+       font:15px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  h1{font-size:19px;margin:0 0 4px}
+  .sub{color:#8FA3B0;font-size:13px;margin:0 0 18px}
+  .card{background:#16202A;border:1px solid #2A3945;border-radius:12px;
+        padding:14px;margin-bottom:12px}
+  button{background:#3ED598;color:#04140c;border:none;border-radius:10px;
+         padding:14px 18px;font-weight:800;font-size:15px;cursor:pointer;
+         min-height:48px;width:100%}
+  pre{background:#0E1418;border:1px solid #2A3945;border-radius:8px;padding:10px;
+      font-size:12px;color:#8FA3B0;white-space:pre-wrap;margin:12px 0 0}
+  a{color:#3ED598}
+</style>
+</head>
+<body>
+
+<h1>Limpar cache</h1>
+<p class="sub">Use isto se a planta abrir a app CE Voz, ou se ficar preso numa
+versão antiga.</p>
+
+<div class="card">
+  <b>O que aconteceu</b><br>
+  <span style="color:#8FA3B0;font-size:13.5px">
+  Uma versão anterior do service worker guardava a pasta inteira em cache e
+  servia o <code>index.html</code> para qualquer endereço. Resultado: a planta
+  abria a app CE Voz. Isto desinstala esse worker e apaga as caches.</span>
+</div>
+
+<button onclick="limpar()">🧹 Desinstalar e limpar tudo</button>
+<pre id="log">Pronto a limpar.</pre>
+
+<div class="card" style="margin-top:14px">
+  <b>Depois de limpar</b><br>
+  <span style="color:#8FA3B0;font-size:13.5px">
+  Fecha o browser <b>por completo</b> e volta a abrir. Nenhum levantamento é
+  apagado — as caches são só cópias das páginas, não dos teus dados.</span>
+</div>
+
+<script>
+const log=t=>{document.getElementById('log').textContent+='\n'+t;};
+async function limpar(){
+  document.getElementById('log').textContent='A limpar…';
+  let nSW=0,nC=0;
+  try{
+    if('serviceWorker' in navigator){
+      const regs=await navigator.serviceWorker.getRegistrations();
+      for(const r of regs){
+        const nome=(r.active&&r.active.scriptURL)||r.scope;
+        await r.unregister(); nSW++;
+        log('✔ desinstalado: '+nome);
+      }
+      if(!regs.length) log('· nenhum service worker registado');
+    } else log('· este browser não usa service workers');
+  }catch(e){ log('✗ ao desinstalar: '+e.message); }
+  try{
+    if('caches' in window){
+      const ks=await caches.keys();
+      for(const k of ks){ await caches.delete(k); nC++; log('✔ cache apagada: '+k); }
+      if(!ks.length) log('· nenhuma cache guardada');
+    }
+  }catch(e){ log('✗ ao apagar caches: '+e.message); }
+  log('');
+  log('Feito: '+nSW+' worker(s), '+nC+' cache(s).');
+  log('Fecha o browser POR COMPLETO e volta a abrir.');
+  log('Os teus levantamentos não foram tocados.');
+}
+</script>
+</body>
+</html>
