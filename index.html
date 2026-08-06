@@ -467,7 +467,7 @@ const DIVS_BASE=[
 // VERSÃO — fonte única (selo no ecrã inicial + cabeçalho do TXT exportado).
 // Subir aqui a cada alteração ao ficheiro.
 // ═══════════════════════════════════════
-const APP_VERSION='v2026.08.04-FIX165';
+const APP_VERSION='v2026.08.04-FIX169';
 
 // ═══════════════════════════════════════
 // ESTADO
@@ -751,6 +751,19 @@ function buildQs(){
 // ═══════════════════════════════════════
 function expandPe(){
   const n=D.pisos||1;
+  /* Se os pisos já foram perguntados um a um, no fim de cada piso, esta
+     pergunta não tem nada a acrescentar — só faria repetir o trabalho. */
+  if(n>1){
+    const pisosUsados=[...new Set((D.divisoes||[])
+      .map(d=>String(((D.divisoesDados[d]||{}).piso||'')).trim()).filter(Boolean))];
+    const jaTodos=pisosUsados.length>1&&
+      pisosUsados.every(p2=>parseFloat(String((D.peDireitos||{})[p2]||''))>0);
+    if(jaTodos){
+      const mi2=qList.findIndex(q=>q.isPeMarker);
+      if(mi2>-1) comRespostasPreservadas(()=>qList.splice(mi2,1));
+      return;
+    }
+  }
   // Uma única pergunta com inputs inline por piso
   const extras=[{
     id:'pe-todos',
@@ -792,6 +805,22 @@ function expandDivCompleto(){
   const chaveAtual=JSON.stringify(divs);
   if(_ultimaExpansaoDivisoesKey===chaveAtual){expandedDivMedidas=true;return;} // já está atualizado
   const extras=[];
+  /* PÉ-DIREITO NO FIM DE CADA PISO
+     Estava tudo numa pergunta só, no fim do levantamento: chegava-se lá sem
+     saber de cor os pés-direitos dos pisos todos, e voltava-se ao princípio a
+     confirmar. Agora pergunta-se assim que se acaba a última divisão de cada
+     piso, com a fita ainda na mão e no piso certo.
+     Só faz sentido com mais do que um piso; com um só, mantém-se a pergunta
+     única de sempre. */
+  const _pisoDe=n=>String(((D.divisoesDados[n]||{}).piso||'')).trim();
+  const _ordemP=['Cave','R/C','1º andar','2º andar','3º andar','4º andar'];
+  const _multi=(parseInt(D.pisos)||1)>1;
+  // último índice de cada piso, pela ordem em que as divisões vão ser visitadas
+  const _ultimoDoPiso={};
+  if(_multi) divs.forEach((d,i)=>{ const p=_pisoDe(d); if(p) _ultimoDoPiso[p]=i; });
+  const _pisosPresentes=Object.keys(_ultimoDoPiso)
+    .sort((a,b)=>_ordemP.indexOf(a)-_ordemP.indexOf(b));
+
   for(const div of divs){
     // 1. Fotos + piso (sempre) + comprimentos das paredes exteriores (só se levParedes=Sim)
     const fazParedes=(D.levParedes||'sim').toLowerCase().includes('sim');
@@ -865,6 +894,35 @@ function expandDivCompleto(){
   // apontar para OUTRA pergunta na nova ordem (ex: vãos da Cozinha), fazendo os
   // formulários misturarem-se (paredes a mostrar vãos, ou vice-versa). Agora
   // reancoramos curQ pelo id da pergunta, esteja na posição que estiver depois.
+  /* A pergunta do piso entra a seguir à última pergunta da última divisão desse
+     piso — ou seja, quando se acaba de medir esse piso e antes de subir. */
+  if(_multi&&_pisosPresentes.length>1){
+    const comExtras=[];
+    let iDiv=-1;
+    for(let k=0;k<extras.length;k++){
+      const e=extras[k];
+      comExtras.push(e);
+      // as perguntas de uma divisão têm o id `dc-<div>-…`; o piso fecha depois
+      // da última pergunta da divisão
+      const proximo=extras[k+1];
+      const divDesta=(String(e.id||'').match(/^dc-(.+?)-[a-z0-9]+$/i)||[])[1];
+      const divProx=proximo?(String(proximo.id||'').match(/^dc-(.+?)-[a-z0-9]+$/i)||[])[1]:null;
+      if(!divDesta||divDesta===divProx) continue;
+      const idx=divs.indexOf(divDesta);
+      const piso=_pisoDe(divDesta);
+      if(idx<0||!piso||_ultimoDoPiso[piso]!==idx) continue;
+      comExtras.push({
+        id:'pe-piso-'+piso,
+        ctx:'Pé-direito · '+piso,
+        text:'Acabaste o '+piso+'. Qual o pé-direito deste piso, em metros?',
+        hint:'Mede agora, com a fita na mão — do pavimento acabado ao teto acabado. '+
+             'Se houver tetos falsos com alturas diferentes, usa o valor dominante.',
+        isPePiso:true, piso:piso, key:'pe-piso-'+piso,
+        isNumeric:true, unidade:'m',
+      });
+    }
+    extras.length=0; extras.push(...comExtras);
+  }
   const idAntesDoSplice=(typeof curQ!=='undefined'&&qList[curQ])?qList[curQ].id:null;
   if(mi>-1) comRespostasPreservadas(()=>qList.splice(mi,fim-mi+1,...extras));
   if(idAntesDoSplice&&typeof curQ!=='undefined'){
@@ -2086,6 +2144,99 @@ function renderBotaoCopiar(div, afterEl, afterCopyFn){
   afterEl.appendChild(btn);
 }
 
+/* ══════════ PÉ-DIREITO DE UM PISO ══════════
+   Duas coisas ao mesmo tempo, porque é o momento certo para as duas:
+   · a MEDIDA, com validação imediata — 5,20 m num fogo corrente é engano de
+     dedo, e apanhá-lo aqui evita que vá para o cálculo;
+   · o BALANÇO do piso — o que ficou por medir, sem orientação, sem vãos. É a
+     última oportunidade de voltar atrás ainda estando no piso. */
+const PE_MIN_PLAUSIVEL=2.20, PE_MAX_PLAUSIVEL=3.60;
+function balancoDoPiso(piso){
+  const divs=(D.divisoes||[]).filter(d=>
+    String(((D.divisoesDados[d]||{}).piso||'')).trim()===piso);
+  const semMedida=[], semOrient=[], semVaos=[];
+  divs.forEach(d=>{
+    const dd=D.divisoesDados[d]||{};
+    const orients=Object.keys(dd.comprimentos||{});
+    const medidas=Object.values(dd.trocos||{})
+      .filter(v=>v&&String(v[0]||'').trim()).length;
+    if(orients.length&&!medidas) semMedida.push(d);
+    if(!orients.length&&!/wc|banho|despensa|arrum|circula|hall|corredor/i
+      .test(d.normalize('NFD').replace(/[\u0300-\u036f]/g,''))) semOrient.push(d);
+    if(orients.length&&medidas&&!(dd.vaos||[]).length) semVaos.push(d);
+  });
+  return {piso,divs,semMedida,semOrient,semVaos};
+}
+function renderPePiso(q){
+  const wrap=document.getElementById('inline-inputs');
+  wrap.innerHTML='';
+  const piso=q.piso;
+  const chave='pe-piso-'+piso;
+
+  // ── medida ──
+  const lbl=document.createElement('div');
+  lbl.className='aqs-lbl';
+  lbl.textContent='Pé-direito do '+piso+' (m)';
+  const inp=document.createElement('input');
+  inp.className='aqs-inp'; inp.type='number'; inp.step='0.01';
+  inp.inputMode='decimal'; inp.placeholder='2.60';
+  const jaTem=parseFloat(String((D.peDireitos||{})[piso]||'').replace(',','.'));
+  if(jaTem>0) inp.value=jaTem.toFixed(2);
+  const aviso=document.createElement('div');
+  aviso.style.cssText='font-size:12.5px;line-height:1.45;margin-top:6px;display:none';
+  const validar=()=>{
+    const v=parseFloat(String(inp.value||'').replace(',','.'));
+    if(!(v>0)){ aviso.style.display='none'; return; }
+    if(v<PE_MIN_PLAUSIVEL||v>PE_MAX_PLAUSIVEL){
+      aviso.style.display='block'; aviso.style.color='var(--am)';
+      aviso.textContent='⚠ '+v.toFixed(2).replace('.',',')+' m é invulgar num fogo — '+
+        'o corrente anda entre '+PE_MIN_PLAUSIVEL.toFixed(2).replace('.',',')+' e '+
+        PE_MAX_PLAUSIVEL.toFixed(2).replace('.',',')+' m. Confirma antes de avançar; '+
+        'se for mesmo assim (pé-direito duplo, sótão), segue em frente.';
+    } else {
+      // comparar com os outros pisos: uma diferença grande também é suspeita
+      const outros=Object.entries(D.peDireitos||{})
+        .filter(([p2])=>p2!==piso)
+        .map(([,x])=>parseFloat(String(x).replace(',','.'))).filter(x=>x>0);
+      const dif=outros.length?Math.max(...outros.map(o=>Math.abs(o-v))):0;
+      if(dif>0.60){
+        aviso.style.display='block'; aviso.style.color='var(--am)';
+        aviso.textContent='⚠ Diferença de '+dif.toFixed(2).replace('.',',')+
+          ' m para outro piso. Acontece, mas confirma que não trocaste os valores.';
+      } else { aviso.style.display='none'; }
+    }
+  };
+  inp.oninput=()=>{ saveToD(chave,inp.value); validar(); autoSave(); };
+  wrap.appendChild(lbl); wrap.appendChild(inp); wrap.appendChild(aviso);
+  validar();
+
+  // ── balanço do piso ──
+  const b=balancoDoPiso(piso);
+  const box=document.createElement('div');
+  box.style.cssText='margin-top:16px;padding:12px 13px;background:var(--bg2);'+
+    'border:1px solid var(--br);border-radius:11px';
+  const tit=document.createElement('div');
+  tit.style.cssText='font-size:11px;color:var(--tx2);font-weight:700;'+
+    'text-transform:uppercase;letter-spacing:.06em;margin-bottom:7px';
+  tit.textContent='Balanço do '+piso;
+  box.appendChild(tit);
+  const linha=(txt,cor)=>{
+    const d=document.createElement('div');
+    d.style.cssText='font-size:13px;line-height:1.5;color:'+(cor||'var(--tx)');
+    d.textContent=txt; box.appendChild(d);
+  };
+  linha(b.divs.length+' divisão(ões) neste piso');
+  if(b.semMedida.length) linha('⚠ Sem medida: '+b.semMedida.join(', '),'var(--am)');
+  if(b.semOrient.length) linha('⚠ Sem parede exterior marcada: '+b.semOrient.join(', '),'var(--am)');
+  if(b.semVaos.length)   linha('· Sem vãos: '+b.semVaos.join(', '),'var(--tx2)');
+  if(!b.semMedida.length&&!b.semOrient.length)
+    linha('✅ Tudo medido neste piso.','var(--ac)');
+  else
+    linha('Ainda estás neste piso — é o momento de voltar atrás, se for preciso.',
+      'var(--tx2)');
+  wrap.appendChild(box);
+}
+
 function renderCompInputs(q){
   const wrap=document.getElementById('inline-inputs');
   wrap.innerHTML='';
@@ -2098,7 +2249,35 @@ function renderCompInputs(q){
      "esta parede dá para onde?" com a bússola na mão. São SUGESTÃO — só se
      preenchem os troços que ainda estiverem vazios, e o que já mediste nunca é
      tocado. */
+  /* ORIENTAÇÕES LIDAS DA PLANTA — COM UM BOTÃO PARA AS APLICAR
+     No histórico deste levantamento, 22 de 31 correcções foram de orientação:
+     é de longe onde mais se perde tempo. Se a planta já as diz, dá-se um botão
+     para as marcar todas de uma vez, em vez de as escolher uma a uma. */
   if(dd.orientsPlanta&&dd.orientsPlanta.length){
+    const jaTem=Object.keys(dd.comprimentos||{});
+    const faltam=dd.orientsPlanta.filter(o=>!jaTem.includes(o));
+    if(faltam.length){
+      const bSec=document.createElement('div');
+      bSec.style.cssText='margin-bottom:10px';
+      const bt=document.createElement('button');
+      bt.type='button';
+      bt.style.cssText='width:100%;padding:13px;background:var(--ac);color:#000;'+
+        'border:none;border-radius:11px;font-weight:800;font-size:14px;min-height:48px';
+      bt.textContent='📐 Marcar '+faltam.join(', ')+' como parede exterior';
+      bt.onclick=()=>{
+        faltam.forEach(o=>{
+          if(!dd.comprimentos) dd.comprimentos={};
+          if(!dd.trocos) dd.trocos={};
+          if(dd.comprimentos[o]===undefined) dd.comprimentos[o]='';
+          if(!dd.trocos[o]||!dd.trocos[o].length) dd.trocos[o]=[''];
+        });
+        registarAlteracao('orient:'+q.div,'da planta: '+faltam.join(', '));
+        autoSave();
+        renderCompInputs(q);
+      };
+      bSec.appendChild(bt);
+      wrap.appendChild(bSec);
+    }
     const oSec=document.createElement('div');
     oSec.style.cssText='margin-bottom:12px;padding:10px 12px;background:#132b1f;'+
       'border:1px solid var(--ac);border-radius:9px';
@@ -3571,6 +3750,10 @@ function renderQ(){
   } else if(q.isOrientComp){
     inlWrap.style.display='block';
     renderCompInputs(q);
+  } else if(q.isPePiso){
+    inlWrap.style.display='block';
+    renderPePiso(q);
+    document.getElementById('ans-box').style.display='none';
   } else if(q.isPeInline){
     inlWrap.style.display='block';
     renderPeInputs(q.nPisos||1);
@@ -3998,6 +4181,19 @@ function registarAlteracao(campo,valorNovo,valorAntigo){
 }
 
 function saveToD(key,raw){
+  /* Pé-direito perguntado piso a piso: a resposta vai directa para
+     D.peDireitos, com a mesma chave que o resto da app usa. */
+  if(String(key||'').indexOf('pe-piso-')===0){
+    const piso=String(key).slice(8);
+    const v=parseFloat(String(raw||'').replace(',','.').replace(/[^\d.]/g,''));
+    if(!D.peDireitos) D.peDireitos={};
+    if(v>0){
+      D.peDireitos[piso]=v.toFixed(2)+'m';
+      // o valor mais comum serve de referência para o resto
+      D.peDireitoMedio=v.toFixed(2);
+    }
+    return;
+  }
   if(!key||raw===undefined) return;
   const v=(raw||'').split('|||').join(', ');
   const arr=(raw||'').split('|||').map(s=>s.trim()).filter(Boolean);
@@ -12981,6 +13177,17 @@ async function baixarEsbocoPlanta(){
 }
 
 // ── ONEDRIVE — login MSAL + upload direto para pasta fixa (sem picker) ──
+/* Endereço de retorno normalizado: sempre a pasta, com barra no fim.
+   /CE-voz/  ·  /CE-voz/index.html  ·  /CE-voz/index.html?app=ce-voz
+   dão todos o mesmo: https://…/CE-voz/
+   É este que tem de estar registado no portal Azure, em Autenticação →
+   URIs de redireccionamento (plataforma: Aplicação de página única). */
+function _redirectOneDrive(){
+  try{
+    return window.location.origin+
+      window.location.pathname.replace(/[^/]*$/,'');
+  }catch(e){ return window.location.origin+'/'; }
+}
 // ═══════════════════════════════════════════════
 // ECRÃ INTEIRO / INSTALAÇÃO COMO APP
 // ═══════════════════════════════════════════════
@@ -13178,7 +13385,11 @@ async function getMsalApp(){
       auth:{
         clientId:ONEDRIVE_CLIENT_ID,
         authority:'https://login.microsoftonline.com/common',
-        redirectUri:window.location.origin+window.location.pathname,
+        /* O redirectUri TEM de ser sempre o mesmo, senão o Azure recusa: só aceita os
+   que estão registados na aplicação. Montado do endereço actual, mudava
+   conforme se abrisse /CE-voz/ ou /CE-voz/index.html — e a app instalada abre
+   por um, o browser pelo outro. Normaliza-se para a PASTA, sem o ficheiro. */
+redirectUri:_redirectOneDrive(),
       },
       cache:{cacheLocation:'localStorage',storeAuthStateInCookie:false},
     });
