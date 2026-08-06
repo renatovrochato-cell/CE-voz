@@ -467,7 +467,7 @@ const DIVS_BASE=[
 // VERSÃO — fonte única (selo no ecrã inicial + cabeçalho do TXT exportado).
 // Subir aqui a cada alteração ao ficheiro.
 // ═══════════════════════════════════════
-const APP_VERSION='v2026.08.04-FIX169';
+const APP_VERSION='v2026.08.05-FIX170';
 
 // ═══════════════════════════════════════
 // ESTADO
@@ -2385,14 +2385,27 @@ function renderCompInputs(q){
   if(/hall|entrada|corredor|circula|vestibul/i
      .test(String(q.div).normalize('NFD').replace(/[\u0300-\u036f]/g,''))){
     const apart=(D.edificioTipo==='Apartamento');
+    /* A pergunta passava despercebida entre as outras e ficava sem resposta.
+       Fica agora destacada, com moldura própria, e com o chip por responder
+       assinalado — porque a porta entra na envolvente e conta. */
+    const respondida=(dd.portaExt===true||dd.portaExt===false);
     const pSec=document.createElement('div');
-    pSec.style.cssText='margin-top:14px;padding-top:12px;border-top:1px solid var(--br)';
+    pSec.style.cssText='margin-top:14px;padding:11px 12px;border-radius:11px;border:1px solid '+
+      (respondida?'var(--br)':'var(--ac)')+';background:'+(respondida?'transparent':'#132b1f');
     const pLbl=document.createElement('div');
     pLbl.className='aqs-lbl';
-    pLbl.textContent=apart
+    pLbl.textContent=(respondida?'':'▸ ')+(apart
       ? 'Porta de entrada da fração (dá para a circulação comum)'
-      : 'Tem porta para o exterior?';
-    pSec.appendChild(pLbl);
+      : 'Esta divisão tem porta para o exterior?');
+    if(!respondida){
+      const sub=document.createElement('div');
+      sub.style.cssText='font-size:11.5px;color:var(--tx2);line-height:1.45;margin:-2px 0 6px';
+      sub.textContent=apart
+        ? 'Confirma a área — entra na envolvente como elemento opaco.'
+        : 'A porta de entrada da moradia conta na envolvente. Se não for por aqui, responde Não.';
+      pSec.appendChild(pLbl); pSec.appendChild(sub);
+    }
+    if(respondida) pSec.appendChild(pLbl);
     const pRow=document.createElement('div');pRow.className='ve-chips';
     ['Sim','Não'].forEach(o=>{
       const c=document.createElement('div');
@@ -7443,10 +7456,17 @@ function buildTxt(){
         contacto:dd.portaExtContacto||(apart?'Circulação comum':'Exterior'),
         defeito:!(medida>0)});
     });
-    if(apart&&!portas.length){
-      const circ=(D.divisoes||[]).find(d=>/circula|hall|entrada|vestibul/i.test(d));
+    /* SE NINGUÉM MARCOU, A PORTA EXISTE NA MESMA.
+       Um fogo tem sempre porta de entrada — num apartamento dá para a
+       circulação comum, numa moradia dá para o exterior. A pergunta pode passar
+       despercebida no levantamento; a secção não pode desaparecer por isso.
+       Sai assinalada como ASSUMIDA, para se confirmar. */
+    if(!portas.length){
+      const sem=x=>String(x).normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+      const circ=(D.divisoes||[]).find(d=>
+        /circula|hall|entrada|vestibul|corredor/i.test(sem(d))&&!_ehENU(d));
       if(circ) portas.push({div:circ,area:PORTA_AREA_DEFEITO,
-        contacto:'Circulação comum',defeito:true,assumida:true});
+        contacto:apart?'Circulação comum':'Exterior',defeito:true,assumida:true});
     }
     if(portas.length){
       t+=sep('PORTAS EM CONTACTO COM O EXTERIOR / ENU');

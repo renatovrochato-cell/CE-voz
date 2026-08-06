@@ -125,6 +125,18 @@ body.cheio>*:not(main){display:none !important}
 body.cheio main>*:not(#tela){display:none !important}
 body.cheio main{grid-template-columns:1fr;height:100vh}
 body.cheio #tela{width:100%;height:100%}
+/* barra de estado do ecrã inteiro: sem os painéis, perde-se a noção do que
+   está seleccionado, da escala e do que falta fazer */
+#estadoCheio{display:none}
+body.cheio #estadoCheio{display:flex;position:fixed;left:50%;transform:translateX(-50%);
+  bottom:12px;z-index:88;gap:14px;align-items:center;
+  background:rgba(27,36,44,.95);border:1px solid var(--linha);border-radius:22px;
+  padding:8px 16px;font-size:12.5px;color:var(--texto);
+  box-shadow:0 4px 16px rgba(0,0,0,.5);max-width:92vw;overflow-x:auto;
+  white-space:nowrap;scrollbar-width:none}
+#estadoCheio::-webkit-scrollbar{display:none}
+#estadoCheio b{color:var(--ac);font-weight:700}
+#estadoCheio .sep2{width:1px;height:15px;background:var(--linha);flex:0 0 auto}
 body.cheio #btCheio{position:fixed;top:10px;right:10px;z-index:90;display:inline-flex;
   background:rgba(27,36,44,.95);border:1px solid var(--linha);border-radius:10px;
   padding:9px 13px;font-size:17px;box-shadow:0 3px 12px rgba(0,0,0,.45)}
@@ -522,6 +534,7 @@ Ver tudo</button>
       <p class="nota">Azimute aproximado para leitura rápida de exposição. Não substitui o cálculo de F<sub>s</sub>.</p>
     </div>
     <div class="sec" id="insp" style="flex:1"></div>
+<div id="estadoCheio"></div>
   </aside>
 </main>
 
@@ -556,7 +569,7 @@ Ver tudo</button>
   window.addEventListener('online',aviso);
 })();
 "use strict";
-const PLANTA_VERSAO='v1.27.0 (2026-08-04)';
+const PLANTA_VERSAO='v1.28.1 (2026-08-05)';
 /* ══════════════════════════════════════════════════════════════════
    CE Voz · motor de planta interativa
    Fonte de verdade: o levantamento (D). A planta é uma camada de
@@ -2636,7 +2649,7 @@ function pintarInspetor(){
    (115 ms com 128 blocos). Os painéis laterais são reconstruções de HTML curtas
    e há código que os lê logo a seguir, por isso ficam síncronos: agrupá-los
    também dava um ganho marginal e partia esse contrato em silêncio. */
-function repintarTudo(){_numCache=null;limparEnvOrfas();pintarListaFundos();if(modoCE)pintarZonas();pintar();pintarLista();pintarBalanco();pintarInspetor();}
+function repintarTudo(){_numCache=null;try{pintarEstadoCheio();}catch(e){}limparEnvOrfas();pintarListaFundos();if(modoCE)pintarZonas();pintar();pintarLista();pintarBalanco();pintarInspetor();}
 
 /* ══════════ polígonos ══════════ */
 // O motor todo (paredes, envolvente, vãos, balanço) assenta em rectângulos.
@@ -4251,6 +4264,53 @@ window.addEventListener('pointerup',soltarDedo);
 window.addEventListener('pointercancel',soltarDedo);
 window.addEventListener('blur',()=>{ if(arr){ largar(); } });
 document.addEventListener('visibilitychange',()=>{ if(document.hidden&&arr) largar(); });
+
+/* ══════════ PINÇA PARA AMPLIAR E DOIS DEDOS PARA ARRASTAR ══════════
+   Num telemóvel só havia os botões + e −: cada ajuste de zoom eram vários
+   toques, e não havia maneira de arrastar a vista sem sair da ferramenta que se
+   estava a usar. Com pinça e dois dedos, o desenho manobra-se como qualquer
+   mapa — e o gesto NÃO interfere com o desenho a um dedo. */
+const _dedos=new Map();
+let _pinca=null;
+function _distancia(a,b){ return Math.hypot(a.x-b.x,a.y-b.y); }
+function _centro(a,b){ return {x:(a.x+b.x)/2,y:(a.y+b.y)/2}; }
+svg.addEventListener('pointerdown',ev=>{
+  if(ev.pointerType!=='touch') return;
+  const r=tela.getBoundingClientRect();
+  _dedos.set(ev.pointerId,{x:ev.clientX-r.left,y:ev.clientY-r.top});
+  if(_dedos.size===2){
+    // dois dedos: a partir daqui é manobra de vista, não desenho
+    if(arr){ try{ largar(); }catch(e){} arr=null; }
+    const [a,b]=[..._dedos.values()];
+    _pinca={d:_distancia(a,b),c:_centro(a,b),ppm:view.ppm,ox:view.ox,oy:view.oy};
+  }
+},true);
+svg.addEventListener('pointermove',ev=>{
+  if(ev.pointerType!=='touch'||!_dedos.has(ev.pointerId)) return;
+  const r=tela.getBoundingClientRect();
+  _dedos.set(ev.pointerId,{x:ev.clientX-r.left,y:ev.clientY-r.top});
+  if(_dedos.size!==2||!_pinca) return;
+  ev.preventDefault(); ev.stopPropagation();
+  const [a,b]=[..._dedos.values()];
+  const d=_distancia(a,b), c=_centro(a,b);
+  if(_pinca.d<8) return;
+  const k=d/_pinca.d;
+  const novoPpm=Math.max(8,Math.min(220,_pinca.ppm*k));
+  // o ponto do desenho sob o centro dos dedos tem de ficar lá, e a vista
+  // acompanha o arrastar dos dois dedos ao mesmo tempo
+  const mundoX=(_pinca.c.x-_pinca.ox)/_pinca.ppm;
+  const mundoY=(_pinca.c.y-_pinca.oy)/_pinca.ppm;
+  view.ppm=novoPpm;
+  view.ox=c.x-mundoX*novoPpm;
+  view.oy=c.y-mundoY*novoPpm;
+  pintar();
+},true);
+['pointerup','pointercancel','pointerleave'].forEach(t2=>
+  svg.addEventListener(t2,ev=>{
+    if(ev.pointerType!=='touch') return;
+    _dedos.delete(ev.pointerId);
+    if(_dedos.size<2) _pinca=null;
+  },true));
 
 svg.addEventListener('wheel',ev=>{
   ev.preventDefault();
@@ -5972,6 +6032,53 @@ if(DENTRO_DA_APP){
    Num Blob, o campo `id` é resolvido contra o URL blob: — que muda a cada
    carregamento — e o Chrome deixava de distinguir esta app da CE Voz: instalar
    uma substituía a outra. Com ficheiros reais, cada uma tem id fixo. */
+/* O que se mostra na barra de estado: a divisão em cima da mesa, a escala, e o
+   que ainda falta — para não ser preciso sair do ecrã inteiro só para conferir. */
+function pintarEstadoCheio(){
+  const el=document.getElementById('estadoCheio');
+  if(!el||!document.body.classList.contains('cheio')) return;
+  const esc2=x=>String(x==null?'':x).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+  const partes=[];
+  // divisão seleccionada, ou quantas estão escolhidas
+  const escolhidas=divsSelecionadas();
+  if(escolhidas.length>1) partes.push('<b>'+escolhidas.length+'</b> divisões escolhidas');
+  else{
+    const d=escolhidas[0]||(sel.t==='div'&&sel.div)||
+      (sel.t==='bloco'&&(L.blocos.find(b=>b.id===sel.id)||{}).div)||null;
+    if(d){
+      const a=L.blocos.filter(b=>b.div===d).reduce((s2,b)=>s2+areaBloco(b),0);
+      partes.push(esc2(d)+' <b>'+fmt(a)+' m²</b>');
+    } else partes.push('<span style="opacity:.65">nada escolhido</span>');
+  }
+  // escala e total
+  partes.push('escala <b>'+Math.round(view.ppm)+'</b> px/m');
+  const bal=balanco();
+  if(bal&&bal.areaDes>0) partes.push('total <b>'+fmt(bal.areaDes)+' m²</b>');
+  // o que falta: divisões sem forma
+  const semForma=divisoes().filter(d=>!L.blocos.some(b=>b.div===d)).length;
+  if(semForma) partes.push('<span style="color:var(--aviso)">'+semForma+' por colocar</span>');
+  if(bal&&bal.sobreposicao>0.05)
+    partes.push('<span style="color:var(--erro)">'+fmt(bal.sobreposicao)+' m² sobrepostos</span>');
+  if(modoCE) partes.push('<span style="color:var(--ac)">vista CE</span>');
+  el.innerHTML=partes.join('<span class="sep2"></span>');
+}
+
+/* O BOTÃO DE SAIR TEM DE VIVER FORA DO CABEÇALHO.
+   Estava dentro dele, e a regra de ecrã inteiro esconde o cabeçalho todo:
+   `position:fixed` não salva um elemento cujo PAI está com display:none. Ao
+   entrar em ecrã inteiro ficava-se sem maneira de sair pelo ecrã.
+   Move-se para o body ao entrar e devolve-se ao cabeçalho ao sair. */
+let _casaDoBtCheio=null;
+function _moverBtCheio(paraFora){
+  const b=document.getElementById('btCheio');
+  if(!b) return;
+  if(paraFora){
+    if(!_casaDoBtCheio) _casaDoBtCheio={pai:b.parentElement,antes:b.nextSibling};
+    if(b.parentElement!==document.body) document.body.appendChild(b);
+  } else if(_casaDoBtCheio&&_casaDoBtCheio.pai){
+    _casaDoBtCheio.pai.insertBefore(b,_casaDoBtCheio.antes||null);
+  }
+}
 function alternarCheio(){
   /* Dentro da app CE Voz, o ecrã inteiro do sistema não serve: um iframe pode
      não ter permissão, e mesmo tendo, o utilizador ficava sem o botão de sair.
@@ -5984,20 +6091,23 @@ function alternarCheio(){
   }
   const on=document.body.classList.toggle('cheio');
   if(on) document.body.classList.remove('painel-esq','painel-dir');
+  _moverBtCheio(on);
   const b=document.getElementById('btCheio');
-  if(b){ b.textContent=on?'⛶':'⛶'; b.title=on?'Sair do ecrã inteiro':'Ecrã inteiro: só o desenho'; }
+  if(b){ b.textContent=on?'⤡ Sair':'⛶';
+         b.title=on?'Sair do ecrã inteiro (ou tecla Esc)':'Ecrã inteiro: só o desenho'; }
   try{
     if(on&&document.documentElement.requestFullscreen)
       document.documentElement.requestFullscreen().catch(()=>{});
     else if(!on&&document.fullscreenElement&&document.exitFullscreen)
       document.exitFullscreen().catch(()=>{});
   }catch(e){}
-  setTimeout(()=>{ try{ ajustarTela(); pintar(); }catch(e){} },60);
+  setTimeout(()=>{ try{ ajustarTela(); pintar(); pintarEstadoCheio(); }catch(e){} },60);
 }
 document.addEventListener('fullscreenchange',()=>{
   // sair pelo gesto do sistema tem de repor o layout
   if(!document.fullscreenElement&&document.body.classList.contains('cheio')){
     document.body.classList.remove('cheio');
+    _moverBtCheio(false);
     setTimeout(()=>{ try{ ajustarTela(); pintar(); }catch(e){} },60);
   }
 });
@@ -6476,7 +6586,7 @@ if(DEMO){ nomeFich='URBª MONTE DA BEMPOSTA Lote 19, R C B_levantamento.json'; c
 
 // exposto para testes
 if(typeof window!=='undefined'){
-  window.__planta={get L(){return L;},get proj(){return proj;},carregar,autoLayout,auditar,balanco,relatorioHTML,pdfEnvolvente,alternarPainel,alternarCheio,fecharPaineis,enviarLayoutParaApp,DENTRO_DA_APP,marcarAlterado,get porGuardar(){return _porGuardar;},empurrarVizinhos,get vaosSemParede(){return _vaosSemParede;},autoColocarVaos,recolocarVaos,guardarJSON,encostarDivisaoLargada,LIMITE_ENCOSTO,comprimirParaOrcamento,bytesDataURL,PDF_MAX_BYTES,ESP_INTERIOR,espExterior,espDaParede,abrirParaParedes,areaBrutaEstimada,areaBrutaPorPiso,juncoes,marcarFachadasAuto,paredeViradaParaDivisao,ceAutoPorPiso,get fila(){return filaColocar;},orientsMedidas,arrancarColocar,colocarNoPonto,pararColocar,separarPorPiso,pisoDaDivisao,linhasGrossas,divisoesDoFundo,fixarDivisoesDoFundo,recortarFundo,fundos,acrescentarFundo,trocarFundoAtivo,removerFundoAtivo,sincronizarFundo,get saltos(){return PARES_SALTOS;},set saltos(v){PARES_SALTOS=v;},estimarEscalaAutomatica,aplicarEscalaAutomatica,medidasDoLevantamento,conferirContraLevantamento,paredeInternaDaDivisao,colarBocado,encontrarRestos,apagarBlocos,copiarFormaPara,PLANTA_VERSAO,get espessura(){return espessura;},set espessura(v){espessura=v;},get orto(){return orto;},set orto(v){orto=v;},aplicarEmLote,planoParaExportar,resolverVars,__mascaraPronta,lerFormaDoDesenho,aplicarFormaLida,dilatar,erodir,fecharAberturas,alastrar,mancaParaRects,get mascara(){return mascaraFundo;},set mascara(v){mascaraFundo=v;},alinharParedes,fachadaMedida,encaixarDivisoes,zonas,areaPorCF,areaInterseccao,zonasDaDivisao,ajustarAreaDivisao,ajustarTodasAsAreas,abrirAreas,fecharAreas,picosDeLinha,melhorEncaixe,ajustarAoFundo,linhasFundoMetros,linhasDesenhadas,lerAreasColadas,gravarAreaUtil,cancelarTudo,divsSelecionadas,alternarNaSelecao,estaSelecionada,usarImagemFundo,receberFicheiroFundo,aplicarCF,porPincel,paredeDe,ceDiv,ceCorParede,cfParede,cfCor,cfDoTipo,marcarFraccaoRestantes,CF,encostarTudo,gravarEnvNoLevantamento,envDesenhadaPorTipo,abrirMenu,fecharMenu,limparEnvOrfas,pontosArco,ortogonal,contorno,areaBloco,caixa,dentroBloco,pontoParede,editarForma,normalizarDivisao,regiaoBooleana,celulasParaRects,decomporPoligono,areaPoligono,fecharOrtogonal,aplicarPoligono,relatorio,desfazer,refazer,guardarHist,posVao,migrarVaos,buracos,marcarDivisoriasAuto,DIVISORIA,rodar,numeracaoTXT,rotuloVao,calibrarFundo,set fundo(v){ if(!L) return; if(!v){L.fundos=[];L.fundoAtivo=0;L.fundo=null;return;} L.fundos=[v];L.fundoAtivo=0;L.fundo=v; },get fundo(){return L&&L.fundo;},marcarEnvolventesAuto,envObj,envSeg,paredes,vaosLivres,envDe,nomeOrient,parseM,desenhar,XJ,BEAR};
+  window.__planta={get L(){return L;},get proj(){return proj;},carregar,autoLayout,auditar,balanco,relatorioHTML,pdfEnvolvente,pintarEstadoCheio,alternarPainel,alternarCheio,fecharPaineis,enviarLayoutParaApp,DENTRO_DA_APP,marcarAlterado,get porGuardar(){return _porGuardar;},empurrarVizinhos,get vaosSemParede(){return _vaosSemParede;},autoColocarVaos,recolocarVaos,guardarJSON,encostarDivisaoLargada,LIMITE_ENCOSTO,comprimirParaOrcamento,bytesDataURL,PDF_MAX_BYTES,ESP_INTERIOR,espExterior,espDaParede,abrirParaParedes,areaBrutaEstimada,areaBrutaPorPiso,juncoes,marcarFachadasAuto,paredeViradaParaDivisao,ceAutoPorPiso,get fila(){return filaColocar;},orientsMedidas,arrancarColocar,colocarNoPonto,pararColocar,separarPorPiso,pisoDaDivisao,linhasGrossas,divisoesDoFundo,fixarDivisoesDoFundo,recortarFundo,fundos,acrescentarFundo,trocarFundoAtivo,removerFundoAtivo,sincronizarFundo,get saltos(){return PARES_SALTOS;},set saltos(v){PARES_SALTOS=v;},estimarEscalaAutomatica,aplicarEscalaAutomatica,medidasDoLevantamento,conferirContraLevantamento,paredeInternaDaDivisao,colarBocado,encontrarRestos,apagarBlocos,copiarFormaPara,PLANTA_VERSAO,get espessura(){return espessura;},set espessura(v){espessura=v;},get orto(){return orto;},set orto(v){orto=v;},aplicarEmLote,planoParaExportar,resolverVars,__mascaraPronta,lerFormaDoDesenho,aplicarFormaLida,dilatar,erodir,fecharAberturas,alastrar,mancaParaRects,get mascara(){return mascaraFundo;},set mascara(v){mascaraFundo=v;},alinharParedes,fachadaMedida,encaixarDivisoes,zonas,areaPorCF,areaInterseccao,zonasDaDivisao,ajustarAreaDivisao,ajustarTodasAsAreas,abrirAreas,fecharAreas,picosDeLinha,melhorEncaixe,ajustarAoFundo,linhasFundoMetros,linhasDesenhadas,lerAreasColadas,gravarAreaUtil,cancelarTudo,divsSelecionadas,alternarNaSelecao,estaSelecionada,usarImagemFundo,receberFicheiroFundo,aplicarCF,porPincel,paredeDe,ceDiv,ceCorParede,cfParede,cfCor,cfDoTipo,marcarFraccaoRestantes,CF,encostarTudo,gravarEnvNoLevantamento,envDesenhadaPorTipo,abrirMenu,fecharMenu,limparEnvOrfas,pontosArco,ortogonal,contorno,areaBloco,caixa,dentroBloco,pontoParede,editarForma,normalizarDivisao,regiaoBooleana,celulasParaRects,decomporPoligono,areaPoligono,fecharOrtogonal,aplicarPoligono,relatorio,desfazer,refazer,guardarHist,posVao,migrarVaos,buracos,marcarDivisoriasAuto,DIVISORIA,rodar,numeracaoTXT,rotuloVao,calibrarFundo,set fundo(v){ if(!L) return; if(!v){L.fundos=[];L.fundoAtivo=0;L.fundo=null;return;} L.fundos=[v];L.fundoAtivo=0;L.fundo=v; },get fundo(){return L&&L.fundo;},marcarEnvolventesAuto,envObj,envSeg,paredes,vaosLivres,envDe,nomeOrient,parseM,desenhar,XJ,BEAR};
 }
 </script>
 </body>
