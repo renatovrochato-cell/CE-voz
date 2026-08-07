@@ -467,7 +467,7 @@ const DIVS_BASE=[
 // VERSÃO — fonte única (selo no ecrã inicial + cabeçalho do TXT exportado).
 // Subir aqui a cada alteração ao ficheiro.
 // ═══════════════════════════════════════
-const APP_VERSION='v2026.08.05-FIX170';
+const APP_VERSION='v2026.08.05-FIX171';
 
 // ═══════════════════════════════════════
 // ESTADO
@@ -11667,16 +11667,19 @@ function renderOrdemDivisoes(wrap){
     lista.style.cssText='display:flex;flex-direction:column;gap:5px;margin-bottom:12px';
     D.ordemDivisoesTemp.forEach((d,idx)=>{
       const row=document.createElement('div');
+      /* O fundo é claro (--acl #d4f0e6) e o texto era --tx (#f0f0f0, quase
+         branco): 1,06:1 de contraste, ilegível. Com fundo claro o texto tem de
+         ser escuro — aqui dá 13,7:1. */
       row.style.cssText='display:flex;align-items:center;gap:8px;background:var(--acl);border:1px solid var(--ac);border-radius:8px;padding:8px 10px';
       const num=document.createElement('div');
-      num.style.cssText='font-weight:800;color:var(--ac);min-width:20px';
+      num.style.cssText='font-weight:800;color:#0f5c44;min-width:20px';
       num.textContent=(idx+1)+'.';
       const nomeEl=document.createElement('div');
-      nomeEl.style.cssText='flex:1;color:var(--tx);font-size:14px';
+      nomeEl.style.cssText='flex:1;color:#16202A;font-size:14px;font-weight:600';
       nomeEl.textContent=d;
       const rem=document.createElement('button');
       rem.textContent='✕';
-      rem.style.cssText='border:none;background:none;color:var(--red);font-size:16px;cursor:pointer;padding:11px 14px;min-width:44px;min-height:44px;line-height:1';
+      rem.style.cssText='border:none;background:none;color:#b3261e;font-size:16px;cursor:pointer;padding:11px 14px;min-width:44px;min-height:44px;line-height:1';
       rem.onclick=()=>{D.ordemDivisoesTemp.splice(idx,1);renderOrdemDivisoes(wrap);};
       row.appendChild(num);row.appendChild(nomeEl);
       // ── PISO DE CADA DIVISÃO, AQUI MESMO ──
@@ -14301,17 +14304,46 @@ function toggleLaser(){
 }
 
 async function ligarLaser(){
+  /* NUNCA DESISTIR EM SILÊNCIO.
+     Isto escrevia na consola e voltava atrás: num telemóvel a consola não se
+     vê, e o botão parecia simplesmente não fazer nada. Cada caso tem agora uma
+     explicação e uma saída — porque a causa mais comum não é avaria da app. */
+  const btn=document.getElementById('btn-laser');
+  const dizer=(t,detalhe)=>{
+    try{ alert('📏 LASER\n\n'+t+(detalhe?'\n\n'+detalhe:'')); }catch(e){}
+    try{ const d=document.getElementById('laser-estado');
+      if(d){ d.style.display='block'; d.style.color='var(--am)'; d.textContent=t; } }catch(e){}
+  };
   if(!navigator.bluetooth){
-    console.warn('Web Bluetooth não suportado neste navegador.');
+    // as duas causas reais: contexto inseguro, ou browser sem Web Bluetooth
+    // isSecureContext é o critério, mas nem todos os ambientes o preenchem —
+    // confirma-se também pelo protocolo, que é o que realmente conta
+    const seguro=window.isSecureContext||location.protocol==='https:'||
+      location.hostname==='localhost';
+    if(!seguro){
+      dizer('O Bluetooth só funciona em ligação segura (https).',
+        'Estás a abrir a app por um endereço não seguro ou por ficheiro local.\n'+
+        'Abre pelo endereço do site: renatovrochato-cell.github.io/CE-voz/');
+    } else if(/iPhone|iPad|iPod/i.test(navigator.userAgent)){
+      dizer('O Safari e o Chrome do iPhone não suportam Bluetooth em páginas web.',
+        'É limitação da Apple, não da app. Num Android funciona.\n'+
+        'Aqui, mede à mão e escreve o valor.');
+    } else if(/Firefox|FxiOS/i.test(navigator.userAgent)){
+      dizer('O Firefox não suporta Bluetooth em páginas web.',
+        'Abre a app no Chrome — aí o laser funciona.');
+    } else {
+      dizer('Este navegador não suporta Bluetooth em páginas web.',
+        'Experimenta o Chrome. Entretanto, mede à mão e escreve o valor.');
+    }
     return;
   }
-  const btn=document.getElementById('btn-laser');
   // verificar se o adaptador Bluetooth do telemóvel está disponível/ligado
   try{
     if(navigator.bluetooth.getAvailability){
       const disponivel=await navigator.bluetooth.getAvailability();
       if(!disponivel){
-        console.warn('Bluetooth do telemóvel parece estar desligado.');
+        dizer('O Bluetooth do telemóvel está desligado.',
+          'Liga o Bluetooth nas definições rápidas e toca outra vez no 📏.');
         return;
       }
     }
