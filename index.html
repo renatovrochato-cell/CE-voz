@@ -467,7 +467,7 @@ const DIVS_BASE=[
 // VERSÃO — fonte única (selo no ecrã inicial + cabeçalho do TXT exportado).
 // Subir aqui a cada alteração ao ficheiro.
 // ═══════════════════════════════════════
-const APP_VERSION='v2026.08.05-FIX171';
+const APP_VERSION='v2026.08.05-FIX172';
 
 // ═══════════════════════════════════════
 // ESTADO
@@ -1057,28 +1057,12 @@ function show(id){
 
 async function iniciar(_restoreCurQ, _restoreAnswers){
   const isRestore=_restoreAnswers!==undefined;
-  /* TRAVÃO ANTES DE COMEÇAR DE NOVO
-     Começar um projeto novo por engano — depois de a app recarregar, por
-     exemplo — deitava fora o levantamento em curso. Pergunta-se antes. */
-  if(!isRestore){
-    try{
-      const raw=localStorage.getItem('ce_ultimo');
-      if(raw){
-        const a=JSON.parse(raw);
-        const Da=typeof a.data==='string'?JSON.parse(a.data):a.data;
-        const peso=_pesoDoLevantamento(Da);
-        if(peso>=10){
-          const nD=(Da.divisoes||[]).length;
-          if(!confirm('ATENÇÃO — há um levantamento por acabar:\n\n'+
-            '  '+(Da.nome||a.nome||'(sem nome)')+'\n'+
-            '  '+nD+' divisões · gravado '+(a.ts||'?')+'\n\n'+
-            'Começar um NOVO apaga-o do ecrã (fica gravado, mas tens de o ir buscar '+
-            'a "Continuar recolha").\n\nOK = começar novo · Cancelar = voltar atrás'))
-            return;
-        }
-      }
-    }catch(e){}
-  }
+  /* O aviso ao começar de novo era um confirm() a cada arranque. Com um
+     levantamento gravado — que é sempre, depois do primeiro — aparecia sempre,
+     e tornava-se um obstáculo em vez de uma protecção. Retirado.
+     O trabalho continua seguro pela via que interessa: uma gravação com MENOS
+     conteúdo nunca substitui uma com mais (_gravarSeguro), e o ecrã inicial
+     mostra o aviso de retomar quando há algo por acabar. */
   D.nome=document.getElementById('start-nome').value.trim()||'Projeto';
   D.morada=document.getElementById('start-morada').value.trim();
   document.getElementById('hdr-proj').textContent=D.nome;
