@@ -467,7 +467,7 @@ const DIVS_BASE=[
 // VERSÃO — fonte única (selo no ecrã inicial + cabeçalho do TXT exportado).
 // Subir aqui a cada alteração ao ficheiro.
 // ═══════════════════════════════════════
-const APP_VERSION='v2026.08.05-FIX173';
+const APP_VERSION='v2026.08.05-FIX174';
 
 // ═══════════════════════════════════════
 // ESTADO
@@ -14329,10 +14329,19 @@ async function ligarLaser(){
      Passa a ser só uma pista: guarda-se o resultado para explicar melhor se a
      ligação falhar, mas tenta-se SEMPRE. Quem sabe se o Bluetooth está ligado é
      o sistema, e ele di-lo no selector que abre a seguir. */
+  /* NENHUMA ESPERA ANTES DO requestDevice().
+     O Chrome só abre o selector Bluetooth se a chamada acontecer DENTRO do
+     gesto do toque. Qualquer pausa antes — mesmo uma consulta rápida a
+     getAvailability() — quebra essa cadeia e o selector NUNCA aparece: o botão
+     fica com ar de avariado. Foi o que eu próprio provoquei ao acrescentar a
+     verificação.
+     A disponibilidade passa a ser consultada em segundo plano; se a resposta
+     chegar a tempo, serve para explicar melhor uma falha posterior. */
   let _btPareceDesligado=false;
   try{
     if(navigator.bluetooth.getAvailability)
-      _btPareceDesligado=!(await navigator.bluetooth.getAvailability());
+      navigator.bluetooth.getAvailability()
+        .then(d=>{_btPareceDesligado=!d;}).catch(()=>{});
   }catch(e){}
 
   // limpar ligação anterior mal fechada (sem esperar — o requestDevice() tem de
