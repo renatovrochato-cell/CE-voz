@@ -467,7 +467,7 @@ const DIVS_BASE=[
 // VERSÃO — fonte única (selo no ecrã inicial + cabeçalho do TXT exportado).
 // Subir aqui a cada alteração ao ficheiro.
 // ═══════════════════════════════════════
-const APP_VERSION='v2026.08.05-FIX172';
+const APP_VERSION='v2026.08.05-FIX173';
 
 // ═══════════════════════════════════════
 // ESTADO
@@ -14321,17 +14321,19 @@ async function ligarLaser(){
     }
     return;
   }
-  // verificar se o adaptador Bluetooth do telemóvel está disponível/ligado
+  /* getAvailability() NÃO é de confiança para bloquear.
+     No Android devolve false com o Bluetooth ligado — por exemplo quando falta
+     a permissão de localização, que o sistema exige para procurar dispositivos,
+     ou numa app instalada com permissões próprias. Estava a impedir o laser de
+     abrir com uma mensagem falsa.
+     Passa a ser só uma pista: guarda-se o resultado para explicar melhor se a
+     ligação falhar, mas tenta-se SEMPRE. Quem sabe se o Bluetooth está ligado é
+     o sistema, e ele di-lo no selector que abre a seguir. */
+  let _btPareceDesligado=false;
   try{
-    if(navigator.bluetooth.getAvailability){
-      const disponivel=await navigator.bluetooth.getAvailability();
-      if(!disponivel){
-        dizer('O Bluetooth do telemóvel está desligado.',
-          'Liga o Bluetooth nas definições rápidas e toca outra vez no 📏.');
-        return;
-      }
-    }
-  }catch(e){/* getAvailability pode não existir em todos os browsers — continuar na mesma */}
+    if(navigator.bluetooth.getAvailability)
+      _btPareceDesligado=!(await navigator.bluetooth.getAvailability());
+  }catch(e){}
 
   // limpar ligação anterior mal fechada (sem esperar — o requestDevice() tem de
   // continuar dentro do mesmo gesto do toque do utilizador, sem atraso, senão o
@@ -14425,9 +14427,31 @@ async function ligarLaser(){
     document.querySelectorAll('.laser-field-btn').forEach(b=>b.style.display='block');
   }catch(e){
     if(btn){btn.textContent='📏';btn.style.color='';}
-    // erros de ligação BLE (dispositivo não encontrado, seleção cancelada, falha
-    // de protocolo, etc.) deixaram de aparecer como toast — só na consola.
     console.warn('Laser: falha ao ligar —',e.name,e.message);
+    /* Cada falha tem uma causa e uma saída. Cancelar o selector é normal e não
+       merece aviso; o resto merece, senão o botão parece avariado. */
+    const nome=String(e&&e.name||''), msg=String(e&&e.message||'');
+    if(nome==='NotFoundError'&&/cancel/i.test(msg)) return;      // o utilizador fechou
+    if(nome==='NotFoundError'){
+      dizer('Não encontrei o laser.',
+        (_btPareceDesligado
+          ? 'O sistema diz que o Bluetooth pode estar desligado — confirma nas definições rápidas.\n\n'
+          : '')+
+        'Confirma que o laser está LIGADO e em modo Bluetooth (no GLM, o símbolo ᛒ aceso).\n'+
+        'Se já estiver emparelhado com outro telemóvel, desliga-o desse primeiro.');
+    } else if(nome==='SecurityError'){
+      dizer('O navegador bloqueou o acesso ao Bluetooth.',
+        'Nas definições do site (o cadeado na barra de endereço), permite o Bluetooth.');
+    } else if(nome==='NetworkError'){
+      dizer('Perdi a ligação ao laser a meio.',
+        'Aproxima-te do aparelho e toca outra vez no 📏.');
+    } else if(nome==='NotSupportedError'){
+      dizer('Este laser não fala um protocolo que eu conheça.',
+        'A app suporta Bosch GLM (MT, MT2 e PrecisionLink). Mede à mão e escreve o valor.');
+    } else {
+      dizer('Não consegui ligar ao laser.',
+        (msg||nome||'sem detalhe')+'\n\nMede à mão e escreve o valor — o levantamento segue na mesma.');
+    }
   }
 }
 
