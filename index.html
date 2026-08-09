@@ -55,6 +55,48 @@ body.planta-cheia #painel-lado{display:flex !important;position:fixed;inset:0;
 body.planta-cheia #painel-lado .pl-sec{border-radius:0;border-width:0 0 1px}
 body.planta-cheia #pl-planta-frame{border:0;border-radius:0;flex:1;min-height:0}
 body.planta-cheia #btDuplo{display:none !important}
+/* ══════════ PLANTA À VISTA, AO LADO DO LEVANTAMENTO ══════════
+   Uma planta em PDF ou fotografia aberta ao lado das perguntas: consulta-se
+   enquanto se mede, sem trocar de aplicação. A divisória arrasta-se, para dar
+   mais espaço a um lado ou ao outro conforme o momento.
+   A planta pode ser rodada — nem sempre o norte do desenho aponta para cima — e
+   a rosa-dos-ventos acompanha a rotação, para não haver enganos de orientação. */
+/* Com a árvore corrigida, isto é um layout normal de duas colunas: a app à
+   esquerda com a largura escolhida, a divisória, e a planta a ocupar o resto. */
+body.com-planta #app{max-width:none;flex-direction:row;gap:0}
+body.com-planta #app>.screen{flex:0 0 var(--larg-app,70%);
+  min-width:260px;overflow-y:auto}
+body.com-planta #painel-lado{display:none !important}
+#visPlanta{display:none}
+body.com-planta #visPlanta{display:flex;flex-direction:column;flex:1 1 0;
+  min-width:180px;background:var(--bg);position:relative;overflow:hidden}
+#visPlantaBarra{display:flex;gap:5px;align-items:center;padding:7px 9px;
+  background:var(--bg2);border-bottom:1px solid var(--br);flex-wrap:wrap}
+#visPlantaBarra button{background:var(--bg3);color:var(--tx);border:1px solid var(--br);
+  border-radius:8px;padding:8px 10px;font-size:14px;min-height:40px;min-width:40px;
+  cursor:pointer;line-height:1}
+#visPlantaBarra button.on{background:var(--ac);color:#04140c;border-color:var(--ac)}
+#visPlantaTela{flex:1;overflow:auto;position:relative;background:#0a0f13;
+  display:flex;align-items:center;justify-content:center;touch-action:none}
+#visPlantaImg{transform-origin:center center;max-width:none;display:block}
+#visRosa{position:absolute;right:10px;top:56px;z-index:5;width:66px;height:66px;
+  background:rgba(22,32,42,.92);border:1px solid var(--br);border-radius:50%;
+  display:none;align-items:center;justify-content:center}
+body.com-planta.com-norte #visRosa{display:flex}
+/* A divisória é um elemento do próprio layout, entre as duas colunas. Antes era
+   posicionada por medição do ecrã — e bastava o layout mudar para ela ficar no
+   sítio errado ou em cima do conteúdo. Assim acompanha sempre. */
+#visDivisoria{display:none}
+body.com-planta #visDivisoria{display:block;flex:0 0 12px;align-self:stretch;
+  cursor:col-resize;background:var(--bg2);position:relative;
+  border-left:1px solid var(--br);border-right:1px solid var(--br);
+  touch-action:none;z-index:5}
+body.com-planta #visDivisoria::after{content:'⋮';position:absolute;top:50%;left:50%;
+  transform:translate(-50%,-50%);color:var(--tx2);font-size:16px;line-height:1;
+  letter-spacing:-1px}
+body.com-planta #visDivisoria:hover,body.com-planta #visDivisoria.a-arrastar{
+  background:var(--ac)}
+body.com-planta #visDivisoria.a-arrastar::after{color:#04140c}
 #btDuplo{display:none}
 /* nos dobráveis a área útil pode estar dividida pelo vinco */
 @media (horizontal-viewport-segments:2){
@@ -167,6 +209,12 @@ body.planta-cheia #btDuplo{display:none !important}
 </head>
 <body>
 <div id="app">
+<button id="btVisPlanta" onclick="alternarVisPlanta()"
+  title="Ver a planta ao lado (PDF ou imagem)"
+  style="position:fixed;top:8px;right:56px;z-index:60;background:var(--bg3);color:var(--tx);
+         border:1px solid var(--br);border-radius:9px;padding:8px 12px;font-size:13px;
+         font-weight:700;cursor:pointer;min-height:40px;display:inline-flex;
+         align-items:center;gap:6px">🗺</button>
 <button id="btDuplo" onclick="alternarDuplo()" title="Usar o ecrã todo: perguntas à esquerda, contexto à direita" style="position:fixed;top:8px;right:8px;z-index:60;background:var(--bg3);color:var(--tx);border:1px solid var(--br);border-radius:9px;padding:8px 12px;font-size:13px;font-weight:700;cursor:pointer;min-height:40px;align-items:center;gap:6px">▥</button>
 
 <!-- START -->
@@ -422,9 +470,34 @@ body.planta-cheia #btDuplo{display:none !important}
     <div id="sat-orients-sel" style="font-size:12px;color:#4af;text-align:center;min-height:18px"></div>
     <button onclick="gravarSatOrients()" style="border:none;background:#4af;color:#000;border-radius:10px;padding:10px;font-size:13px;font-weight:700;cursor:pointer;width:100%;margin-top:6px">💾 Gravar orientações na recolha</button>
     <div style="font-size:10px;color:#555;text-align:center;margin-top:4px">Orientações já na recolha: <span id="sat-orients-existing" style="color:#888"></span></div>
-  </div>
-<div id="painel-lado"></div>
+
 </div>
+</div><!-- /satelite-overlay — faltava este fecho: sem ele, TUDO o que vinha a
+     seguir ficava dentro do painel do satélite, que está com display:none.
+     Elementos acrescentados no fim do #app nunca apareciam. -->
+<div id="visDivisoria" title="Arrasta para ajustar · duplo toque repõe"></div>
+<div id="painel-lado"></div>
+<div id="visPlanta">
+  <div id="visPlantaBarra">
+    <button id="vpAbrir" onclick="visPlantaAbrir()" title="Abrir uma planta (PDF ou imagem)">📂</button>
+    <button onclick="visPlantaZoom(1.25)" title="Ampliar">＋</button>
+    <button onclick="visPlantaZoom(0.8)" title="Reduzir">−</button>
+    <button onclick="visPlantaAjustar()" title="Ajustar ao ecrã">⤢</button>
+    <button onclick="visPlantaRodar(-90)" title="Rodar para a esquerda">⟲</button>
+    <button onclick="visPlantaRodar(90)" title="Rodar para a direita">⟳</button>
+    <button id="vpNorte" onclick="visPlantaNorte()" title="Onde fica o Norte nesta planta">🧭</button>
+    <span id="vpPag" style="font-size:11.5px;color:var(--tx2);margin-left:auto"></span>
+    <button onclick="visPlantaPag(-1)" title="Página anterior">‹</button>
+    <button onclick="visPlantaPag(1)" title="Página seguinte">›</button>
+    <button onclick="alternarVisPlanta()" title="Fechar">✕</button>
+  </div>
+  <div id="visPlantaTela"><img id="visPlantaImg" alt=""></div>
+  <div id="visRosa"></div>
+</div>
+</div><!-- /#app — o fecho faltava por completo. O browser fechava-o sozinho
+     onde calhava, e qualquer elemento acrescentado depois caía FORA da app.
+     Foi o que aconteceu ao botão de fotos do exterior, que nunca chegou a
+     aparecer, e ao visualizador de planta. -->
 <style>
 .sat-dir-btn{border:1px solid #444;background:rgba(255,255,255,.08);color:#ccc;border-radius:6px;padding:8px 4px;font-size:12px;font-weight:600;cursor:pointer;transition:all .12s}
 .sat-dir-btn.on{background:rgba(68,170,255,.3);border-color:#4af;color:#4af}
@@ -467,7 +540,7 @@ const DIVS_BASE=[
 // VERSÃO — fonte única (selo no ecrã inicial + cabeçalho do TXT exportado).
 // Subir aqui a cada alteração ao ficheiro.
 // ═══════════════════════════════════════
-const APP_VERSION='v2026.08.05-FIX174';
+const APP_VERSION='v2026.08.09-FIX181';
 
 // ═══════════════════════════════════════
 // ESTADO
@@ -879,13 +952,22 @@ function expandDivCompleto(){
   // Encontrar o bloco a substituir: o marcador original (1ª vez) OU o bloco dc-*
   // já expandido numa passagem anterior (se as divisões mudaram entretanto — ex:
   // voltar atrás e escolher uma tipologia diferente).
+  /* O bloco a substituir vai da primeira à última pergunta gerada aqui.
+     Antes procurava-se só por `dc-`, e o varrimento parava no primeiro id
+     diferente — mas as perguntas de pé-direito por piso (`pe-piso-…`) ficam NO
+     MEIO do bloco. Resultado: só a primeira metade era substituída, a segunda
+     ficava para trás, e as perguntas apareciam a dobrar ou de divisões que já
+     tinham sido removidas. */
+  const _geradaAqui=q=>!!(q&&q.id&&(String(q.id).startsWith('dc-')||
+                                    String(q.id).startsWith('pe-piso-')));
   let mi=qList.findIndex(q=>q.isDivCompletoMarker);
   let fim=mi;
   if(mi===-1){
-    mi=qList.findIndex(q=>q.id&&q.id.startsWith('dc-'));
+    mi=qList.findIndex(_geradaAqui);
     if(mi>-1){
+      // até à ÚLTIMA, não até ao primeiro intervalo
       fim=mi;
-      while(fim+1<qList.length&&qList[fim+1].id&&qList[fim+1].id.startsWith('dc-')) fim++;
+      for(let k=qList.length-1;k>=mi;k--){ if(_geradaAqui(qList[k])){ fim=k; break; } }
     }
   }
   // BUG CORRIGIDO: guardar o id da pergunta actual (curQ) ANTES do splice — se o
@@ -2157,10 +2239,42 @@ function renderPePiso(q){
   const piso=q.piso;
   const chave='pe-piso-'+piso;
 
+  /* ÚLTIMO PISO: A LAJE PODE SER INCLINADA.
+     Sob uma cobertura inclinada o pé-direito varia do beirado à cumeeira. Para
+     a área de PAREDE conta o MÍNIMO — é a altura que a parede tem em toda a
+     volta; a parte acima disso é o triângulo do desvão, que não é parede a
+     direito. Pedem-se os dois e usa-se o mínimo no cálculo. */
+  const ORDEM_P=['Cave','R/C','1º andar','2º andar','3º andar','4º andar'];
+  const _pisosTodos=[...new Set((D.divisoes||[])
+    .map(d=>String(((D.divisoesDados[d]||{}).piso||'')).trim()).filter(Boolean))]
+    .sort((a,b)=>ORDEM_P.indexOf(a)-ORDEM_P.indexOf(b));
+  const ehUltimo=(_pisosTodos[_pisosTodos.length-1]===piso);
+  if(ehUltimo){
+    const iSec=document.createElement('div');
+    iSec.style.cssText='margin-bottom:12px';
+    const iLbl=document.createElement('div');
+    iLbl.className='aqs-lbl';
+    iLbl.textContent='Este é o último piso. O teto é inclinado?';
+    const iRow=document.createElement('div');iRow.className='ve-chips';
+    ['Não, plano','Sim, inclinado'].forEach(o=>{
+      const c=document.createElement('div');
+      const val=(o.indexOf('Sim')===0);
+      c.className='chip'+((!!D.peInclinado&&val)||(!D.peInclinado&&!val)?' on':'');
+      c.textContent=o;
+      c.onclick=()=>{ D.peInclinado=val; autoSave(); renderPePiso(q); };
+      iRow.appendChild(c);
+    });
+    iSec.appendChild(iLbl); iSec.appendChild(iRow);
+    wrap.appendChild(iSec);
+  }
+  const inclinado=ehUltimo&&!!D.peInclinado;
+
   // ── medida ──
   const lbl=document.createElement('div');
   lbl.className='aqs-lbl';
-  lbl.textContent='Pé-direito do '+piso+' (m)';
+  lbl.textContent=inclinado
+    ? 'Pé-direito MÍNIMO do '+piso+' (m) — no ponto mais baixo'
+    : 'Pé-direito do '+piso+' (m)';
   const inp=document.createElement('input');
   inp.className='aqs-inp'; inp.type='number'; inp.step='0.01';
   inp.inputMode='decimal'; inp.placeholder='2.60';
@@ -2193,6 +2307,45 @@ function renderPePiso(q){
   inp.oninput=()=>{ saveToD(chave,inp.value); validar(); autoSave(); };
   wrap.appendChild(lbl); wrap.appendChild(inp); wrap.appendChild(aviso);
   validar();
+
+  if(inclinado){
+    const mLbl=document.createElement('div');
+    mLbl.className='aqs-lbl'; mLbl.style.marginTop='10px';
+    mLbl.textContent='Pé-direito MÁXIMO do '+piso+' (m) — na cumeeira';
+    const mInp=document.createElement('input');
+    mInp.className='aqs-inp'; mInp.type='number'; mInp.step='0.01';
+    mInp.inputMode='decimal'; mInp.placeholder='3.40';
+    const jaMax=parseFloat(String((D.peDireitosMax||{})[piso]||'').replace(',','.'));
+    if(jaMax>0) mInp.value=jaMax.toFixed(2);
+    const mNota=document.createElement('div');
+    mNota.style.cssText='font-size:12px;color:var(--tx2);line-height:1.45;margin-top:6px';
+    const pintarNota=()=>{
+      const vmin=parseFloat(String(inp.value||'').replace(',','.'));
+      const vmax=parseFloat(String(mInp.value||'').replace(',','.'));
+      if(vmin>0&&vmax>0&&vmax<vmin){
+        mNota.style.color='var(--am)';
+        mNota.textContent='⚠ O máximo é menor que o mínimo — trocaste os valores?';
+      } else if(vmin>0&&vmax>0){
+        mNota.style.color='var(--tx2)';
+        mNota.textContent='Para a área de PAREDE conta o mínimo ('+
+          vmin.toFixed(2).replace('.',',')+' m). O médio, '+
+          ((vmin+vmax)/2).toFixed(2).replace('.',',')+' m, serve para o volume.';
+      } else {
+        mNota.style.color='var(--tx2)';
+        mNota.textContent='Para a área de parede usa-se o mínimo; o médio serve para o volume.';
+      }
+    };
+    mInp.oninput=()=>{
+      const v=parseFloat(String(mInp.value||'').replace(',','.'));
+      if(!D.peDireitosMax) D.peDireitosMax={};
+      if(v>0) D.peDireitosMax[piso]=v.toFixed(2)+'m'; else delete D.peDireitosMax[piso];
+      pintarNota(); autoSave();
+    };
+    const antesOninput=inp.oninput;
+    inp.oninput=()=>{ antesOninput(); pintarNota(); };
+    pintarNota();
+    wrap.appendChild(mLbl); wrap.appendChild(mInp); wrap.appendChild(mNota);
+  }
 
   // ── balanço do piso ──
   const b=balancoDoPiso(piso);
@@ -2904,7 +3057,7 @@ function renderPeInputs(n){
 // ═══════════════════════════════════════
 const ORIENTS_VE=['Norte','Sul','Este','Oeste','Nordeste','Sudeste','Sudoeste','Noroeste'];
 const VIDRO_OPTS=['Simples','Duplo'];
-const PROT_OPTS=['Persiana','Portada de madeira','Portada metálica','Cortina exterior opaca','Portada interior de madeira','Sem proteção exterior'];
+const PROT_OPTS=['Persiana','Portada de madeira','Portada metálica','Cortina exterior opaca','Portada interior de madeira','Portada interior metálica','Sem proteção exterior'];
 const PROT_INT_OPTS=['Cortinas blackout','Cortinas transparentes','Cortinas pouco transparentes','Estore','Outro','Sem proteção interior'];
 const CAIXILHO_COR_OPTS=['Cor clara','Cor escura'];
 const ABERTURA_OPTS=['Correr','Basculante','Fixo'];
@@ -3344,6 +3497,34 @@ function _chaveOrdemDiv(n){
   return String(n||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'')
     .toLowerCase().replace(/\s+/g,' ').trim();
 }
+/* ORDEM DE PERCURSO POR OMISSÃO
+   Quando o utilizador ainda NÃO escolheu a ordem, vale a pena propor a que se
+   usa em obra: entra-se pela sala (ou kitchenette), passa-se à cozinha e só
+   depois aos quartos e WC. Percorrer assim é mais rápido e é o que evita
+   voltar atrás.
+   Isto NÃO toca na ordem escolhida — essa manda sempre, e é o que já foi
+   corrigido três vezes. Só actua quando não há escolha nenhuma. */
+const PESO_ORDEM_TIPO=[
+  [/^(sala\s*comum|sala|kitchen|open\s*space)/i, 0],
+  [/^(cozinha|copa)/i,                            1],
+  [/^(sala de (jantar|refei)|refei)/i,            2],
+  [/^(hall|entrada|vestibul|circula|corredor)/i,  3],
+  [/^(escrit|sotao|s[oó]t[aã]o|escritório)/i,     5],
+  [/^(su[ií]te|quarto)/i,                         6],
+  [/^(wc|i\.?s\.?|casa de banho|banho)/i,         7],
+  [/^(despensa|arrum|arrecada|lavandaria|marquise|garagem|estendal)/i, 8],
+];
+function _pesoOrdem(nome){
+  const n=String(nome||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
+  for(const [re,p] of PESO_ORDEM_TIPO) if(re.test(n)) return p;
+  return 4;                       // o que não se reconhece fica pelo meio
+}
+function ordemSugerida(divs){
+  return (divs||[]).map((d,i)=>({d,i,p:_pesoOrdem(d)}))
+    .sort((a,b)=>a.p-b.p||a.i-b.i)      // empate: mantém a ordem em que vieram
+    .map(x=>x.d);
+}
+
 function divisoesComOrdemEscolhida(){
   /* A BASE SÃO AS DIVISÕES QUE EXISTEM, não a resposta a uma pergunta.
      parseDivs('') devolve ['Sala','Cozinha','Quarto 1','WC'] — um valor por
@@ -3356,6 +3537,16 @@ function divisoesComOrdemEscolhida(){
   const base=(String(resp||'').trim())
     ? parseDivs(resp)
     : ((D.divisoes||[]).length ? D.divisoes.slice() : parseDivs(''));
+  // sem ordem escolhida, propõe-se a ordem de percurso corrente
+  /* A sugestão só entra quando NÃO há ordem nenhuma — nem a resposta à
+     pergunta, nem a gravada. Olhar só a D.ordemDivisoes deixava de fora quem
+     tinha respondido à pergunta e ainda não a tinha gravado, e a ordem escolhida
+     era reordenada. A escolha do utilizador manda sempre. */
+  const _semOrdem=!String(D.ordemDivisoes||'').trim()&&
+                  !String(getAns('ordem-divisoes')||'').trim();
+  if(_semOrdem&&D.edificioTipo==='Apartamento'){
+    return ordemSugerida(base);
+  }
   const ordemResp=getAns('ordem-divisoes')||D.ordemDivisoes||'';
   if(!ordemResp) return base;
   const ordem=ordemResp.split(',').map(s=>s.trim()).filter(Boolean);
@@ -3795,6 +3986,8 @@ function renderQ(){
     veWrap.style.display='none';veWrap.innerHTML='';
   }
   document.getElementById('main').scrollTop=0;
+  // o botão de fotos do exterior só existe durante o levantamento das divisões
+  try{ actualizarBotaoFotoExt(); }catch(e){}
   speak(q.text+(q.hint?' — '+q.hint:''));
 }
 
@@ -4380,6 +4573,7 @@ function next(){
   try{ marcarAlteradoDesdeExportacao(); }catch(e){}
   autoSave();
   try{ pintarPainelLado(); }catch(e){}
+  try{ actualizarBotaoFotoExt(); }catch(e){}
   if(navigator.vibrate) navigator.vibrate(40);
   curQ++;renderQ();
 }
@@ -4513,6 +4707,10 @@ const DELTA_R={
   // (outras espessuras)» = 0,16. O que muda com a posição é o gtot (Tabela 48),
   // muito mais alto no interior porque a radiação já atravessou o vidro.
   portada_int_madeira: 0.16,
+  // Portada opaca METÁLICA pelo interior. Mesmo princípio: a Tabela 45 dá o ΔR
+  // pelo tipo de dispositivo — «Portada opaca metálica» = 0,12 — e a posição só
+  // muda o gtot (Tabela 48).
+  portada_int_metalica: 0.12,
   sem:      0,
 };
 
@@ -4628,7 +4826,10 @@ function protToKey(prot,ve){
   // portada INTERIOR antes do bloco genérico: senão era apanhada por
   // p.includes('portada') e tratada como portada exterior de madeira, com o
   // gtot errado (0,03 em vez de 0,35 — dez vezes menos radiação admitida)
-  if(p.includes('portada interior')) return 'portada_int_madeira';
+  // metálica ou madeira: ΔR diferente (0,12 vs 0,16) e gtot diferente
+  if(p.includes('portada interior'))
+    return /met[aá]lic|alum[ií]ni|ferro|a[çc]o/.test(p)
+      ? 'portada_int_metalica' : 'portada_int_madeira';
   if(p.includes('portada')){
     // resposta explícita do utilizador (nova pergunta) tem sempre prioridade
     const permeabExplicita=(ve&&ve.portadaPermeab||'').toLowerCase();
@@ -6294,7 +6495,11 @@ function buildTxt(){
        casavam por acaso. Delega-se na global, que já tem os recursos todos. */
     function resolverPeDireitoDivisao(div,pisoLabel){
       const v=resolverPeDireitoPiso(div,pisoLabel);
-      return v>0?(v.toFixed(2).replace('.',',')+'m'):'';
+      if(!(v>0)) return '';
+      // teto inclinado: mostra-se o intervalo, mas o cálculo usa o mínimo
+      const mx=parseFloat(String((D.peDireitosMax||{})[pisoLabel]||'').replace(',','.'));
+      if(mx>v) return v.toFixed(2).replace('.',',')+'–'+mx.toFixed(2).replace('.',',')+'m';
+      return v.toFixed(2).replace('.',',')+'m';
     }
     function resolverAreaDivisao(div){
       return resolverAreaDivisaoGlobal(div);
@@ -6333,6 +6538,50 @@ function buildTxt(){
       });
       t+=`${'─'.repeat(colDiv+2)}┼${'─'.repeat(12)}┼${'─'.repeat(16)}\n`;
       t+=`${'TOTAL (área útil)'.padEnd(colDiv)} | ${(areaTotalDiv>0?areaTotalDiv.toFixed(2)+'m²':'—').padEnd(10)} |\n`;
+      /* COERÊNCIA COM A PLANTA
+         A área lida da planta e a soma das divisões são o MESMO número visto de
+         duas maneiras. Se divergirem, há divisões por atribuir — e o TXT trazia
+         os dois totais lado a lado sem uma palavra, o que é pior do que trazer
+         só um: quem copia para a folha não sabe qual usar. */
+      // conta tudo o que é interior — 'util' e 'indefinido'. Só se excluem as
+      // áreas exteriores e as explicitamente marcadas como brutas.
+      const _totPlanta=(D.areasPlanta||[])
+        .filter(a=>!isAreaExterior(a.nome)&&a.tipo!=='bruta')
+        .reduce((s2,a)=>s2+(parseFloat(a.area)||0),0);
+      if(_totPlanta>0&&areaTotalDiv>0){
+        const dif=Math.abs(_totPlanta-areaTotalDiv);
+        if(dif>0.5){
+          const semArea=(D.divisoes||[]).filter(d=>!(resolverAreaDivisaoGlobal(d)>0));
+          t+='\n⚠ NÃO BATE COM A PLANTA: '+areaTotalDiv.toFixed(2).replace('.',',')+
+             ' m² nas divisões contra '+_totPlanta.toFixed(2).replace('.',',')+
+             ' m² lidos da planta (diferença de '+dif.toFixed(2).replace('.',',')+' m²).\n';
+          if(semArea.length)
+            t+='  Sem área atribuída: '+semArea.join(', ')+'\n';
+          t+='  Usa o total das DIVISÕES no cálculo — é o que corresponde ao que mediste.\n'+
+             '  A diferença vem de compartimentos da planta que não foram associados a\n'+
+             '  nenhuma divisão do levantamento, ou de divisões por medir.\n';
+        }
+      }
+      // teto inclinado: explicar que valor entra em que cálculo
+      const _incl=Object.entries(D.peDireitosMax||{})
+        .filter(([p2,v])=>{
+          const mn=parseFloat(String((D.peDireitos||{})[p2]||'').replace(',','.'));
+          const mx=parseFloat(String(v||'').replace(',','.'));
+          return mx>0&&mn>0&&mx>mn;
+        });
+      if(_incl.length){
+        t+='\nTETO INCLINADO em: '+_incl.map(([p2])=>p2).join(', ')+'\n';
+        _incl.forEach(([p2,v])=>{
+          const mn=parseFloat(String((D.peDireitos||{})[p2]||'').replace(',','.'));
+          const mx=parseFloat(String(v).replace(',','.'));
+          t+='  '+p2+': mínimo '+mn.toFixed(2).replace('.',',')+' m · máximo '+
+             mx.toFixed(2).replace('.',',')+' m · médio '+
+             ((mn+mx)/2).toFixed(2).replace('.',',')+' m\n';
+        });
+        t+='A área de PAREDE exterior é calculada com o MÍNIMO — é a altura que a parede\n'+
+           'tem em toda a volta. A parte acima disso é o triângulo sob a cobertura, que não\n'+
+           'é parede a direito. Para o VOLUME (ventilação) usa-se o pé-direito médio.\n';
+      }
       if(_listaENU.length){
         t+='\nNÃO INCLUÍDOS nesta tabela (espaços NÃO ÚTEIS): '+_listaENU.join(', ')+
            '  —  '+_areaENU.toFixed(2).replace('.',',')+' m² no total.\n'+
@@ -7309,13 +7558,21 @@ function buildTxt(){
       // Valores muito acima dos da portada exterior (0,03–0,09) porque a
       // radiação já entrou pelo vidro antes de ser barrada.
       portada_int_madeira:{duplo:{clara:0.35,escura:0.58},simples:{clara:0.30,escura:0.50}},
+      // Portada opaca METÁLICA pelo interior. A Tabela 48 dá o gtot pela
+      // opacidade e pela cor, não pelo material: uma portada metálica opaca
+      // barra a radiação como a de madeira. Os valores são os mesmos; o que
+      // difere entre materiais é o ΔR (Tabela 45): 0,12 na metálica, 0,16 na
+      // de madeira.
+      portada_int_metalica:{duplo:{clara:0.35,escura:0.58},simples:{clara:0.30,escura:0.50}},
       blackout:{duplo:{clara:0.37,escura:0.55},simples:{clara:0.33,escura:0.54}},
       cortina:{duplo:{clara:0.38,escura:0.56},simples:{clara:0.36,escura:0.56}},
       estore:{duplo:{clara:0.47,escura:0.69},simples:{clara:0.45,escura:0.65}},
     };
     let tipoP=null;
     if(prot.includes('persiana')) tipoP='persiana';
-    else if(prot.includes('portada interior')) tipoP='portada_int_madeira';
+    else if(prot.includes('portada interior'))
+      tipoP=/met[aá]lic|alum[ií]ni|ferro|a[çc]o/.test(prot)
+        ? 'portada_int_metalica' : 'portada_int_madeira';
     else if(prot.includes('portada')){
       const permeabExplicita=(ve.portadaPermeab||'').toLowerCase();
       if(permeabExplicita.includes('elevada')) tipoP='portada_elevada';
@@ -7340,7 +7597,7 @@ function buildTxt(){
       const veGrupo='VE'+grp.veNum;
       const r=calcUw(ve);
       const {gPerp,gtot,vidro,tipoP}=calcGtotTab48(ve);
-      const NOMES_TIPOP={persiana:'Persiana réguas metál./plást.',portada_baixa:'Portada opaca',portada_elevada:'Portada de lâminas reguláveis',cortina_ext:'Lona/cortina exterior opaca',portada_int_madeira:'Portada opaca interior (madeira)',blackout:'Cortina opaca (blackout)',estore:'Estore de lâminas',cortina:'Cortina ligeiramente transp.'};
+      const NOMES_TIPOP={persiana:'Persiana réguas metál./plást.',portada_baixa:'Portada opaca',portada_elevada:'Portada de lâminas reguláveis',cortina_ext:'Lona/cortina exterior opaca',portada_int_madeira:'Portada opaca interior (madeira)',portada_int_metalica:'Portada opaca interior (metálica)',blackout:'Cortina opaca (blackout)',estore:'Estore de lâminas',cortina:'Cortina ligeiramente transp.'};
       const dispositivoStr=tipoP?NOMES_TIPOP[tipoP]:'Sem proteção (g⊥,vi)';
       const temUwdn=r&&r.uwdn!==null;
       const uwdnVal=temUwdn?r.uwdn:(r?r.uw:null);
@@ -7490,8 +7747,14 @@ function buildTxt(){
         const pi=((D.divisoesDados[d]||{}).piso||'').trim();
         return !pisoBaixoT||pi===pisoBaixoT;
       });
+      /* resolverAreaDivisaoGlobal devolve TEXTO ("18.50"), não número: somar
+         assim dava uma concatenação e o toFixed rebentava a seguir. Só se via
+         com áreas a zero, porque "0"||0 dá 0 e o resto passava. */
       let areaT=0;
-      divsTerreo.forEach(d=>{areaT+=resolverAreaDivisaoGlobal(d)||0;});
+      divsTerreo.forEach(d=>{
+        const v=parseFloat(String(resolverAreaDivisaoGlobal(d)||'').replace(',','.'));
+        if(isFinite(v)) areaT+=v;
+      });
       if(areaT>0){
         t+=sep('PAVIMENTO EM CONTACTO COM O SOLO');
         t+='Pavimento térreo com espessura desconhecida, não sendo possível identificar com mais exatidão, sendo que é possível determinar que é composta por laje em betão pesado, com revestimento em pavimento cerâmico.\n\n';
@@ -9763,10 +10026,26 @@ function comprimirFotoGenerica(dataURL,perfil='normal'){
           let out=canvas.toDataURL('image/jpeg',qualidade);
           function tamanhoAprox(du){return Math.round((du.length-du.indexOf(',')-1)*3/4);}
           let tentativas=0;
-          while(tamanhoAprox(out)>cfg.tamanhoAlvo&&qualidade>cfg.qualidadeMin&&tentativas<6){
-            qualidade-=0.05;
-            out=canvas.toDataURL('image/jpeg',qualidade);
-            tentativas++;
+          /* MENOS PASSAGENS PELO COMPRESSOR.
+             toDataURL é síncrono e bloqueia o ecrã: numa foto de 12 MP cada
+             passagem custa perto de um segundo, e o ciclo fazia até SETE. Daí a
+             espera longa até a miniatura aparecer.
+             Agora estima-se a qualidade necessária a partir do primeiro
+             resultado — o tamanho de um JPEG é aproximadamente proporcional à
+             qualidade — e faz-se uma segunda passagem já perto do alvo. No
+             máximo três, quase sempre duas. */
+          if(tamanhoAprox(out)>cfg.tamanhoAlvo){
+            const razao=cfg.tamanhoAlvo/tamanhoAprox(out);
+            // margem de 8%: mais vale acertar por baixo do que voltar a tentar
+            let q2=Math.max(cfg.qualidadeMin,Math.min(qualidade,qualidade*razao*0.92));
+            out=canvas.toDataURL('image/jpeg',q2);
+            qualidade=q2; tentativas=1;
+            // uma última, só se a estimativa tiver falhado por muito
+            if(tamanhoAprox(out)>cfg.tamanhoAlvo*1.15&&q2>cfg.qualidadeMin){
+              q2=Math.max(cfg.qualidadeMin,q2*0.8);
+              out=canvas.toDataURL('image/jpeg',q2);
+              qualidade=q2; tentativas=2;
+            }
           }
           // salvaguarda: se por algum motivo saiu maior que o original, fica com o original
           resolve(out.length<dataURL.length?out:dataURL);
@@ -11585,6 +11864,58 @@ function botaoFotoCampo(campo,label){
   wrap.appendChild(btn);
   renderFotoCampoThumb(campo,wrap);
   return wrap;
+}
+
+/* ══════════ FOTOS DO EXTERIOR, A QUALQUER MOMENTO ══════════
+   Varandas, alçados, o que se vê da rua — coisas que aparecem quando aparecem e
+   não têm pergunta própria no fluxo. O botão fica sempre à mão durante o
+   levantamento das divisões e desaparece a partir do pé-direito, que é quando
+   já não faz falta.
+   As fotos vão para D.fotosAlcado, que é o saco que já vai no pacote. */
+function fotografarExterior(){
+  const input=document.createElement('input');
+  input.type='file'; input.accept='image/*'; input.capture='environment'; input.multiple=true;
+  input.onchange=async()=>{
+    const files=Array.from(input.files||[]);
+    if(!files.length) return;
+    const b=document.getElementById('btFotoExt');
+    if(b){ b.textContent='⏳'; b.disabled=true; }
+    let ok=0,falhas=0;
+    for(const file of files){
+      try{
+        const orig=await new Promise((res,rej)=>{
+          const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=rej;
+          r.readAsDataURL(file);});
+        const dataURL=await comprimirFotoGenerica(orig,'normal');
+        const idbKey=novaFotoKey('alcado');
+        await fotoDbSet(idbKey,dataURL);
+        if(!Array.isArray(D.fotosAlcado)) D.fotosAlcado=[];
+        D.fotosAlcado.push({idbKey,ts:new Date().toLocaleString('pt-PT'),origem:'exterior'});
+        ok++;
+      }catch(e){ falhas++; }
+    }
+    autoSave();
+    if(b){ b.textContent='📷'; b.disabled=false; }
+    actualizarBotaoFotoExt();
+    if(falhas) alert(falhas+' foto(s) não ficaram guardadas. Tenta outra vez.');
+  };
+  input.click();
+}
+function actualizarBotaoFotoExt(){
+  const b=document.getElementById('btFotoExt');
+  const c=document.getElementById('fotoExtConta');
+  if(!b||!c) return;
+  // visível só durante o levantamento das divisões: a partir do pé-direito, não
+  const q=(typeof qList!=='undefined'&&qList[curQ])?qList[curQ]:null;
+  const noFluxo=!!(q&&(q.isOrientComp||q.isVaosInline||String(q.id||'').indexOf('dc-')===0));
+  // o ecrã das perguntas chama-se scr-int
+  const ecra=document.getElementById('scr-int');
+  const emEcra=!!(ecra&&ecra.classList.contains('active'));
+  const mostrar=noFluxo&&emEcra;
+  b.style.display=mostrar?'flex':'none';
+  const n=(D.fotosAlcado||[]).length;
+  c.style.display=(mostrar&&n)?'block':'none';
+  if(n) c.textContent=n+' foto'+(n>1?'s':'');
 }
 
 function fotografarDivisao(div,callback){
@@ -13613,6 +13944,12 @@ window.addEventListener('DOMContentLoaded',()=>{
     // anterior se já houver uma
     let guardado=null;
     try{ guardado=localStorage.getItem('ce_modo_duplo'); }catch(e){}
+    let vp=null; try{ vp=localStorage.getItem('ce_vis_planta'); }catch(e){}
+    if(vp==='1'){
+      document.body.classList.add('com-planta');
+      const bv=document.getElementById('btVisPlanta'); if(bv) bv.classList.add('on');
+      setTimeout(posicionarDivisoria,60);
+    }
     const largo=window.innerWidth>=900;
     if(guardado==='1'||(guardado===null&&largo)){
       document.body.classList.add('duplo');
@@ -13819,6 +14156,188 @@ function _libertarEspaco(){
    divisões estão feitas, as medidas de cada uma, e as fotos já tiradas. Num
    Fold desdobrado isto fica ao lado da pergunta — deixa de ser preciso andar
    para trás para conferir. */
+/* ══════════ VISUALIZADOR DE PLANTA ══════════ */
+let _vpPaginas=[], _vpPag=0, _vpZoom=1, _vpRot=0, _vpNorte=null, _vpArrasto=null;
+
+function alternarVisPlanta(){
+  const on=document.body.classList.toggle('com-planta');
+  if(on) document.body.classList.remove('duplo');
+  try{ localStorage.setItem('ce_vis_planta',on?'1':'0'); }catch(e){}
+  const b=document.getElementById('btVisPlanta');
+  if(b){ b.classList.toggle('on',on); }
+  if(on){
+    posicionarDivisoria();
+    if(!_vpPaginas.length) visPlantaAbrir();
+  }
+  window.dispatchEvent(new Event('resize'));
+}
+
+function visPlantaAbrir(){
+  const inp=document.createElement('input');
+  inp.type='file'; inp.accept='application/pdf,image/*';
+  inp.onchange=async()=>{
+    const f=(inp.files||[])[0]; if(!f) return;
+    const tela=document.getElementById('visPlantaTela');
+    if(tela) tela.style.opacity='.4';
+    try{
+      if(/pdf$/i.test(f.name)||f.type==='application/pdf'){
+        _vpPaginas=await visPlantaLerPDF(f);
+      } else {
+        _vpPaginas=[await new Promise((res,rej)=>{
+          const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=rej;
+          r.readAsDataURL(f);})];
+      }
+      _vpPag=0; _vpRot=0; _vpZoom=1;
+      visPlantaMostrar();
+      visPlantaAjustar();
+    }catch(e){
+      alert('Não consegui abrir esta planta.\n\n'+(e.message||e)+
+        '\n\nSe for um PDF, experimenta uma captura de ecrã ou uma fotografia.');
+    }
+    if(tela) tela.style.opacity='';
+  };
+  inp.click();
+}
+
+/* Um PDF é rasterizado página a página, com resolução suficiente para se ler as
+   cotas ao ampliar mas sem encher a memória do telemóvel. */
+async function visPlantaLerPDF(file){
+  if(!window.pdfjsLib) throw new Error('leitor de PDF não disponível — verifica a ligação');
+  const buf=await file.arrayBuffer();
+  const pdf=await pdfjsLib.getDocument({data:buf}).promise;
+  const out=[];
+  const n=Math.min(pdf.numPages,12);
+  for(let i=1;i<=n;i++){
+    const pg=await pdf.getPage(i);
+    const base=pg.getViewport({scale:1});
+    // 2200 px no lado maior: legível ao ampliar, leve o suficiente
+    const esc=Math.min(3.5,2200/Math.max(base.width,base.height));
+    const vp=pg.getViewport({scale:esc});
+    const cv=document.createElement('canvas');
+    cv.width=Math.round(vp.width); cv.height=Math.round(vp.height);
+    await pg.render({canvasContext:cv.getContext('2d'),viewport:vp}).promise;
+    out.push(cv.toDataURL('image/jpeg',0.86));
+  }
+  return out;
+}
+
+function visPlantaMostrar(){
+  const img=document.getElementById('visPlantaImg');
+  const pag=document.getElementById('vpPag');
+  if(!img) return;
+  if(!_vpPaginas.length){ img.removeAttribute('src'); if(pag) pag.textContent=''; return; }
+  img.src=_vpPaginas[_vpPag]||'';
+  if(pag) pag.textContent=_vpPaginas.length>1?((_vpPag+1)+'/'+_vpPaginas.length):'';
+  visPlantaAplicar();
+}
+function visPlantaAplicar(){
+  const img=document.getElementById('visPlantaImg');
+  if(img) img.style.transform='rotate('+_vpRot+'deg) scale('+_vpZoom+')';
+  pintarRosa();
+}
+function visPlantaZoom(k){ _vpZoom=Math.max(0.15,Math.min(8,_vpZoom*k)); visPlantaAplicar(); }
+function visPlantaRodar(g){ _vpRot=((_vpRot+g)%360+360)%360; visPlantaAplicar(); }
+function visPlantaPag(d){
+  if(!_vpPaginas.length) return;
+  _vpPag=Math.max(0,Math.min(_vpPaginas.length-1,_vpPag+d));
+  visPlantaMostrar();
+}
+function visPlantaAjustar(){
+  const img=document.getElementById('visPlantaImg');
+  const tela=document.getElementById('visPlantaTela');
+  if(!img||!tela||!img.naturalWidth){ setTimeout(()=>{
+    const i2=document.getElementById('visPlantaImg');
+    if(i2&&i2.naturalWidth) visPlantaAjustar(); },220); return; }
+  const rodado=(_vpRot===90||_vpRot===270);
+  const lw=rodado?img.naturalHeight:img.naturalWidth;
+  const lh=rodado?img.naturalWidth:img.naturalHeight;
+  _vpZoom=Math.min((tela.clientWidth-16)/lw,(tela.clientHeight-16)/lh)||1;
+  visPlantaAplicar();
+}
+
+/* ONDE FICA O NORTE
+   A planta pode estar rodada de qualquer maneira. Pergunta-se para onde aponta
+   o norte NA IMAGEM e a rosa passa a acompanhar as rotações — assim, ao olhar
+   para uma parede no desenho sabe-se logo a orientação real. */
+function visPlantaNorte(){
+  const r=prompt('Para onde aponta o NORTE nesta planta?\n\n'+
+    'Escreve: cima, baixo, esquerda, direita — ou os graus (0 = para cima,\n'+
+    '90 = para a direita, 180 = para baixo).','cima');
+  if(r===null) return;
+  const t=String(r).toLowerCase().trim();
+  const mapa={cima:0,baixo:180,esquerda:270,direita:90,norte:0,'0':0};
+  let g=(t in mapa)?mapa[t]:parseFloat(t.replace(',','.'));
+  if(!isFinite(g)){ alert('Não percebi "'+r+'". Escreve cima, baixo, esquerda, direita ou os graus.'); return; }
+  _vpNorte=((g%360)+360)%360;
+  D.norteGrausPlanta=_vpNorte;
+  document.body.classList.add('com-norte');
+  autoSave();
+  pintarRosa();
+}
+const _ROSA8=[[0,'N'],[45,'NE'],[90,'E'],[135,'SE'],[180,'S'],[225,'SO'],[270,'O'],[315,'NO']];
+function pintarRosa(){
+  const el=document.getElementById('visRosa');
+  if(!el) return;
+  if(_vpNorte===null){ document.body.classList.remove('com-norte'); el.innerHTML=''; return; }
+  document.body.classList.add('com-norte');
+  // o norte na imagem + a rotação aplicada = para onde aponta no ECRÃ
+  const ang=((_vpNorte+_vpRot)%360+360)%360;
+  el.innerHTML='<svg width="60" height="60" viewBox="0 0 60 60">'+
+    '<circle cx="30" cy="30" r="26" fill="none" stroke="#2A3945"/>'+
+    '<g transform="rotate('+ang+' 30 30)">'+
+      '<line x1="30" y1="30" x2="30" y2="9" stroke="#FF6B6B" stroke-width="3"/>'+
+      '<line x1="30" y1="30" x2="30" y2="50" stroke="#5A6B78" stroke-width="2"/>'+
+      '<text x="30" y="7" text-anchor="middle" font-size="10" fill="#FF6B6B" font-weight="700">N</text>'+
+    '</g></svg>';
+  el.title='Norte a '+Math.round(ang)+'° no ecrã';
+}
+
+/* A divisória faz parte do layout — não precisa de ser posicionada. */
+function posicionarDivisoria(){ /* mantida por compatibilidade */ }
+// Largura da coluna do levantamento, em percentagem da janela.
+function definirLarguraApp(pct){
+  const v=Math.max(25,Math.min(85,pct));
+  document.documentElement.style.setProperty('--larg-app',v.toFixed(1)+'%');
+  try{ localStorage.setItem('ce_larg_app',v.toFixed(1)+'%'); }catch(e){}
+  return v;
+}
+(function(){
+  const larg=(()=>{ try{ return localStorage.getItem('ce_larg_app'); }catch(e){ return null; } })();
+  if(larg) document.documentElement.style.setProperty('--larg-app',larg);
+  const d=()=>document.getElementById('visDivisoria');
+  const mover=ev=>{
+    if(!_vpArrasto) return;
+    const x=(ev.touches&&ev.touches[0])?ev.touches[0].clientX:ev.clientX;
+    if(!isFinite(x)) return;
+    definirLarguraApp(x/window.innerWidth*100);
+    ev.preventDefault();
+  };
+  const largar=()=>{
+    if(!_vpArrasto) return;
+    _vpArrasto=null;
+    const el=d(); if(el) el.classList.remove('a-arrastar');
+    window.dispatchEvent(new Event('resize'));
+  };
+  document.addEventListener('pointerdown',ev=>{
+    const el=d();
+    if(el&&(ev.target===el||(ev.target.closest&&ev.target.closest('#visDivisoria')))){
+      _vpArrasto=true; el.classList.add('a-arrastar');
+      try{ el.setPointerCapture&&el.setPointerCapture(ev.pointerId); }catch(e){}
+      ev.preventDefault();
+    }
+  },{passive:false});
+  document.addEventListener('pointermove',mover,{passive:false});
+  ['pointerup','pointercancel'].forEach(t2=>document.addEventListener(t2,largar));
+  // duplo toque na divisória repõe os 70%
+  document.addEventListener('dblclick',ev=>{
+    const el=d();
+    if(el&&(ev.target===el||(ev.target.closest&&ev.target.closest('#visDivisoria')))){
+      definirLarguraApp(70);
+      window.dispatchEvent(new Event('resize'));
+    }
+  });
+})();
+
 function alternarDuplo(){
   const on=document.body.classList.toggle('duplo');
   try{ localStorage.setItem('ce_modo_duplo',on?'1':'0'); }catch(e){}
@@ -14924,5 +15443,17 @@ window.addEventListener('load',()=>{
   setTimeout(()=>{try{atualizarBotaoOneDrive();}catch(e){}},800);
 });
 </script>
+<button id="btFotoExt" onclick="fotografarExterior()"
+  title="Foto do exterior — varandas, alçados, o que se vê da rua"
+  style="display:none;position:fixed;right:14px;bottom:80px;z-index:70;
+         width:46px;height:46px;border-radius:50%;border:none;
+         background:var(--ac);color:#04140c;font-size:19px;line-height:1;
+         align-items:center;justify-content:center;
+         box-shadow:0 3px 12px rgba(0,0,0,.4);cursor:pointer;opacity:.92">📷</button>
+<div id="fotoExtConta" style="display:none;position:fixed;right:12px;bottom:126px;
+  z-index:71;background:var(--bg3);color:var(--tx);border:1px solid var(--br);
+  border-radius:10px;padding:2px 7px;font-size:10.5px;font-weight:700"></div>
+</div>
+
 </body>
 </html>

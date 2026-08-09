@@ -569,7 +569,7 @@ Ver tudo</button>
   window.addEventListener('online',aviso);
 })();
 "use strict";
-const PLANTA_VERSAO='v1.28.1 (2026-08-05)';
+const PLANTA_VERSAO='v1.29.0 (2026-08-07)';
 /* ══════════════════════════════════════════════════════════════════
    CE Voz · motor de planta interativa
    Fonte de verdade: o levantamento (D). A planta é uma camada de
@@ -964,11 +964,11 @@ function normalParede(par){
 // Um contorno em L é guardado como vários rectângulos. As arestas onde esses
 // rectângulos se tocam NÃO são paredes — são a costura da decomposição. Antes
 // apareciam desenhadas a cinzento e pareciam divisórias dentro do compartimento.
-function paredeInternaDaDivisao(par){
+function trocosTapadosDaDivisao(par){
   const b=L.blocos.find(x=>x.id===par.bloco);
-  if(!b) return false;
+  if(!b) return null;
   const irmaos=L.blocos.filter(x=>x.div===b.div&&x.id!==b.id);
-  if(!irmaos.length) return false;
+  if(!irmaos.length) return null;
   const dx=(par.p2.x-par.p1.x)/par.comp, dy=(par.p2.y-par.p1.y)/par.comp;
   const tap=[];
   irmaos.forEach(o=>paredes(o).forEach(q=>{
@@ -981,11 +981,38 @@ function paredeInternaDaDivisao(par){
     const a=Math.max(0,t0), z=Math.min(par.comp,t1);
     if(z-a>.02) tap.push([a,z]);
   }));
-  if(!tap.length) return false;
+  if(!tap.length) return null;
   tap.sort((a,b2)=>a[0]-b2[0]);
-  let c=0;
-  tap.forEach(([a,z])=>{ if(a<=c+.02) c=Math.max(c,z); });
-  return c>=par.comp-.02;                            // coberta de ponta a ponta
+  // juntar os troços tapados que se tocam
+  const juntos=[];
+  tap.forEach(([a,z])=>{
+    const u=juntos[juntos.length-1];
+    if(u&&a<=u[1]+.02) u[1]=Math.max(u[1],z);
+    else juntos.push([a,z]);
+  });
+  return juntos;
+}
+/* Uma parede é COSTURA quando está inteiramente encoberta por blocos da mesma
+   divisão. Mas numa forma em T ou em cruz há paredes tapadas SÓ NUMA PARTE — o
+   corpo largo da circulação encosta ao braço estreito a meio. A regra antiga
+   exigia cobertura de ponta a ponta e desenhava a parede inteira, criando as
+   linhas a meio da forma.
+   Agora responde-se em três estados: totalmente tapada (não se desenha),
+   totalmente livre (desenha-se toda), ou parcial — e aí desenham-se só os
+   BOCADOS livres. */
+function paredeInternaDaDivisao(par){
+  const t=trocosTapadosDaDivisao(par);
+  if(!t||!t.length) return false;
+  return t.length===1&&t[0][0]<=.02&&t[0][1]>=par.comp-.02;
+}
+// Bocados da parede que NÃO estão encostados a outro bloco da mesma divisão.
+function trocosLivresDaParede(par){
+  const t=trocosTapadosDaDivisao(par);
+  if(!t||!t.length) return [[0,par.comp]];
+  const livres=[]; let c=0;
+  t.forEach(([a,z])=>{ if(a-c>.02) livres.push([c,a]); c=Math.max(c,z); });
+  if(par.comp-c>.02) livres.push([c,par.comp]);
+  return livres;
 }
 function vaosLivres(par){
   const dx=(par.p2.x-par.p1.x)/par.comp, dy=(par.p2.y-par.p1.y)/par.comp;
@@ -1853,10 +1880,18 @@ function desenhar(dimForcada){
       const cor=modoCE?(corCE||'#B9C6CE'):(verOrient?(COR_ORIENT[par.orient]||'#5A6B78'):'#16202A');
       const horiz=(par.lado==='N'||par.lado==='S');
       // interior a cinzento fino, exterior grosso na cor da orientação
+      /* Só os bocados LIVRES. Numa forma em T, o corpo largo encosta ao braço
+         só numa parte: desenhar a parede inteira punha uma linha a meio da
+         divisão — as "mini áreas" que apareciam na circulação. */
       const interna=paredeInternaDaDivisao(par);
-      if(!interna)
-        p.push('<line data-par="'+b.id+'|'+par.lado+'" x1="'+sx(par.p1.x)+'" y1="'+sy(par.p1.y)+'" x2="'+sx(par.p2.x)+'" y2="'+sy(par.p2.y)+
-          '" stroke="#8FA0AC" stroke-width="2" stroke-linecap="square" style="cursor:pointer"/>');
+      if(!interna){
+        trocosLivresDaParede(par).forEach((tr,iT)=>{
+          const A=pontoParede(par,tr[0]), B=pontoParede(par,tr[1]);
+          p.push('<line data-par="'+b.id+'|'+par.lado+'" x1="'+sx(A.x)+'" y1="'+sy(A.y)+
+            '" x2="'+sx(B.x)+'" y2="'+sy(B.y)+
+            '" stroke="#8FA0AC" stroke-width="2" stroke-linecap="square" style="cursor:pointer"/>');
+        });
+      }
       const eo=envObj(b.id,par.lado), es=envSeg(par);
       if(eo&&es){
         const A=pontoParede(par,es[0]), B=pontoParede(par,es[1]);
@@ -2099,9 +2134,12 @@ function desenhar(dimForcada){
     });
     L.blocos.filter(b=>_escolhidas.includes(b.div)).forEach(b=>{
       paredes(b).forEach(par=>{
-        if(paredeInternaDaDivisao(par)) return;   // costura: não é parede
-        p.push('<line x1="'+sx(par.p1.x)+'" y1="'+sy(par.p1.y)+'" x2="'+sx(par.p2.x)+'" y2="'+sy(par.p2.y)+
-          '" stroke="var(--sel)" stroke-width="3.5" stroke-linecap="square" pointer-events="none"/>');
+        if(paredeInternaDaDivisao(par)) return;   // costura inteira: não é parede
+        trocosLivresDaParede(par).forEach(tr=>{
+          const A=pontoParede(par,tr[0]), B=pontoParede(par,tr[1]);
+          p.push('<line x1="'+sx(A.x)+'" y1="'+sy(A.y)+'" x2="'+sx(B.x)+'" y2="'+sy(B.y)+
+            '" stroke="var(--sel)" stroke-width="3.5" stroke-linecap="square" pointer-events="none"/>');
+        });
       });
     });
     // visto no canto superior esquerdo de cada divisão escolhida
@@ -6586,7 +6624,7 @@ if(DEMO){ nomeFich='URBª MONTE DA BEMPOSTA Lote 19, R C B_levantamento.json'; c
 
 // exposto para testes
 if(typeof window!=='undefined'){
-  window.__planta={get L(){return L;},get proj(){return proj;},carregar,autoLayout,auditar,balanco,relatorioHTML,pdfEnvolvente,pintarEstadoCheio,alternarPainel,alternarCheio,fecharPaineis,enviarLayoutParaApp,DENTRO_DA_APP,marcarAlterado,get porGuardar(){return _porGuardar;},empurrarVizinhos,get vaosSemParede(){return _vaosSemParede;},autoColocarVaos,recolocarVaos,guardarJSON,encostarDivisaoLargada,LIMITE_ENCOSTO,comprimirParaOrcamento,bytesDataURL,PDF_MAX_BYTES,ESP_INTERIOR,espExterior,espDaParede,abrirParaParedes,areaBrutaEstimada,areaBrutaPorPiso,juncoes,marcarFachadasAuto,paredeViradaParaDivisao,ceAutoPorPiso,get fila(){return filaColocar;},orientsMedidas,arrancarColocar,colocarNoPonto,pararColocar,separarPorPiso,pisoDaDivisao,linhasGrossas,divisoesDoFundo,fixarDivisoesDoFundo,recortarFundo,fundos,acrescentarFundo,trocarFundoAtivo,removerFundoAtivo,sincronizarFundo,get saltos(){return PARES_SALTOS;},set saltos(v){PARES_SALTOS=v;},estimarEscalaAutomatica,aplicarEscalaAutomatica,medidasDoLevantamento,conferirContraLevantamento,paredeInternaDaDivisao,colarBocado,encontrarRestos,apagarBlocos,copiarFormaPara,PLANTA_VERSAO,get espessura(){return espessura;},set espessura(v){espessura=v;},get orto(){return orto;},set orto(v){orto=v;},aplicarEmLote,planoParaExportar,resolverVars,__mascaraPronta,lerFormaDoDesenho,aplicarFormaLida,dilatar,erodir,fecharAberturas,alastrar,mancaParaRects,get mascara(){return mascaraFundo;},set mascara(v){mascaraFundo=v;},alinharParedes,fachadaMedida,encaixarDivisoes,zonas,areaPorCF,areaInterseccao,zonasDaDivisao,ajustarAreaDivisao,ajustarTodasAsAreas,abrirAreas,fecharAreas,picosDeLinha,melhorEncaixe,ajustarAoFundo,linhasFundoMetros,linhasDesenhadas,lerAreasColadas,gravarAreaUtil,cancelarTudo,divsSelecionadas,alternarNaSelecao,estaSelecionada,usarImagemFundo,receberFicheiroFundo,aplicarCF,porPincel,paredeDe,ceDiv,ceCorParede,cfParede,cfCor,cfDoTipo,marcarFraccaoRestantes,CF,encostarTudo,gravarEnvNoLevantamento,envDesenhadaPorTipo,abrirMenu,fecharMenu,limparEnvOrfas,pontosArco,ortogonal,contorno,areaBloco,caixa,dentroBloco,pontoParede,editarForma,normalizarDivisao,regiaoBooleana,celulasParaRects,decomporPoligono,areaPoligono,fecharOrtogonal,aplicarPoligono,relatorio,desfazer,refazer,guardarHist,posVao,migrarVaos,buracos,marcarDivisoriasAuto,DIVISORIA,rodar,numeracaoTXT,rotuloVao,calibrarFundo,set fundo(v){ if(!L) return; if(!v){L.fundos=[];L.fundoAtivo=0;L.fundo=null;return;} L.fundos=[v];L.fundoAtivo=0;L.fundo=v; },get fundo(){return L&&L.fundo;},marcarEnvolventesAuto,envObj,envSeg,paredes,vaosLivres,envDe,nomeOrient,parseM,desenhar,XJ,BEAR};
+  window.__planta={get L(){return L;},get proj(){return proj;},carregar,autoLayout,auditar,balanco,relatorioHTML,pdfEnvolvente,trocosLivresDaParede,trocosTapadosDaDivisao,pintarEstadoCheio,alternarPainel,alternarCheio,fecharPaineis,enviarLayoutParaApp,DENTRO_DA_APP,marcarAlterado,get porGuardar(){return _porGuardar;},empurrarVizinhos,get vaosSemParede(){return _vaosSemParede;},autoColocarVaos,recolocarVaos,guardarJSON,encostarDivisaoLargada,LIMITE_ENCOSTO,comprimirParaOrcamento,bytesDataURL,PDF_MAX_BYTES,ESP_INTERIOR,espExterior,espDaParede,abrirParaParedes,areaBrutaEstimada,areaBrutaPorPiso,juncoes,marcarFachadasAuto,paredeViradaParaDivisao,ceAutoPorPiso,get fila(){return filaColocar;},orientsMedidas,arrancarColocar,colocarNoPonto,pararColocar,separarPorPiso,pisoDaDivisao,linhasGrossas,divisoesDoFundo,fixarDivisoesDoFundo,recortarFundo,fundos,acrescentarFundo,trocarFundoAtivo,removerFundoAtivo,sincronizarFundo,get saltos(){return PARES_SALTOS;},set saltos(v){PARES_SALTOS=v;},estimarEscalaAutomatica,aplicarEscalaAutomatica,medidasDoLevantamento,conferirContraLevantamento,paredeInternaDaDivisao,colarBocado,encontrarRestos,apagarBlocos,copiarFormaPara,PLANTA_VERSAO,get espessura(){return espessura;},set espessura(v){espessura=v;},get orto(){return orto;},set orto(v){orto=v;},aplicarEmLote,planoParaExportar,resolverVars,__mascaraPronta,lerFormaDoDesenho,aplicarFormaLida,dilatar,erodir,fecharAberturas,alastrar,mancaParaRects,get mascara(){return mascaraFundo;},set mascara(v){mascaraFundo=v;},alinharParedes,fachadaMedida,encaixarDivisoes,zonas,areaPorCF,areaInterseccao,zonasDaDivisao,ajustarAreaDivisao,ajustarTodasAsAreas,abrirAreas,fecharAreas,picosDeLinha,melhorEncaixe,ajustarAoFundo,linhasFundoMetros,linhasDesenhadas,lerAreasColadas,gravarAreaUtil,cancelarTudo,divsSelecionadas,alternarNaSelecao,estaSelecionada,usarImagemFundo,receberFicheiroFundo,aplicarCF,porPincel,paredeDe,ceDiv,ceCorParede,cfParede,cfCor,cfDoTipo,marcarFraccaoRestantes,CF,encostarTudo,gravarEnvNoLevantamento,envDesenhadaPorTipo,abrirMenu,fecharMenu,limparEnvOrfas,pontosArco,ortogonal,contorno,areaBloco,caixa,dentroBloco,pontoParede,editarForma,normalizarDivisao,regiaoBooleana,celulasParaRects,decomporPoligono,areaPoligono,fecharOrtogonal,aplicarPoligono,relatorio,desfazer,refazer,guardarHist,posVao,migrarVaos,buracos,marcarDivisoriasAuto,DIVISORIA,rodar,numeracaoTXT,rotuloVao,calibrarFundo,set fundo(v){ if(!L) return; if(!v){L.fundos=[];L.fundoAtivo=0;L.fundo=null;return;} L.fundos=[v];L.fundoAtivo=0;L.fundo=v; },get fundo(){return L&&L.fundo;},marcarEnvolventesAuto,envObj,envSeg,paredes,vaosLivres,envDe,nomeOrient,parseM,desenhar,XJ,BEAR};
 }
 </script>
 </body>
