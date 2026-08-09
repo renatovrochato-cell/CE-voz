@@ -540,7 +540,7 @@ const DIVS_BASE=[
 // VERSÃO — fonte única (selo no ecrã inicial + cabeçalho do TXT exportado).
 // Subir aqui a cada alteração ao ficheiro.
 // ═══════════════════════════════════════
-const APP_VERSION='v2026.08.09-FIX181';
+const APP_VERSION='v2026.08.09-FIX182';
 
 // ═══════════════════════════════════════
 // ESTADO
@@ -14158,6 +14158,8 @@ function _libertarEspaco(){
    para trás para conferir. */
 /* ══════════ VISUALIZADOR DE PLANTA ══════════ */
 let _vpPaginas=[], _vpPag=0, _vpZoom=1, _vpRot=0, _vpNorte=null, _vpArrasto=null;
+// deslocamento da imagem dentro do painel, em pixels de ecrã
+let _vpX=0, _vpY=0;
 
 function alternarVisPlanta(){
   const on=document.body.classList.toggle('com-planta');
@@ -14167,6 +14169,7 @@ function alternarVisPlanta(){
   if(b){ b.classList.toggle('on',on); }
   if(on){
     posicionarDivisoria();
+    ligarGestosPlanta();
     if(!_vpPaginas.length) visPlantaAbrir();
   }
   window.dispatchEvent(new Event('resize'));
@@ -14232,11 +14235,32 @@ function visPlantaMostrar(){
 }
 function visPlantaAplicar(){
   const img=document.getElementById('visPlantaImg');
-  if(img) img.style.transform='rotate('+_vpRot+'deg) scale('+_vpZoom+')';
+  if(img) img.style.transform='translate('+_vpX+'px,'+_vpY+'px) '+
+    'rotate('+_vpRot+'deg) scale('+_vpZoom+')';
   pintarRosa();
 }
-function visPlantaZoom(k){ _vpZoom=Math.max(0.15,Math.min(8,_vpZoom*k)); visPlantaAplicar(); }
-function visPlantaRodar(g){ _vpRot=((_vpRot+g)%360+360)%360; visPlantaAplicar(); }
+/* Ampliar pelo CENTRO do painel, não pelo canto: sem isto, cada toque no + faz
+   fugir a zona que se está a ver. */
+function visPlantaZoom(k,cx,cy){
+  const antes=_vpZoom;
+  _vpZoom=Math.max(0.15,Math.min(8,_vpZoom*k));
+  const real=_vpZoom/antes;
+  const tela=document.getElementById('visPlantaTela');
+  if(tela){
+    const r=tela.getBoundingClientRect();
+    // ponto fixo: o centro do painel, ou onde os dedos estiverem
+    const px=(cx===undefined?r.width/2:cx-r.left);
+    const py=(cy===undefined?r.height/2:cy-r.top);
+    _vpX=px-(px-_vpX)*real;
+    _vpY=py-(py-_vpY)*real;
+  }
+  visPlantaAplicar();
+}
+function visPlantaRodar(g){
+  _vpRot=((_vpRot+g)%360+360)%360;
+  _vpX=0; _vpY=0;                      // depois de rodar, a imagem podia ficar fora de vista
+  visPlantaAplicar();
+}
 function visPlantaPag(d){
   if(!_vpPaginas.length) return;
   _vpPag=Math.max(0,Math.min(_vpPaginas.length-1,_vpPag+d));
@@ -14245,14 +14269,94 @@ function visPlantaPag(d){
 function visPlantaAjustar(){
   const img=document.getElementById('visPlantaImg');
   const tela=document.getElementById('visPlantaTela');
-  if(!img||!tela||!img.naturalWidth){ setTimeout(()=>{
-    const i2=document.getElementById('visPlantaImg');
-    if(i2&&i2.naturalWidth) visPlantaAjustar(); },220); return; }
+  if(!img||!tela) return;
+  if(!img.naturalWidth){
+    // ainda sem imagem medida: recentra já e tenta de novo quando carregar
+    _vpX=0; _vpY=0; visPlantaAplicar();
+    setTimeout(()=>{
+      const i2=document.getElementById('visPlantaImg');
+      if(i2&&i2.naturalWidth) visPlantaAjustar(); },220);
+    return;
+  }
   const rodado=(_vpRot===90||_vpRot===270);
   const lw=rodado?img.naturalHeight:img.naturalWidth;
   const lh=rodado?img.naturalWidth:img.naturalHeight;
   _vpZoom=Math.min((tela.clientWidth-16)/lw,(tela.clientHeight-16)/lh)||1;
+  _vpX=0; _vpY=0;                      // ajustar ao ecrã volta a centrar
   visPlantaAplicar();
+}
+
+/* ══════════ DEDOS: PINÇA PARA AMPLIAR, ARRASTAR PARA CENTRAR ══════════
+   Só havia os botões + e −, e a planta estava presa no meio do painel. Numa
+   vistoria quer-se ir ao canto do desenho ver uma cota: um dedo arrasta, dois
+   ampliam. É o que qualquer mapa faz e é o que a mão espera.
+   A pinça amplia à volta do ponto entre os dedos, não do centro do painel —
+   assim o sítio que se está a olhar não foge. */
+const _vpDedos=new Map();
+let _vpPinca=null, _vpMoveu=false;
+function _vpDist(a,b){ return Math.hypot(a.x-b.x,a.y-b.y); }
+function _vpCentro(a,b){ return {x:(a.x+b.x)/2,y:(a.y+b.y)/2}; }
+function ligarGestosPlanta(){
+  const tela=document.getElementById('visPlantaTela');
+  if(!tela||tela.__gestos) return;
+  tela.__gestos=true;
+
+  tela.addEventListener('pointerdown',ev=>{
+    _vpDedos.set(ev.pointerId,{x:ev.clientX,y:ev.clientY});
+    _vpMoveu=false;
+    if(_vpDedos.size===2){
+      const [a,b]=[..._vpDedos.values()];
+      _vpPinca={d:_vpDist(a,b),c:_vpCentro(a,b),zoom:_vpZoom,x:_vpX,y:_vpY};
+    }
+    try{ tela.setPointerCapture(ev.pointerId); }catch(e){}
+    ev.preventDefault();
+  },{passive:false});
+
+  tela.addEventListener('pointermove',ev=>{
+    if(!_vpDedos.has(ev.pointerId)) return;
+    const antes=_vpDedos.get(ev.pointerId);
+    _vpDedos.set(ev.pointerId,{x:ev.clientX,y:ev.clientY});
+
+    if(_vpDedos.size>=2&&_vpPinca){
+      // dois dedos: ampliar e deslocar ao mesmo tempo
+      const [a,b]=[..._vpDedos.values()];
+      const d=_vpDist(a,b), c=_vpCentro(a,b);
+      if(_vpPinca.d<8) return;
+      const k=d/_vpPinca.d;
+      const novo=Math.max(0.15,Math.min(8,_vpPinca.zoom*k));
+      const real=novo/_vpPinca.zoom;
+      const r=document.getElementById('visPlantaTela').getBoundingClientRect();
+      const px=_vpPinca.c.x-r.left, py=_vpPinca.c.y-r.top;
+      _vpZoom=novo;
+      // o ponto sob os dedos fica onde está, e a vista acompanha o arrastar
+      _vpX=(c.x-r.left)-(px-_vpPinca.x)*real;
+      _vpY=(c.y-r.top)-(py-_vpPinca.y)*real;
+      _vpMoveu=true;
+      visPlantaAplicar();
+    } else if(_vpDedos.size===1){
+      // um dedo: arrastar
+      const dx=ev.clientX-antes.x, dy=ev.clientY-antes.y;
+      if(Math.abs(dx)>0.5||Math.abs(dy)>0.5) _vpMoveu=true;
+      _vpX+=dx; _vpY+=dy;
+      visPlantaAplicar();
+    }
+    ev.preventDefault();
+  },{passive:false});
+
+  ['pointerup','pointercancel','pointerleave'].forEach(t2=>
+    tela.addEventListener(t2,ev=>{
+      _vpDedos.delete(ev.pointerId);
+      if(_vpDedos.size<2) _vpPinca=null;
+    }));
+
+  // duplo toque ajusta ao ecrã — o gesto de "voltar ao princípio"
+  tela.addEventListener('dblclick',ev=>{ visPlantaAjustar(); ev.preventDefault(); });
+
+  // roda do rato amplia à volta do cursor
+  tela.addEventListener('wheel',ev=>{
+    ev.preventDefault();
+    visPlantaZoom(ev.deltaY<0?1.15:1/1.15,ev.clientX,ev.clientY);
+  },{passive:false});
 }
 
 /* ONDE FICA O NORTE
