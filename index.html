@@ -540,7 +540,7 @@ const DIVS_BASE=[
 // VERSÃO — fonte única (selo no ecrã inicial + cabeçalho do TXT exportado).
 // Subir aqui a cada alteração ao ficheiro.
 // ═══════════════════════════════════════
-const APP_VERSION='v2026.08.09-FIX182';
+const APP_VERSION='v2026.08.10-FIX183';
 
 // ═══════════════════════════════════════
 // ESTADO
@@ -14177,7 +14177,13 @@ function alternarVisPlanta(){
 
 function visPlantaAbrir(){
   const inp=document.createElement('input');
-  inp.type='file'; inp.accept='application/pdf,image/*';
+  /* A MESMA ORDEM DO `accept` QUE O ANEXO DE DOCUMENTOS.
+     O Windows guarda a última pasta usada por CADA combinação de filtros do
+     diálogo. Com 'application/pdf,image/*' o diálogo é tratado como outro e
+     abre na pasta genérica; com a mesma ordem do botão de anexar planta —
+     'image/*,application/pdf' — cai na pasta dos certificados, que é onde já se
+     andou. Detalhe que parece inócuo e é o que faz a diferença no dia a dia. */
+  inp.type='file'; inp.accept='image/*,application/pdf';
   inp.onchange=async()=>{
     const f=(inp.files||[])[0]; if(!f) return;
     const tela=document.getElementById('visPlantaTela');

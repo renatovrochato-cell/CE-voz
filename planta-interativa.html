@@ -322,7 +322,7 @@ table.bal tr.tot td{border-top:1px solid var(--linha);padding-top:4px}
       style="min-height:40px;padding:7px 11px;font-size:17px">☰</button>
     <button id="btPainelDir" onclick="alternarPainel('dir')" title="Detalhes e envolventes"
       style="min-height:40px;padding:7px 11px;font-size:17px">▤</button>
-    <label class="btn primaria">Abrir levantamento<input type="file" id="fileIn" accept=".json,application/json"></label>
+    <label class="btn primaria">Abrir levantamento<input type="file" id="fileIn" accept="application/json,.json"></label>
     <button id="btAcertarTudo" class="primaria" title="Acerta as áreas ao levantamento, solda as paredes e recoloca os vãos — tudo de uma vez">📐 Acertar tudo</button>
     <button id="btAlinhar" class="primaria" title="Solda as paredes que estão quase no mesmo sítio, sem mexer na disposição">⇲⇱ Alinhar paredes</button>
     <button id="btAuto" class="esconde-toque" title="Constrói tudo de novo — perde a disposição que fizeste à mão">Refazer do zero</button>
@@ -421,7 +421,7 @@ Ver tudo</button>
     <div class="exemplo" id="avisoExemplo" hidden>
       <div><b>Isto é um exemplo</b> <span id="exemploNome"></span> — abre o teu <b>_levantamento.json</b>.</div>
       <label class="btn primaria" style="white-space:nowrap">Abrir o meu levantamento
-        <input type="file" id="fileIn2" accept=".json,application/json"></label>
+        <input type="file" id="fileIn2" accept="application/json,.json"></label>
       <button id="exemploFechar" title="Fechar este aviso" style="padding:4px 10px">✕</button>
     </div>
     <div class="menu" id="menu" hidden></div>
@@ -463,7 +463,7 @@ Ver tudo</button>
     <div class="sec">
       <h2>Planta de fundo</h2>
       <div style="display:flex;gap:6px;flex-wrap:wrap">
-        <label class="btn">Carregar planta<input type="file" id="fundoIn" accept="image/*,application/pdf,.pdf"></label>
+        <label class="btn">Carregar planta<input type="file" id="fundoIn" accept="image/*,application/pdf"></label>
         <button id="btCalib">Calibrar escala</button>
         <button id="btEncaixar">Encaixar na planta original</button>
         <button id="btColocar" class="primaria" style="width:100%;margin-top:6px">👆 Colocar por cliques</button>
@@ -1056,9 +1056,25 @@ function dadosVao(v){return (dadosDiv(v.div).vaos||[])[v.i]||{};}
 // a divisão deixa de arrastar o vão consigo. O limite impede-o de sair da parede.
 function posVao(v,par){
   const larg=Math.max(parseM(dadosVao(v).larg),.2);
-  let d=(v.d!=null)?v.d:(v.t!=null?v.t*par.comp:par.comp/2);
   if(par.comp<=larg) return par.comp/2;
-  return Math.max(larg/2,Math.min(par.comp-larg/2,d));
+  const limitar=x=>Math.max(larg/2,Math.min(par.comp-larg/2,x));
+  // posição escolhida à mão: respeita-se
+  if(v.d!=null) return limitar(v.d);
+  if(v.t!=null) return limitar(v.t*par.comp);
+  /* SEM POSIÇÃO ESCOLHIDA, O VÃO VAI PARA UM TROÇO LIVRE.
+     Ia para o meio da parede sem olhar ao que estava tapado por outra divisão:
+     numa parede meio encostada, o vão nascia por dentro de casa e ficava
+     marcado como erro sem culpa nenhuma do utilizador.
+     Escolhe-se o maior troço livre onde ele caiba, e centra-se aí. */
+  const lv=vaosLivres(par);
+  const cabem=(lv.livres||[]).filter(([a,z])=>z-a>=larg-.02)
+    .sort((x,y)=>(y[1]-y[0])-(x[1]-x[0]));
+  if(cabem.length) return limitar((cabem[0][0]+cabem[0][1])/2);
+  // não cabe em lado nenhum: o maior troço que houver, para ficar o mais fora
+  // possível — e a auditoria assinala
+  const maior=(lv.livres||[]).slice().sort((x,y)=>(y[1]-y[0])-(x[1]-x[0]))[0];
+  if(maior) return limitar((maior[0]+maior[1])/2);
+  return limitar(par.comp/2);
 }
 function migrarVaos(){   // ficheiros antigos guardavam fração
   L.vaos.forEach(v=>{
@@ -1934,7 +1950,25 @@ function desenhar(dimForcada){
     const x1=sx(A.x), y1=sy(A.y), x2=sx(B.x), y2=sy(B.y);
     const selV=(sel.t==='vao'&&sel.div===v.div&&sel.i===v.i);
     const lv=vaosLivres(par), dentro=lv.livres.some(([a,z])=>cen-larg/2>=a-.02&&cen+larg/2<=z+.02);
-    const cor=!dentro?'var(--erro)':(dv.orient&&dv.orient!==par.orient?'var(--erro)':'#F7FAFB');
+    const orientErrada=(dv.orient&&dv.orient!==par.orient);
+    const problema=(!dentro||orientErrada);
+    const cor=problema?'var(--erro)':'#F7FAFB';
+    /* UM VÃO MAL COLOCADO TEM DE SALTAR À VISTA.
+       A cor vermelha sozinha perde-se num desenho já cheio de cor — e um vão
+       numa parede interior passou despercebido num levantamento real. Marca-se
+       com um halo e um ponto de exclamação por cima, que não se confundem com
+       mais nada. */
+    if(problema){
+      const nrmP=normalParede(par);
+      p.push('<line x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+
+        '" stroke="var(--erro)" stroke-width="13" stroke-linecap="round" '+
+        'opacity=".28" pointer-events="none"/>');
+      const mx=(x1+x2)/2+nrmP.x*13, my=(y1+y2)/2+nrmP.y*13;
+      p.push('<circle cx="'+mx+'" cy="'+my+'" r="8.5" fill="var(--erro)" '+
+        'stroke="#fff" stroke-width="1.5" pointer-events="none"/>');
+      p.push('<text x="'+mx+'" y="'+(my+4)+'" text-anchor="middle" font-size="12" '+
+        'font-weight="800" fill="#fff" pointer-events="none">!</text>');
+    }
     p.push('<line x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+'" stroke="#EDF1F3" stroke-width="7" stroke-linecap="butt" pointer-events="none"/>');
     p.push('<line data-vao="'+esc(v.div)+'|'+v.i+'" x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+
       '" stroke="'+cor+'" stroke-width="4" stroke-linecap="butt" style="cursor:ew-resize"/>');
@@ -2981,11 +3015,27 @@ function recolocarVaos(div){
     porParede[k]=(porParede[k]||0)+1;
     L.vaos.push({div,i,bloco:alvo.bloco,lado:alvo.lado,d:null});
   });
+  /* VÁRIOS VÃOS NA MESMA PAREDE
+     Distribuíam-se pelo comprimento TOTAL, sem olhar ao que estava tapado por
+     outra divisão: numa parede meio encostada, um dos vãos ia parar por dentro
+     de casa. Agora distribuem-se pelo maior troço LIVRE onde caibam todos —
+     e se não couberem, pelo maior que houver, ficando assinalados. */
   Object.keys(porParede).forEach(k=>{
     const [bl,lado]=k.split('|');
     const g=L.vaos.filter(v=>v.div===div&&v.bloco===bl&&v.lado===lado);
-    const comp=(paredeDe(bl,lado)||{comp:1}).comp;
-    g.forEach((v,j)=>{if(v.d==null)v.d=(j+1)/(g.length+1)*comp;});
+    const par=paredeDe(bl,lado);
+    if(!par){ g.forEach((v,j)=>{if(v.d==null)v.d=(j+1)/(g.length+1);}); return; }
+    const larguras=g.map(v=>Math.max(parseM(dadosVao(v).larg)||0.6,0.2));
+    const precisa=larguras.reduce((a,b)=>a+b,0);
+    const livres=(vaosLivres(par).livres||[]).slice()
+      .sort((x,y)=>(y[1]-y[0])-(x[1]-x[0]));
+    // o primeiro troço onde caibam todos; senão o maior de todos
+    const alvo=livres.find(([a,z])=>z-a>=precisa)||livres[0]||[0,par.comp];
+    const largura=alvo[1]-alvo[0];
+    g.forEach((v,j)=>{
+      if(v.d!=null) return;
+      v.d=alvo[0]+(j+1)/(g.length+1)*largura;
+    });
   });
 }
 
