@@ -540,7 +540,7 @@ const DIVS_BASE=[
 // VERSÃO — fonte única (selo no ecrã inicial + cabeçalho do TXT exportado).
 // Subir aqui a cada alteração ao ficheiro.
 // ═══════════════════════════════════════
-const APP_VERSION='v2026.08.10-FIX183';
+const APP_VERSION='v2026.08.10-FIX185';
 
 // ═══════════════════════════════════════
 // ESTADO
@@ -6190,6 +6190,36 @@ function ventFachadasExpostas(){
   });
   return o.size;
 }
+/* Constrói a lista de condutas a partir do que foi respondido no levantamento.
+   A app pergunta o tipo (só exaustão / admissão e exaustão / não existem), a
+   abrangência (em todas / só em algumas) e quais as I.S. abrangidas. A folha do
+   ITeCons pede uma linha por conduta, com as sete colunas. */
+function condutasDoLevantamento(){
+  const tipo=String(D.ventCondutasIS||'').trim();
+  if(!tipo||tipo==='Não existem condutas') return [];
+  const escoamento=(tipo==='Admissão e exaustão')?'Admissão e exaustão':'Exaustão';
+  // quantas: as I.S. escolhidas, ou todas as que houver
+  let n;
+  // as I.S. indicadas mandam sempre — só se não houver nenhuma é que se contam
+  if((D.ventCondutasISWCs||[]).length)
+    n=D.ventCondutasISWCs.length;
+  else {
+    const sem=x=>String(x).normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+    n=(D.divisoes||[]).filter(d=>/^(wc|i\.?s\.?|casa de banho|banho)/i.test(sem(d))).length||1;
+  }
+  return [{
+    escoamento,
+    ventax:'Não',
+    // conduta corrente e desimpedida: perda de carga baixa
+    perdaCarga:'Baixa',
+    cobertura:(D.coberturaInclinada==='Sim')?'Inclinada (10° a 30°)':'Terraço, inclinada (<10°)',
+    n,
+    altura:null,               // não é medida em obra; a folha estima
+    quais:(D.ventCondutasISWCs||[]).slice(),
+    detalhe:D.ventCondutasISDetalhe||'',
+  }];
+}
+
 function ventAlturas(){
   const pd=_n(D.peDireitoMedio)||
     (Object.values(D.peDireitos||{}).map(_n).filter(x=>x>0)[0])||2.60;
@@ -6197,9 +6227,23 @@ function ventAlturas(){
   const nFrac=parseInt(D.pisos)||1;
   // altura por piso: pé-direito + espessura da laje (0,30 m, valor corrente)
   const hPiso=pd+0.30;
+  /* H_FA é a altura do PAVIMENTO da fracção acima do solo, não a altura da
+     fracção em si. Estava a usar o nº de pisos DA FRACÇÃO — num apartamento é
+     sempre 1 — e dava a altura de um piso em vez da cota a que ele está.
+     Num 2.º andar (pisoLocal 3), o pavimento está a 2 pisos do solo. */
+  const pl=String(D.pisoLocal||'').trim();
+  let nAbaixo=null;
+  if(/^r\/?c$|^0$|^r[ée]s/i.test(pl)) nAbaixo=0;
+  else{
+    const n=parseInt(pl);
+    // pisoLocal é a ordem no prédio: 1=R/C, 2=1º, 3=2º… → pisos abaixo = n-1
+    if(isFinite(n)&&n>0) nAbaixo=n-1;
+  }
+  const hFA=(nAbaixo===null)?(nFrac*hPiso):(nAbaixo*hPiso);
   return {peDireito:+pd.toFixed(2),
     hEdificio:+(nEdif*hPiso).toFixed(1),
-    hFracao:+(nFrac*hPiso).toFixed(1),
+    hFracao:+hFA.toFixed(1),
+    hFracaoBase:(nAbaixo!==null?nAbaixo:null),
     pisosEdificio:nEdif,pisosFracao:nFrac};
 }
 function ventVolume(){
@@ -6231,7 +6275,11 @@ function ventResumoITeCons(){
     hObstaculo:_n(D.ventHObstaculo)||null,
     dObstaculo:_n(D.ventDObstaculo)||null,
     aberturasAdmissao:D.ventAberturas||'',
-    condutas:(D.ventCondutas||[]),
+    /* AS CONDUTAS SAEM DA PERGUNTA QUE JÁ EXISTE.
+       Estava a ler D.ventCondutas — campo que nunca existiu — em vez de
+       D.ventCondutasIS, que é onde a resposta fica gravada. Resultado: dizia
+       sempre "não existem condutas", mesmo tendo sido respondido o contrário. */
+    condutas:condutasDoLevantamento(),
   };
 }
 
@@ -6671,6 +6719,78 @@ function buildTxt(){
     t+='\nNota: os valores assinalados como estimados saem do nº de pisos e do pé-direito\n'+
        'medidos. Confirma-os na folha antes de calcular — a altura entra na velocidade\n'+
        'do vento e essa afeta o caudal de renovação.\n';
+
+    /* BLOCO PRONTO A COPIAR, NA ORDEM DA FOLHA
+       O bloco acima é para ler; este é para transcrever. Segue exactamente a
+       ordem em que os campos aparecem na folha do ITeCons, um por linha, sem
+       comentários pelo meio — assim percorre-se a folha de cima a baixo sem
+       ter de procurar cada valor. */
+    t+='\n'+'─'.repeat(50)+'\n';
+    t+='PARA COPIAR — folha "Ventilação", pela ordem dos campos\n';
+    t+='─'.repeat(50)+'\n';
+    const cp=(campo,valor)=>{ t+=campo.padEnd(38)+String(valor)+'\n'; };
+    cp('Tipo de edifício',(D.anoConstrucao&&+D.anoConstrucao<2013)?'Existente':'Novo');
+    cp('Concelho',D.concelho||'—');
+    cp('Altitude (m)',v.altitude!=null?String(v.altitude):'—');
+    cp('Região',v.regiao||'—');
+    cp('Rugosidade',(v.rugosidade||'I')+'  ← CONFIRMAR');
+    t+='\n';
+    cp('Nº de pisos da fracção',String(v.pisosFracao));
+    cp('Velocidade do vento, u10 (m/s)','Por defeito');
+    cp('Nº fachadas expostas',v.fachadasExpostas>=2?'>=2':String(v.fachadasExpostas));
+    cp('Altura do edifício, Hedf (m)',v.hEdificio.toFixed(2).replace('.',','));
+    cp('Altura da fracção, HFA (m)',v.hFracao.toFixed(2).replace('.',','));
+    cp('Edifícios/obstáculos?',v.obstaculos||'não indicado — deixar por marcar');
+    if(v.hObstaculo) cp('Altura do obstáculo, Hobs (m)',v.hObstaculo.toFixed(1).replace('.',','));
+    if(v.dObstaculo) cp('Distância ao obstáculo, Dobs (m)',v.dObstaculo.toFixed(1).replace('.',','));
+    t+='\n';
+    cp('Área útil (m²)',v.areaUtil.toFixed(2).replace('.',','));
+    cp('Pé-direito (m)',v.peDireito.toFixed(2).replace('.',','));
+    cp('Volume (m³)',v.volume.toFixed(2).replace('.',','));
+    t+='\n';
+    /* A resposta do LEVANTAMENTO é que manda: há uma pergunta com três opções
+       — só exaustão, admissão e exaustão, não existem. Olhar só à lista de
+       condutas detalhadas dizia "não existem" a quem tinha respondido que sim. */
+    const respCond=String(D.ventCondutasIS||'').trim();
+    const temCond=/exaust|admiss/i.test(respCond)||!!(v.condutas&&v.condutas.length);
+    cp('Existem condutas de vent. natural?',
+      !respCond ? 'por responder no levantamento'
+      : temCond ? 'SIM — marcar' : 'NÃO — deixar por marcar');
+    if(temCond&&!(v.condutas&&v.condutas.length)){
+      // respondeu que existem mas não detalhou cada uma: dá-se o essencial e
+      // assinala-se o que fica ao critério de quem preenche
+      const soExaustao=/^só exaust/i.test(respCond);
+      const wcs=(D.ventCondutasISWCs||[]);
+      t+='\n  Do levantamento: '+respCond+
+         (wcs.length?(' — em: '+wcs.join(', ')):'')+'\n';
+      if(D.ventCondutasISDetalhe) t+='  Detalhe: '+D.ventCondutasISDetalhe+'\n';
+      t+='  Conduta V_N 1\n';
+      t+='    Tipo de escoamento              '+(soExaustao?'Exaustão':'Admissão e exaustão')+'\n';
+      t+='    Exaustores tipo ventax?         Não  ← confirmar\n';
+      t+='    Perda de carga                  Baixa  ← confirmar (Alta se tiver cotovelos ou grelha suja)\n';
+      t+='    Tipo de cobertura               ← conforme a cobertura do edifício\n';
+      t+='    Número de condutas semelhantes  '+(wcs.length||1)+'\n';
+      t+='    Altura da conduta conhecida?    Não\n';
+      t+='       (não sabendo, a folha estima pela altura do edifício: '+
+         v.hEdificio.toFixed(2).replace('.',',')+' m)\n';
+    }
+    if(temCond){
+      v.condutas.forEach((c,i2)=>{
+        t+='\n  Conduta V_N '+(i2+1)+'\n';
+        /* O escoamento e o número saem do levantamento. O resto são valores
+           correntes que a app não tem forma de saber — vão assinalados, para
+           não passarem por medidos. */
+        t+='    Tipo de escoamento              '+(c.escoamento||'Exaustão')+'\n';
+        t+='    Exaustores tipo ventax?         '+(c.ventax||'Não')+'  ← confirmar\n';
+        t+='    Perda de carga                  '+(c.perdaCarga||'Baixa')+'  ← confirmar\n';
+        t+='    Tipo de cobertura               '+(c.cobertura||'Inclinada (10° a 30°)')+
+           '  ← conforme a cobertura do edifício\n';
+        t+='    Número de condutas semelhantes  '+(c.n||1)+'\n';
+        t+='    Altura da conduta conhecida?    '+(c.altura?'Sim':'Não')+'\n';
+        if(c.altura) t+='    Altura da conduta (m)           '+String(c.altura).replace('.',',')+'\n';
+      });
+    }
+    t+='\nO Rph e o n50 NÃO se introduzem: são resultado do cálculo da folha.\n';
   }
 
   // ── CLIMATIZAÇÃO ──
