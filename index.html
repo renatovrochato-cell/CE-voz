@@ -540,7 +540,7 @@ const DIVS_BASE=[
 // VERSÃO — fonte única (selo no ecrã inicial + cabeçalho do TXT exportado).
 // Subir aqui a cada alteração ao ficheiro.
 // ═══════════════════════════════════════
-const APP_VERSION='v2026.08.10-FIX185';
+const APP_VERSION='v2026.08.13-FIX193';
 
 // ═══════════════════════════════════════
 // ESTADO
@@ -1211,6 +1211,36 @@ function voltarInt(){if(curQ>=qList.length)curQ=qList.length-1;show('scr-int');r
 const CLIMA_COM_MARCA=['Split','Multi-split','Bomba de calor ar-ar','Bomba de calor ar-água','Radiadores elétricos','Pavimento radiante'];
 const CLIMA_SEM_MARCA=['Lareira/recuperador'];
 
+
+// Devolve o SISTEMA a que uma divisão pertence — não a divisão em si.
+// Três splits iguais em três quartos são UM sistema (3 unidades exteriores);
+// um multi-split que serve quatro divisões é UM sistema (1 unidade exterior,
+// 4 interiores). O texto do CE é do sistema, partilhado por todas as divisões.
+function grupoDaDivisao(div){
+  const cd=(D.climaDivisoes||{})[div]||{};
+  const tipos=(cd.tipos||[cd.tipo]).filter(t=>t&&t!=='Sem sistema');
+  if(!tipos.length) return null;
+  const SEM=['pavimento radiante','lareira/recuperador','radiadores elétricos'];
+  const semUE=tipos.filter(t=>SEM.includes(String(t).toLowerCase()));
+  const comUE=tipos.filter(t=>!SEM.includes(String(t).toLowerCase()));
+  if(comUE.length){
+    const gs=agruparSistemasAC(D,SEM);
+    const g=gs.find(x=>x.divs.includes(div));
+    if(g) return {chave:g.chave,grupo:g};
+  }
+  if(semUE.length){
+    // sem unidade exterior: agrupa por tipo em todo o projeto
+    const tipo=semUE[0];
+    const divs=Object.entries(D.climaDivisoes||{})
+      .filter(([,c])=>c&&(c.tipos||[c.tipo]).some(t=>String(t).toLowerCase()===tipo.toLowerCase()))
+      .map(([d])=>d);
+    return {chave:'SEMUE|'+tipo.toLowerCase(),
+      grupo:{tipos:[tipo],divs,marca:'',modelo:'',dados:{},multi:false,
+             nUnidades:divs.length,nInteriores:divs.length}};
+  }
+  return null;
+}
+
 function renderClimaDiv(div){
   const wrap=document.getElementById('inline-inputs');
   wrap.innerHTML='';
@@ -1284,10 +1314,30 @@ function renderClimaDiv(div){
     form.appendChild(sg);
   }
 
-  wrap.appendChild(form);
-
-  // actualiza marcas (compatibilidade com buildTxt)
+  // actualiza marcas ANTES de agrupar (agruparSistemasAC lê cd.marcas)
   cd.marcas=[...new Set(Object.values(cd.marcasPorTipo).flat())];
+  const sis=grupoDaDivisao(div);
+  if(sis){
+    const g=sis.grupo;
+    const cab=document.createElement('div');
+    cab.style.cssText='font-size:11px;color:var(--tx3);margin-top:14px;padding-top:10px;border-top:1px solid var(--bd)';
+    const FONTE={exterior:'chapa da unidade exterior',interior:'etiqueta interior (sem chapa exterior)',nenhuma:'sem chapa nem etiqueta'};
+    cab.textContent='Sistema: '+g.tipos.join(' + ')+
+      ' — '+(g.multi?('1 unidade exterior, '+g.nInteriores+' interiores')
+                    :(g.nUnidades+' unidade(s), '+g.nInteriores+' interior(es)'))+
+      ' · dados: '+(FONTE[g.fonteDados]||'—')+
+      ' · serve '+g.divs.join(', ')+
+      (g.divs.length>1?' · o texto é partilhado por estas divisões':'');
+    form.appendChild(cab);
+    if(g.aviso){
+      const av=document.createElement('div');
+      av.style.cssText='font-size:11px;color:var(--red);margin-top:4px;font-weight:600';
+      av.textContent='⚠ '+g.aviso;
+      form.appendChild(av);
+    }
+    blocoTextoBase(form,{escopo:'CLIMA',chave:sis.chave,grupo:g});
+  }
+  wrap.appendChild(form);
 }
 
 // ═══════════════════════════════════════
@@ -1951,7 +2001,11 @@ function renderAqsInline(tipo){
         D.aqsCaudal=String(c);
         D.aqsPotencia=String(POT_ESQ[c]);
         D.aqsPotenciaOrigem='defeito';
-        renderAQSInline(wrap);
+        // BUG CORRIGIDO: era renderAQSInline(wrap) — a função chama-se
+        // renderAqsInline e recebe o TIPO, não o wrap. Rebentava com
+        // ReferenceError ao escolher o caudal do esquentador, e a potência
+        // por defeito não chegava a aparecer no ecrã.
+        renderAqsInline(D.aqsTipo||tipo);
       };
       rowC.appendChild(ch);
     });
@@ -2061,6 +2115,7 @@ function renderAqsInline(tipo){
     if(D.aqsManutencao==='sim'){D.aqsFatorIdade=1.00;rendAvisoDiv.textContent='F_age 1,00 — manutenção documentada (Nota 2 da Tabela 76). Guarda a evidência (fatura/relatório).';}
     else atualizarRendimentoPorIdade();
   }
+  blocoTextoBase(form,'AQS');
   wrap.appendChild(form);
 }
 
@@ -4616,8 +4671,50 @@ function speak(txt){
 // Colunas: fixo, basc, correr — por material e corte térmico
 // ═══════════════════════════════════════
 
+// ── Uwdn de VIDRO DUPLO — Quadros III.1 a III.3 do ITE50, colunas de oclusão
+// nocturna, a 6 mm e a 16 mm de lâmina de ar. Interpolam-se como o Uw.
+//
+// REGRA (Renato, 13/08): vidro simples → valor DIRECTO do ITE50; vidro duplo em
+// edifício EXISTENTE → INTERPOLAÇÃO no ITE50; vãos de PROJECTO NOVO → cálculo
+// integral pelo Manual SCE (Eq. 15 e 18, ΔR da Tabela 45).
+// A app é de levantamento de existentes, logo usa sempre a via ITE50.
+//
+// [cortina interior opaca, outros disp. perm. ELEVADA, outros disp. perm. BAIXA]
+const ITE50_UWDN_DUPLO={
+  alum_sem:{
+    fixo:  {cortina:[3.4,3.1], permelevada:[3.2,2.9], permbaixa:[2.8,2.6]},
+    basc:  {cortina:[3.7,3.3], permelevada:[3.4,3.1], permbaixa:[3.0,2.7]},
+    correr:{cortina:[3.9,3.5], permelevada:[3.6,3.3], permbaixa:[3.1,2.9]},
+  },
+  alum_com:{
+    fixo:  {cortina:[3.3,2.9], permelevada:[3.1,2.8], permbaixa:[2.7,2.5]},
+  },
+  pvc_com:{
+    fixo:  {cortina:[2.9,2.5], permelevada:[2.7,2.3], permbaixa:[2.4,2.1]},
+  },
+  mad_sem:{
+    fixo:  {cortina:[2.9,2.5], permelevada:[2.8,2.4], permbaixa:[2.5,2.2]},
+  },
+};
+
 // Tabela de Uw base (sem proteção) por [material][corteTerm][abertura] para X1=6mm e X2=16mm
-// Fonte: Quadro III.1 (madeira) e III.2 (alumínio/PVC) do ITE50
+//
+// NUMERAÇÃO REAL DOS QUADROS (confirmada no PDF, págs. 168-172):
+//   III.1   madeira
+//   III.2 A metálica SEM corte térmico   ← única que distingue fixa/giratória/de correr
+//   III.2 B metálica COM corte térmico
+//   III.3   plástico (PVC)               ← NÃO é o III.4
+//   III.4   vão para local não aquecido: Uw(lna) = 1/(1/Uw + 0,09)
+//   III.5   vãos horizontais
+// Em madeira, PVC e metálica com corte térmico o quadro diz "fixa, giratória ou de
+// correr" — o tipo de abertura NÃO altera o Uw; por isso as três colunas são iguais.
+//
+// NÃO COBERTO por esta tabela (têm linha própria nos quadros do ITE50):
+//   · vidro duplo de baixa emissividade (16 low ε): mad 2,6 · alum s/ct 3,1/3,6/3,7 ·
+//     alum c/ct 3,0 · PVC 2,5 — não implementado porque o g⊥vi correspondente
+//     (Tabela 51) não está confirmado, e sem ele o gtot sairia errado.
+//   · janela dupla, 2 janelas em série (50-100 mm): mad 2,5 · alum s/ct 3,1 · PVC 2,4.
+// Nestes casos o valor tem de ser corrigido à mão — ver aviso no TXT.
 const ITE50_BASE={
   // [material_ct]: {X1, X2, colunas: {fixo:[y1,y2], basc:[y1,y2], correr:[y1,y2], opaFixo:[y1,y2], ...}}
   alum_sem:{
@@ -4669,9 +4766,41 @@ function autoTesteTabelas(){
     eq('ΔR cortina',DELTA_R.cortina,0.08);
     // ITE50 — pontos de referência confirmados contra o PDF
     const r1=calcUw({tipo:'Vidro simples',caixMat:'Alumínio',corteTerm:false,abertura:'De correr',prot:'Persiana'});
-    eq('ITE50 simples alum s/corte correr+persiana (Uwdn)',r1.uwdn,4.4);
+    eq('ITE50 simples alum s/corte correr+persiana (Uwdn)',r1.uwdn,4.1);
     const r2=calcUw({tipo:'Vidro simples',caixMat:'Alumínio',corteTerm:false,abertura:'De correr',prot:'Portada metálica'});
     eq('ITE50 idem portada metálica (Uwdn)',r2.uwdn,4.8);
+    // PVC — Quadro III.3. O tipo de janela NÃO altera o Uw (a tabela diz
+    // "fixa, giratória ou de correr"); só a metálica sem corte térmico separa.
+    //
+    // Cada asserção fixa a lâmina de ar que precisa. Não herdar a do teste
+    // anterior: já aconteceu (FIX189) o teste "madeira duplo 6mm" correr com a
+    // lâmina a 10 mm deixada pelo bloco do PVC, e acusar erro onde não havia.
+    const arSave=D.caixaArGlobal;
+    const uw=(o,mm)=>{D.caixaArGlobal=mm;return calcUw(Object.assign({tipo:'Vidro duplo',prot:'Sem proteção'},o)).uw;};
+    const uwdn=(o,mm)=>{D.caixaArGlobal=mm;return calcUw(Object.assign({tipo:'Vidro duplo'},o)).uwdn;};
+
+    eq('ITE50 PVC duplo 6mm',  uw({caixMat:'PVC',abertura:'De abrir'},6), 3.2);
+    eq('ITE50 PVC duplo 16mm', uw({caixMat:'PVC',abertura:'De abrir'},16),2.7);
+    eq('ITE50 PVC duplo 10mm (interpolado)', uw({caixMat:'PVC',abertura:'De abrir'},10),3.0);
+    eq('PVC: abertura não altera Uw', uw({caixMat:'PVC',abertura:'De correr'},6), uw({caixMat:'PVC',abertura:'Fixo'},6));
+    eq('ITE50 simples PVC cortina (Uwdn)',
+       calcUw({tipo:'Vidro simples',caixMat:'PVC',abertura:'De abrir',prot:'Cortinas'}).uwdn,4.1);
+    eq('ITE50 madeira duplo 6mm',  uw({caixMat:'Madeira',abertura:'De correr'},6), 3.3);
+    eq('ITE50 madeira duplo 16mm', uw({caixMat:'Madeira',abertura:'De correr'},16),2.8);
+    eq('ITE50 alum c/corte duplo 6mm', uw({caixMat:'Alumínio',corteTerm:true,abertura:'De correr'},6),3.7);
+
+    // Uwdn de vidro duplo tem de vir do ITE50 interpolado (via de edifício
+    // existente), NÃO da fórmula ΔR do Manual (via de projecto novo).
+    eq('Uwdn duplo PVC 6mm persiana',  uwdn({caixMat:'PVC',abertura:'De abrir',prot:'Persiana'},6), 2.4);
+    eq('Uwdn duplo PVC 16mm persiana', uwdn({caixMat:'PVC',abertura:'De abrir',prot:'Persiana'},16),2.1);
+    eq('Uwdn duplo PVC 10mm persiana (interpolado)', uwdn({caixMat:'PVC',abertura:'De abrir',prot:'Persiana'},10),2.28);
+    eq('Uwdn duplo alum s/ct correr 6mm cortina',
+       uwdn({caixMat:'Alumínio',corteTerm:false,abertura:'De correr',prot:'Cortinas'},6),3.9);
+    eq('Uwdn duplo madeira 16mm persiana', uwdn({caixMat:'Madeira',abertura:'Fixo',prot:'Persiana'},16),2.2);
+    D.caixaArGlobal=6;
+    if(calcUw({tipo:'Vidro duplo',caixMat:'PVC',abertura:'De abrir',prot:'Persiana'}).uwdnViaManual)
+      erros.push('Uwdn duplo caiu na via do Manual — devia vir do ITE50');
+    D.caixaArGlobal=arSave;
     // Texto AQS — cenário de regressão do bug histórico
     const Dsave={...D};
     Object.assign(D,{aqsTipo:'Termoacumulador elétrico',aqsMarca:'X',aqsModelo:'Y',aqsCapacidade:'',aqsPotencia:'',
@@ -4760,7 +4889,7 @@ function calcUw(ve){
 
   // Uwdn = 1/(1/Uw + ΔR) apenas se há proteção
   // Uwdn = (Uw + 1/(1/Uw+ΔR)) / 2  — fórmula do ITE50 (Quadro III.2), válida para VIDRO DUPLO
-  let uwdn=null;
+  let uwdn=null, uwdnViaManual=false;
   if(vidro==='simples'){
     // Vidro simples: o ITE50 tabela o Uwdn diretamente (não é a fórmula ΔR acima) —
     // confirmado visualmente nas 4 páginas (madeira/metálica sem/com corte/PVC).
@@ -4772,9 +4901,9 @@ function calcUw(ve){
       'mad_sem_cortina':4.3,'mad_sem_permbaixa':3.4,'mad_sem_permelevada':3.9,
       'alum_sem_fixo_cortina':4.9,'alum_sem_fixo_permbaixa':3.8,'alum_sem_fixo_permelevada':4.5,
       'alum_sem_basc_cortina':5.0,'alum_sem_basc_permbaixa':3.9,'alum_sem_basc_permelevada':4.6,
-      'alum_sem_correr_cortina':5.2,'alum_sem_correr_permbaixa':4.4,'alum_sem_correr_permelevada':4.8,
+      'alum_sem_correr_cortina':5.2,'alum_sem_correr_permbaixa':4.1,'alum_sem_correr_permelevada':4.8,
       'alum_com_cortina':4.5,'alum_com_permbaixa':3.6,'alum_com_permelevada':4.1,
-      'pvc_com_cortina':4.4,'pvc_com_permbaixa':3.3,'pvc_com_permelevada':3.8,
+      'pvc_com_cortina':4.1,'pvc_com_permbaixa':3.3,'pvc_com_permelevada':3.8,
     };
     const catProt=prot==='cortina'?'cortina':(prot==='sem'?null:(prot==='portada_metalica'?'permelevada':'permbaixa'));
     if(catProt){
@@ -4794,14 +4923,37 @@ function calcUw(ve){
       uwdn=uwdnSimples[chave]!==undefined?uwdnSimples[chave]:null;
     }
   } else {
-    const dr=DELTA_R[prot]||0;
-    if(dr>0 && uw){
-      const uwdn_raw=1/(1/uw+dr);
-      uwdn=Math.round(((uw+uwdn_raw)/2)*100)/100;
+    // VIDRO DUPLO, EDIFÍCIO EXISTENTE → interpolar o Uwdn no ITE50, tal como o Uw.
+    // A fórmula ΔR do Manual SCE (Eq. 18) é a via de PROJECTO NOVO; usá-la aqui
+    // dava ~+0,30 W/m²·°C, penalizando o certificado sem fundamento.
+    const catProt=prot==='cortina'?'cortina'
+      :(prot==='sem'?null:(prot==='portada_metalica'?'permelevada':'permbaixa'));
+    if(catProt){
+      const ctKey=(mat==='mad')?'sem':ct;
+      const fam=ITE50_UWDN_DUPLO[`${mat}_${ctKey}`]||ITE50_UWDN_DUPLO[`${mat}_${ct==='com'?'sem':'com'}`];
+      if(fam){
+        // só a metálica sem corte térmico separa por abertura
+        const linha=fam[aber]||fam.fixo;
+        const par=linha&&linha[catProt];
+        if(par){
+          const caixArMm=D.caixaArGlobal||ve.caixAr||6;
+          const x=Math.max(0.06,Math.min(0.16,caixArMm/100));
+          uwdn=Math.round(interpolar(par[0],par[1],0.06,0.16,x)*100)/100;
+        }
+      }
+      // sem entrada na tabela (caso não previsto): cai na via do Manual, e
+      // assinala-se para não passar despercebido.
+      if(uwdn===null){
+        const dr=DELTA_R[prot]||0;
+        if(dr>0&&uw){
+          uwdn=Math.round(((uw+1/(1/uw+dr))/2)*100)/100;
+          uwdnViaManual=true;
+        }
+      }
     }
   }
 
-  return {uw, uwdn, prot};
+  return {uw, uwdn, prot, uwdnViaManual};
 }
 
 
@@ -5284,6 +5436,22 @@ function verificarLevantamento(){
   // ── identificação ──
   if(!D.nome) L('Identificação','Nome do projeto por preencher');
   if(!D.anoConstrucao) L('Identificação','Ano de construção em falta (afeta F_age e valores por defeito)');
+  // split vs multi-split: o que foi escolhido em campo tem de bater com as chapas
+  try{
+    agruparSistemasAC(D,['pavimento radiante','lareira/recuperador','radiadores elétricos'])
+      .forEach(g=>{
+        if(g.aviso) A('Climatização',g.tipos.join('+')+' ('+g.divs.join(', ')+'): '+g.aviso);
+        if(g.fonteDados==='nenhuma')
+          A('Climatização',g.tipos.join('+')+' ('+g.divs.join(', ')+'): sem chapa exterior nem etiqueta interior — sem potência nem COP');
+      });
+  }catch(e){}
+  // textos-tipo escolhidos que ficaram com «campos» por substituir vão para o CE
+  // com dados do exemplo — bloquear antes da exportação.
+  Object.keys(D).filter(k=>k==='aqsTextoBase'||k.indexOf('climaTextoBase_')===0).forEach(k=>{
+    const ph=[...new Set((String(D[k]).match(/«[^»]+»/g)||[]))];
+    if(ph.length) E(k==='aqsTextoBase'?'AQS':'Climatização',
+      'Texto-tipo com campos por substituir: '+ph.join(' '));
+  });
   if(!D.localidade&&!D.concelho) L('Identificação','Localidade/concelho em falta (zona climática e região A/B)');
   if(!D.tipologia) L('Identificação','Tipologia por definir');
   if(!D.edificioTipo) L('Identificação','Tipo de edifício (apartamento/moradia) por definir');
@@ -6047,11 +6215,18 @@ function agruparSistemasAC(D,tiposSemUE){
   const norm=v=>String(v||'').trim().toLowerCase().replace(/\s+/g,' ');
   const ocrUE=(D.unidadesExtFotos||[]).map(f=>(f&&f.dados)||{}).filter(d=>Object.keys(d).length);
   const etiq=(D.fotoEtiquetas||[]).filter(f=>f&&f.div&&f.div!=='AQS'&&f.dados&&Object.keys(f.dados).length);
+  // Não herdar dados de uma chapa de OUTRA marca: um Mitsubishi não pode ficar
+  // com o modelo e o COP da chapa do Daikin. O recurso à chapa única só vale
+  // quando ela não contradiz a marca registada na divisão.
   const dadosDaDiv=(div,marca)=>{
     const e=etiq.find(f=>norm(f.div)===norm(div));
-    if(e) return e.dados;
+    if(e) return Object.assign({},e.dados,{_deEtiqueta:true});
     if(marca){ const u=ocrUE.find(d=>norm(d.marca)===norm(marca)); if(u) return u; }
-    return ocrUE.length===1?ocrUE[0]:{};
+    if(ocrUE.length===1){
+      const u=ocrUE[0];
+      if(!marca||!u.marca||norm(u.marca)===norm(marca)) return u;
+    }
+    return {};
   };
   const unidades=[];
   Object.entries(D.climaDivisoes||{}).forEach(([div,cd])=>{
@@ -6062,7 +6237,8 @@ function agruparSistemasAC(D,tiposSemUE){
         const marcas=((mpt[tipo]&&mpt[tipo].length)?mpt[tipo]:(cd.marcas||[])).filter(Boolean);
         const marca=marcas[0]||'';
         const dd=dadosDaDiv(div,marca)||{};
-        unidades.push({div,tipo,marca:marca||dd.marca||'',modelo:dd.modelo||'',dados:dd});
+        unidades.push({div,tipo,marca:marca||dd.marca||'',modelo:dd.modelo||'',
+                       modeloDeEtiqueta:!!(dd._deEtiqueta&&dd.modelo),dados:dd});
       });
   });
   const assinatura=u=>{
@@ -6082,9 +6258,85 @@ function agruparSistemasAC(D,tiposSemUE){
   grupos.forEach(g=>{
     g.marca=g.unidades.map(u=>u.marca).find(Boolean)||'';
     g.modelo=g.unidades.map(u=>u.modelo).find(Boolean)||'';
+    // o modelo só é fiável para atribuir chapas se veio de uma etiqueta lida na
+    // divisão; se foi herdado de uma chapa qualquer, não serve para filtrar
+    g.modeloFiavel=g.unidades.some(u=>u.modeloDeEtiqueta);
     g.dados=g.unidades.map(u=>u.dados).find(d=>d&&Object.keys(d).length)||{};
+    g.nInteriores=g.divs.length;
+
+    // ── Split ou multi-split decide-se pelas CHAPAS EXTERIORES, no fim ────────
+    // Em campo nem sempre se sabe: a mesma instalação parece N splits vista de
+    // dentro e é um multi-split visto de fora. Quem decide são as fotos das
+    // unidades exteriores, não o que foi escolhido nos chips.
+    //   · 1 chapa exterior a servir N divisões  → multi-split (nUnidades = 1)
+    //   · N chapas exteriores para N divisões   → N splits   (nUnidades = N)
+    // Sem NENHUMA chapa exterior, só etiquetas interiores: caracteriza-se pelas
+    // unidades interiores, com os rendimentos delas — é o que há.
+    const chapasUE=(D.unidadesExtFotos||[])
+      .map(f=>(f&&f.dados)||{}).filter(d=>Object.keys(d).length);
+    // Se o grupo já tem modelo (veio da etiqueta interior), a chapa só é dele
+    // quando o modelo coincide — senão duplicavam-se sistemas ao separar depois
+    // por modelo.
+    let daMarca=g.marca?chapasUE.filter(d=>norm(d.marca)===norm(g.marca)):[];
+    if(g.modelo&&g.modeloFiavel&&daMarca.length){
+      const doModelo=daMarca.filter(d=>norm(d.modelo)===norm(g.modelo));
+      if(doModelo.length) daMarca=doModelo;
+    }
+    // com um só grupo, as chapas sem marca legível são todas dele
+    g.chapasUE=daMarca.length?daMarca:(grupos.length===1?chapasUE:[]);
+    g.temChapaUE=g.chapasUE.length>0;
+    g.tipoEscolhido=/multi-?split/i.test(g.tipos.join(' '));
+
+    if(g.temChapaUE){
+      g.fonteDados='exterior';
+      g.nUnidades=g.chapasUE.length;
+      // multi-split = há menos unidades exteriores do que divisões servidas.
+      // Duas exteriores para seis divisões continuam a ser multi-split (duas),
+      // não dois splits — a comparação é chapas < divisões, não chapas === 1.
+      g.multi=g.chapasUE.length<g.divs.length;
+      g.dados=g.chapasUE[0];
+    }else{
+      // sem chapa exterior — contam as interiores, com os rendimentos delas
+      g.fonteDados=Object.keys(g.dados||{}).length?'interior':'nenhuma';
+      g.multi=g.tipoEscolhido;
+      g.nUnidades=g.multi?1:g.divs.length;
+    }
+
+    // divergência entre o que foi escolhido em campo e o que as chapas mostram
+    g.aviso=null;
+    if(g.temChapaUE&&g.tipoEscolhido&&!g.multi)
+      g.aviso='marcado multi-split mas há '+g.chapasUE.length+' chapas exteriores para '+g.divs.length+
+              ' divisões — cada exterior serve uma interior, são '+g.chapasUE.length+' splits independentes';
+    if(g.temChapaUE&&!g.tipoEscolhido&&g.multi)
+      g.aviso='marcado split mas há só '+g.chapasUE.length+' chapa(s) exterior(es) para '+g.divs.length+
+              ' divisões — é multi-split';
+    if(!g.temChapaUE&&g.tipoEscolhido)
+      g.aviso='multi-split sem foto da unidade exterior — sem a chapa da exterior não há potência nem COP para o cálculo';
   });
-  return grupos;
+
+  // ── Modelos diferentes na mesma marca são sistemas diferentes ──────────────
+  // A sala leva quase sempre um aparelho mais potente que os quartos. Se as
+  // chapas exteriores mostram modelos distintos, não é um sistema com N
+  // unidades: são N sistemas, cada um com a sua potência e COP. Em campo isto
+  // não se sabe — o modelo só aparece na chapa —, por isso a separação faz-se
+  // aqui e assinala-se para confirmar que divisões pertencem a cada um.
+  const finais=[];
+  grupos.forEach(g=>{
+    const mods=[...new Set((g.chapasUE||[]).map(d=>norm(d.modelo)).filter(Boolean))];
+    if(!g.temChapaUE||g.multi||mods.length<2){finais.push(g);return;}
+    mods.forEach(mo=>{
+      const chapas=g.chapasUE.filter(d=>norm(d.modelo)===mo);
+      finais.push(Object.assign({},g,{
+        chave:g.chave+'|M:'+mo,
+        chapasUE:chapas,dados:chapas[0],
+        modelo:chapas[0].modelo||g.modelo,
+        nUnidades:chapas.length,nInteriores:chapas.length,multi:false,
+        aviso:'chapas exteriores com '+mods.length+' modelos diferentes — separado em '+
+              mods.length+' sistemas; confirmar que divisões servem cada um ('+g.divs.join(', ')+')'
+      }));
+    });
+  });
+  return finais;
 }
 
 // ORDEM DAS SECÇÕES DO TXT
@@ -6190,36 +6442,6 @@ function ventFachadasExpostas(){
   });
   return o.size;
 }
-/* Constrói a lista de condutas a partir do que foi respondido no levantamento.
-   A app pergunta o tipo (só exaustão / admissão e exaustão / não existem), a
-   abrangência (em todas / só em algumas) e quais as I.S. abrangidas. A folha do
-   ITeCons pede uma linha por conduta, com as sete colunas. */
-function condutasDoLevantamento(){
-  const tipo=String(D.ventCondutasIS||'').trim();
-  if(!tipo||tipo==='Não existem condutas') return [];
-  const escoamento=(tipo==='Admissão e exaustão')?'Admissão e exaustão':'Exaustão';
-  // quantas: as I.S. escolhidas, ou todas as que houver
-  let n;
-  // as I.S. indicadas mandam sempre — só se não houver nenhuma é que se contam
-  if((D.ventCondutasISWCs||[]).length)
-    n=D.ventCondutasISWCs.length;
-  else {
-    const sem=x=>String(x).normalize('NFD').replace(/[\u0300-\u036f]/g,'');
-    n=(D.divisoes||[]).filter(d=>/^(wc|i\.?s\.?|casa de banho|banho)/i.test(sem(d))).length||1;
-  }
-  return [{
-    escoamento,
-    ventax:'Não',
-    // conduta corrente e desimpedida: perda de carga baixa
-    perdaCarga:'Baixa',
-    cobertura:(D.coberturaInclinada==='Sim')?'Inclinada (10° a 30°)':'Terraço, inclinada (<10°)',
-    n,
-    altura:null,               // não é medida em obra; a folha estima
-    quais:(D.ventCondutasISWCs||[]).slice(),
-    detalhe:D.ventCondutasISDetalhe||'',
-  }];
-}
-
 function ventAlturas(){
   const pd=_n(D.peDireitoMedio)||
     (Object.values(D.peDireitos||{}).map(_n).filter(x=>x>0)[0])||2.60;
@@ -6227,23 +6449,9 @@ function ventAlturas(){
   const nFrac=parseInt(D.pisos)||1;
   // altura por piso: pé-direito + espessura da laje (0,30 m, valor corrente)
   const hPiso=pd+0.30;
-  /* H_FA é a altura do PAVIMENTO da fracção acima do solo, não a altura da
-     fracção em si. Estava a usar o nº de pisos DA FRACÇÃO — num apartamento é
-     sempre 1 — e dava a altura de um piso em vez da cota a que ele está.
-     Num 2.º andar (pisoLocal 3), o pavimento está a 2 pisos do solo. */
-  const pl=String(D.pisoLocal||'').trim();
-  let nAbaixo=null;
-  if(/^r\/?c$|^0$|^r[ée]s/i.test(pl)) nAbaixo=0;
-  else{
-    const n=parseInt(pl);
-    // pisoLocal é a ordem no prédio: 1=R/C, 2=1º, 3=2º… → pisos abaixo = n-1
-    if(isFinite(n)&&n>0) nAbaixo=n-1;
-  }
-  const hFA=(nAbaixo===null)?(nFrac*hPiso):(nAbaixo*hPiso);
   return {peDireito:+pd.toFixed(2),
     hEdificio:+(nEdif*hPiso).toFixed(1),
-    hFracao:+hFA.toFixed(1),
-    hFracaoBase:(nAbaixo!==null?nAbaixo:null),
+    hFracao:+(nFrac*hPiso).toFixed(1),
     pisosEdificio:nEdif,pisosFracao:nFrac};
 }
 function ventVolume(){
@@ -6263,7 +6471,11 @@ function ventResumoITeCons(){
     tipoEdificio:'Existente',
     concelho:D.concelhoCaderneta||D.concelho||'',
     altitude:(D.gpsCoords&&D.gpsCoords.alt!=null)?Math.round(D.gpsCoords.alt):null,
-    regiao:/inferior a 5\s*km/i.test(String(D.distanciaCosta||''))?'B':'A',
+    // BUG CORRIGIDO: lia D.distanciaCosta, campo que NUNCA é escrito em lado
+    // nenhum — o teste falhava sempre e a região saía 'A' (interior) mesmo em
+    // fracções à beira-mar. A região certa vem de determinarRegiaoCosta(), que
+    // já decide por localidade e, na falta dela, por concelho com frente de mar.
+    regiao:determinarRegiaoCosta(),
     areaUtil:+areaUtil.toFixed(2),
     peDireito:a.peDireito,
     volume:ventVolume(),
@@ -6275,11 +6487,7 @@ function ventResumoITeCons(){
     hObstaculo:_n(D.ventHObstaculo)||null,
     dObstaculo:_n(D.ventDObstaculo)||null,
     aberturasAdmissao:D.ventAberturas||'',
-    /* AS CONDUTAS SAEM DA PERGUNTA QUE JÁ EXISTE.
-       Estava a ler D.ventCondutas — campo que nunca existiu — em vez de
-       D.ventCondutasIS, que é onde a resposta fica gravada. Resultado: dizia
-       sempre "não existem condutas", mesmo tendo sido respondido o contrário. */
-    condutas:condutasDoLevantamento(),
+    condutas:(D.ventCondutas||[]),
   };
 }
 
@@ -6719,78 +6927,6 @@ function buildTxt(){
     t+='\nNota: os valores assinalados como estimados saem do nº de pisos e do pé-direito\n'+
        'medidos. Confirma-os na folha antes de calcular — a altura entra na velocidade\n'+
        'do vento e essa afeta o caudal de renovação.\n';
-
-    /* BLOCO PRONTO A COPIAR, NA ORDEM DA FOLHA
-       O bloco acima é para ler; este é para transcrever. Segue exactamente a
-       ordem em que os campos aparecem na folha do ITeCons, um por linha, sem
-       comentários pelo meio — assim percorre-se a folha de cima a baixo sem
-       ter de procurar cada valor. */
-    t+='\n'+'─'.repeat(50)+'\n';
-    t+='PARA COPIAR — folha "Ventilação", pela ordem dos campos\n';
-    t+='─'.repeat(50)+'\n';
-    const cp=(campo,valor)=>{ t+=campo.padEnd(38)+String(valor)+'\n'; };
-    cp('Tipo de edifício',(D.anoConstrucao&&+D.anoConstrucao<2013)?'Existente':'Novo');
-    cp('Concelho',D.concelho||'—');
-    cp('Altitude (m)',v.altitude!=null?String(v.altitude):'—');
-    cp('Região',v.regiao||'—');
-    cp('Rugosidade',(v.rugosidade||'I')+'  ← CONFIRMAR');
-    t+='\n';
-    cp('Nº de pisos da fracção',String(v.pisosFracao));
-    cp('Velocidade do vento, u10 (m/s)','Por defeito');
-    cp('Nº fachadas expostas',v.fachadasExpostas>=2?'>=2':String(v.fachadasExpostas));
-    cp('Altura do edifício, Hedf (m)',v.hEdificio.toFixed(2).replace('.',','));
-    cp('Altura da fracção, HFA (m)',v.hFracao.toFixed(2).replace('.',','));
-    cp('Edifícios/obstáculos?',v.obstaculos||'não indicado — deixar por marcar');
-    if(v.hObstaculo) cp('Altura do obstáculo, Hobs (m)',v.hObstaculo.toFixed(1).replace('.',','));
-    if(v.dObstaculo) cp('Distância ao obstáculo, Dobs (m)',v.dObstaculo.toFixed(1).replace('.',','));
-    t+='\n';
-    cp('Área útil (m²)',v.areaUtil.toFixed(2).replace('.',','));
-    cp('Pé-direito (m)',v.peDireito.toFixed(2).replace('.',','));
-    cp('Volume (m³)',v.volume.toFixed(2).replace('.',','));
-    t+='\n';
-    /* A resposta do LEVANTAMENTO é que manda: há uma pergunta com três opções
-       — só exaustão, admissão e exaustão, não existem. Olhar só à lista de
-       condutas detalhadas dizia "não existem" a quem tinha respondido que sim. */
-    const respCond=String(D.ventCondutasIS||'').trim();
-    const temCond=/exaust|admiss/i.test(respCond)||!!(v.condutas&&v.condutas.length);
-    cp('Existem condutas de vent. natural?',
-      !respCond ? 'por responder no levantamento'
-      : temCond ? 'SIM — marcar' : 'NÃO — deixar por marcar');
-    if(temCond&&!(v.condutas&&v.condutas.length)){
-      // respondeu que existem mas não detalhou cada uma: dá-se o essencial e
-      // assinala-se o que fica ao critério de quem preenche
-      const soExaustao=/^só exaust/i.test(respCond);
-      const wcs=(D.ventCondutasISWCs||[]);
-      t+='\n  Do levantamento: '+respCond+
-         (wcs.length?(' — em: '+wcs.join(', ')):'')+'\n';
-      if(D.ventCondutasISDetalhe) t+='  Detalhe: '+D.ventCondutasISDetalhe+'\n';
-      t+='  Conduta V_N 1\n';
-      t+='    Tipo de escoamento              '+(soExaustao?'Exaustão':'Admissão e exaustão')+'\n';
-      t+='    Exaustores tipo ventax?         Não  ← confirmar\n';
-      t+='    Perda de carga                  Baixa  ← confirmar (Alta se tiver cotovelos ou grelha suja)\n';
-      t+='    Tipo de cobertura               ← conforme a cobertura do edifício\n';
-      t+='    Número de condutas semelhantes  '+(wcs.length||1)+'\n';
-      t+='    Altura da conduta conhecida?    Não\n';
-      t+='       (não sabendo, a folha estima pela altura do edifício: '+
-         v.hEdificio.toFixed(2).replace('.',',')+' m)\n';
-    }
-    if(temCond){
-      v.condutas.forEach((c,i2)=>{
-        t+='\n  Conduta V_N '+(i2+1)+'\n';
-        /* O escoamento e o número saem do levantamento. O resto são valores
-           correntes que a app não tem forma de saber — vão assinalados, para
-           não passarem por medidos. */
-        t+='    Tipo de escoamento              '+(c.escoamento||'Exaustão')+'\n';
-        t+='    Exaustores tipo ventax?         '+(c.ventax||'Não')+'  ← confirmar\n';
-        t+='    Perda de carga                  '+(c.perdaCarga||'Baixa')+'  ← confirmar\n';
-        t+='    Tipo de cobertura               '+(c.cobertura||'Inclinada (10° a 30°)')+
-           '  ← conforme a cobertura do edifício\n';
-        t+='    Número de condutas semelhantes  '+(c.n||1)+'\n';
-        t+='    Altura da conduta conhecida?    '+(c.altura?'Sim':'Não')+'\n';
-        if(c.altura) t+='    Altura da conduta (m)           '+String(c.altura).replace('.',',')+'\n';
-      });
-    }
-    t+='\nO Rph e o n50 NÃO se introduzem: são resultado do cálculo da folha.\n';
   }
 
   // ── CLIMATIZAÇÃO ──
@@ -6815,6 +6951,22 @@ function buildTxt(){
       t+=`  ${div}: ${tipos}${marcasStr?' ('+marcasStr+')':''}\n`;
     });
 
+    // textos-tipo escolhidos manualmente na app (base BASE_2025), por divisão —
+    // têm prioridade sobre o texto gerado, porque foram escolhidos no local.
+    const vistos={};
+    climDivs.forEach(([div])=>{
+      const sis=(typeof grupoDaDivisao==='function')?grupoDaDivisao(div):null;
+      if(!sis||vistos[sis.chave]) return;
+      const txt=D['climaTextoBase_'+sis.chave];
+      if(!txt) return;
+      vistos[sis.chave]=1;
+      const g=sis.grupo;
+      const FT={exterior:'chapa exterior',interior:'etiqueta interior',nenhuma:'sem dados'};
+      t+='\nTexto para CE (climatização) — '+g.tipos.join(' + ')+
+         ' ['+(g.multi?('1 UE / '+g.nInteriores+' UI'):(g.nUnidades+' unidade(s) / '+g.nInteriores+' UI'))+
+         ' · dados: '+(FT[g.fonteDados]||'—')+
+         ' · '+g.divs.join(', ')+']'+(g.aviso?'  ⚠ '+g.aviso:'')+':\n'+txt+'\n';
+    });
     // ── Texto CE do sistema de climatização (pré-preenchido) ──
     const tiposUnicos=[...new Set(climDivs.flatMap(([,cd])=>(cd.tipos||[cd.tipo]).filter(Boolean)))];
     // Separar por divisão: sistemas COM unidade exterior/permuta ar-ar (split,
@@ -6989,6 +7141,9 @@ function buildTxt(){
     t+=ln('Área coletores',D.solArea?D.solArea+'m²':'');
     t+=ln('Marca solar',D.solMarca);
   }
+  if(D.aqsTextoBase){
+    t+='\nTexto para CE (AQS) — cenário '+(D.aqsTextoBaseId||'?')+' da base:\n'+D.aqsTextoBase+'\n';
+  }
   // texto completo do AQS não é impresso aqui — fica só como descrição do
   // Sistema 1 na tabela SISTEMAS TÉCNICOS — IDENTIFICAÇÃO, para não repetir
 
@@ -7051,7 +7206,7 @@ function buildTxt(){
       sistemas.push({
         fonteEnergia:fonteEnergiaAqs,tipoEquip:tipoEquipAqs,nUnidades:'1',
         marca:D.aqsMarca||'—',modelo:D.aqsModelo||'—',
-        descricao:textoAQS||'—',funcoes:funcoesAqs,
+        descricao:D.aqsTextoBase||textoAQS||'—',funcoes:funcoesAqs,
       });
     }
 
@@ -7101,10 +7256,12 @@ function buildTxt(){
         sistemas.push({
           fonteEnergia:'Eletricidade',
           tipoEquip:g.tipos.join(' + ')+' (ar-ar)',
-          nUnidades:String(g.divs.length),
+          nUnidades:String(g.nUnidades),
           marca:g.marca||'—',modelo:g.modelo||'—',
           descricao:(gruposAC.length===1&&_textosSistemasClima.ac)?_textosSistemasClima.ac
-            :`${g.tipos.join(' + ')}${g.marca?' '+g.marca:''}${g.modelo?' '+g.modelo:''}, instalado em ${g.divs.map(d=>d.toLowerCase()).join(', ')}.`,
+            :(g.multi
+              ?`${g.tipos.join(' + ')}${g.marca?' '+g.marca:''}${g.modelo?' '+g.modelo:''}, composto por 1 unidade exterior e ${g.nInteriores} unidade${g.nInteriores>1?'s':''} interior${g.nInteriores>1?'es':''}, instalada${g.nInteriores>1?'s':''} em ${g.divs.map(d=>d.toLowerCase()).join(', ')}.`
+              :`${g.tipos.join(' + ')}${g.marca?' '+g.marca:''}${g.modelo?' '+g.modelo:''}, composto por ${g.nUnidades} unidade${g.nUnidades>1?'s':''} exterior${g.nUnidades>1?'es':''} e ${g.nUnidades} unidade${g.nUnidades>1?'s':''} interior${g.nUnidades>1?'es':''}, instalada${g.nUnidades>1?'s':''} em ${g.divs.map(d=>d.toLowerCase()).join(', ')}.`),
           funcoes:[
             {funcao:'Aquecimento',potencia:dd.potencia_aquecimento_kw||'—',eficiencia:dd.cop||'—',
              fracaoServida:divsAquec.length?fracaoOuTraco(areaDivs(divsAquec)):'—',idade:idadeG},
@@ -7427,8 +7584,15 @@ function buildTxt(){
        a garagem, desvão sobre o último piso. Cada uma tem U e área próprios, e
        o desvão nem sequer é cobertura — é ENU. */
     {
+      // BUG CORRIGIDO: D.coberturaTipos e D.coberturaTipo nunca são escritos —
+      // a app só recolhe D.coberturaInclinada (Sim/Não). A secção COBERTURAS
+      // saía sempre vazia do TXT. Mantêm-se os dois campos como fonte
+      // preferencial (para quando passarem a ser recolhidos) e cai-se no que
+      // existe hoje.
       const cobs=(D.coberturaTipos&&D.coberturaTipos.length)?D.coberturaTipos
-        :(D.coberturaTipo?[D.coberturaTipo]:[]);
+        :(D.coberturaTipo?[D.coberturaTipo]
+        :(D.coberturaInclinada==='Sim'?['Cobertura inclinada']
+        :(D.coberturaInclinada==='Não'?['Cobertura horizontal']:[])));
       if(cobs.length){
         t+=sep('COBERTURAS');
         cobs.forEach((c,i2)=>{
@@ -7709,6 +7873,12 @@ function buildTxt(){
   const {grupos:grpsPaste}=agruparVEsPorCaracteristicas();
   if(grpsPaste.length){
     t+='\nTABELA 11 — Uwdn / Fator Solar (linha 728+)\n';
+    t+='  [Via: EDIFÍCIO EXISTENTE — vidro simples, valor directo do ITE50; vidro duplo,\n';
+    t+='   interpolação no ITE50 entre 6 e 16 mm. A fórmula ΔR do Manual SCE é a via de\n';
+    t+='   PROJECTO NOVO e não se aplica aqui. NÃO recalcular estes valores.]\n';
+    t+='  [Uw dos Quadros III.1 a III.3 do ITE50: vidro simples ou duplo incolor, UMA janela.\n';
+    t+='   Vidro de BAIXA EMISSIVIDADE e JANELA DUPLA (2 janelas em série) têm linha própria\n';
+    t+='   nesses quadros e não são cobertos pela app — corrigir Uw, Uwdn e g\u22a5vi à mão.]\n';
     t+=`${'B: Designação'.padEnd(15)}${'C: Uwdn'.padEnd(10)}${'D: g⊥,vi'.padEnd(10)}${'E: gtot'.padEnd(9)}${'F: Gtot,p'.padEnd(11)}${'G: Classe Caixilharia'.padEnd(23)}${'H: Tipo Vidro'}\n`;
     t+=`${'─'.repeat(95)}\n`;
     grpsPaste.forEach((grp,idx)=>{
@@ -8315,6 +8485,160 @@ function calcularFageAQS(tipo,anoAssumido){
   if(idade<=1) return {fage:1.00,frase:'idade inferior a 1 ano'};
   if(anoAssumido>1995) return {fage:0.95,frase:'instalado depois de 1995'};
   return {fage:0.80,frase:'instalado até 1995 (inclusive)'};
+}
+
+const TEXTOS_BASE=[{"id":"T01","g":"Esquentadores","f":"AQS","m":["esquentador"],"l":"Esquentador — sem dados, anterior a 1995","r":0.6,"t":"O sistema de preparação de águas quentes sanitárias é composto por um esquentador a gás, marca Junkers, com uma potência de 18,6kW, não foi possível obter os valores de eficiência. Considerou-se para efeitos de cálculo o valor por defeito previsto na Tabela 76 do Despacho n.º 6476-H/2021. Não sendo conhecido o ano de fabrico e considerando a ausência de contrato de manutenção, foi considerado fabricado antes de 1995. Não foi possível aferir se a rede de distribuição de águas quentes sanitárias possui isolamento térmico. Rendimento considerado para efeitos de cálculo foi de 0.60."},{"id":"T02","g":"Esquentadores","f":"AQS","m":["esquentador"],"l":"Esquentador — sem dados, posterior a 1996","r":0.71,"t":"O sistema de preparação de águas quentes sanitárias é composto por um esquentador a gás, marca Junkers, com uma potência de 18,6kW, não foi possível obter os valores de eficiência, O sistema satisfaz 100% das necessidades de produção de águas quentes sanitárias. Considerou-se para efeitos de cálculo o valor por defeito previsto na Tabela 76 do Despacho n.º 6476-H/2021. Não sendo conhecido o ano de fabrico e considerando a ausência de contrato de manutenção, foi considerado fabricado depois de 1995. Rendimento considerado de 0.71. Foi reduzido o rendimento do equipamento em 5% considerando o intervalo de tempo entre superior a 10 anos. Não foi possível aferir se a rede de distribuição de águas quentes sanitárias possui isolamento térmico"},{"id":"T03","g":"Esquentadores","f":"AQS","m":["esquentador"],"l":"Esquentador — com dados técnicos","r":0.86,"t":"Sistema de aquecimento de águas quentes composto por um esquentador com 11 litros de capacidade, marca Junkers modelo Power Control F, a gás propano, com eficiência de 86% e uma potência de 19,2 kW. O sistema satisfaz 100% das necessidades de produção de águas quentes sanitárias do imóvel. Não possui registo de manutenção. O equipamento encontra-se em funcionamento e em bom estado de conservação. Não foi possível aferir se a rede de distribuição de águas quentes sanitárias possui isolamento térmico. Não sendo conhecido o ano de fabrico e considerando a ausência de contrato de manutenção, foi reduzido o rendimento do equipamento em 10% considerando que o mesmo foi instalado depois de 1995."},{"id":"T04","g":"Caldeiras a gás","f":"AQS","m":["caldeira"],"l":"Caldeira sem manutenção e sem data de fabrico","r":0.89,"t":"O sistema de preparação de águas quentes sanitárias e aquecimento central é composto por uma caldeira a gás propano, marca Roca, modelo Vitoria 20/20 com uma potência de 24,0kW, rendimento determinado segundo o catálogo técnico do equipamento de 0,89. O sistema satisfaz 100% das necessidades de produção de águas quentes sanitárias do imóvel. Aquecimento central composto por radiadores distribuídos pelos principais compartimentos do imóvel, nomeadamente sala e quartos. Não foi possível aferir o isolamento das tubagens de águas quentes sanitárias. Equipamento sem contrato de manutenção. Não foi possível determinar a data da sua instalação, foi reduzido o rendimento do equipamento em 5% considerando o intervalo de tempo entre 1 a 10 anos.","no":["gasóleo"]},{"id":"T05","g":"Caldeiras a gás","f":"AQS","m":["caldeira"],"l":"Caldeira com manutenção e com data de fabrico","r":0.89,"t":"O sistema de preparação de águas quentes sanitárias e aquecimento central é composto por uma caldeira a gás propano, marca Roca, modelo Vitoria 20/20 com uma potência de 24,0kW, rendimento determinado segundo o catálogo técnico do equipamento de 0,89. O sistema satisfaz 100% das necessidades de produção de águas quentes sanitárias do imóvel. Aquecimento central composto por radiadores distribuídos pelos principais compartimentos do imóvel, nomeadamente sala e quartos. Não foi possível aferir o isolamento das tubagens de águas quentes sanitárias. Equipamento instalado no ano de «ano», com contrato de manutenção. Foi reduzido o rendimento do equipamento em 5% considerando o intervalo de tempo entre 1 e 10 anos.","no":["gasóleo"]},{"id":"T06","g":"Caldeiras a gasóleo","f":"CLIMA","m":["caldeira","gasóleo"],"l":"Caldeira a gasóleo","r":null,"t":"Sistema de aquecimento ambiente central é composto por uma caldeira a gasóleo, marca Baxi Modelo Geodis 24/30, com uma potência de 24kW e um rendimento segundo o catalogo técnico de 92,9%., sistema está interligado a radiadores distribuídos em todos os compartimentos da moradia."},{"id":"T07","g":"Caldeiras a gasóleo","f":"CLIMA","m":["caldeira","gasóleo"],"l":"Caldeira a gasóleo +aquecimento central","r":null,"t":"Sistema de aquecimento ambiente central é composto por uma caldeira a gasóleo, marca Baxi Modelo Argenta 24GT, com uma potência de 24kW e um rendimento segundo o catalogo técnico de 102%. interligado a radiadores, para aquecimento central distribuídos pelos principais compartimentos do imóvel, nomeadamente sala e quartos. Não foi possível aferir o isolamento das tubagens de águas quentes sanitárias. Equipamento sem manutenção. Não foi possível determinar a data da sua instalação, foi reduzido o rendimento do equipamento em 10% considerando o intervalo de tempo entre 10 a 20 anos."},{"id":"T08","g":"Termoacumuladores eléctricos","f":"AQS","m":["termoacumulador"],"l":"Termoacumulador — Sem Chapa","r":0.72,"t":"Sistema de aquecimento de águas quentes sanitárias composto por termoacumulador elétrico sem chapa de características visível, do qual não foi possível obter as características técnicas. Considerou-se para efeitos de cálculo o valor por defeito previsto na Tabela 76 do Despacho n.º 6476-H/2021 (90%). Não sendo conhecido o ano de fabrico e considerando a ausência de contrato de manutenção, foi reduzido o rendimento do equipamento considerando que o mesmo foi instalado na data de construção do imóvel. Não foi possível aferir se a rede de distribuição de águas quentes sanitárias possui isolamento térmico. Rendimento considerado de 0.72.","no":["gás","gas"]},{"id":"T09","g":"Termoacumuladores eléctricos","f":"AQS","m":["termoacumulador"],"l":"Termoacumulador — com Chapa","r":0.81,"t":"Sistema de aquecimento de águas quentes sanitárias composto por termoacumulador elétrico, marca Equation com 80 litros de capacidade, do qual não foi possível obter os valores de eficiência. Considerou-se para efeitos de cálculo o valor por defeito previsto na Tabela 76 do Despacho n.º 6476-H/2021. A potência foi estimada com base na chapa do equipamento (2 kW). Não sendo conhecido o ano de fabrico e considerando a ausência de contrato de manutenção, foi reduzido o rendimento do equipamento em 10% considerando que o mesmo foi instalado na data de construção do imóvel (entre 10 e 20 anos). Não foi possível aferir se a rede de distribuição de águas quentes sanitárias possui isolamento térmico. Rendimento considerado de 0.81.","no":["gás","gas"]},{"id":"T10","g":"Termoacumuladores eléctricos","f":"AQS","m":["termoacumulador"],"l":"Termoacumulador — com Chapa Novo com fatura","r":0.86,"t":"Sistema de aquecimento de águas quentes sanitárias composto por termoacumulador elétrico, marca Saunier Duval com 150 litros de capacidade, do qual não foi possível obter os valores de eficiência. Considerou-se para efeitos de cálculo o valor por defeito previsto na Tabela 76 do Despacho n.º 6476-H/2021. A potência foi estimada com base na chapa do equipamento (2 kW). Equipamento foi comprado a 11/2/2019 (conforme fatura de compra), rendimento do equipamento foi reduzido em 5% ficando no intervalo de tempo de 1 a 10 anos conforme a legislação em vigor. Não foi possível aferir se a rede de distribuição de águas quentes sanitárias possui isolamento térmico. Rendimento considerado de 0.86.","no":["gás","gas"]},{"id":"T11","g":"Termoacumuladores a gás","f":"AQS","m":["termoacumulador","gás"],"l":"Termoacumulador a gás — rendimento por defeito","r":null,"t":"O sistema de produção de águas quentes sanitárias convencional é composto por um termoacumulador a gás, marca Junkers modelo S160 KP, instalado numa arrecadação, com um rendimento considerado de 0,71, potência de 7,9kW e uma capacidade estimada para 155 litros. Rendimento calculado segundo o Despacho n.º 15793-E/2013, Não foi possível determinar a data da instalação do equipamento. Não foi possível aferir o isolamento térmico nas tubagens de água quente sanitária."},{"id":"T12","g":"Termoacumuladores a gás","f":"AQS","m":["termoacumulador","gás"],"l":"Termoacumulador a gás — rendimento da ficha técnica","r":null,"t":"O sistema de produção de águas quentes sanitárias convencional é composto por um termoacumulador a gás, marca Vaillant modelo tmoSTOR VGH 220, instalado numa arrecadação, com um rendimento considerado de 0,73, potência de 8,2kW e uma capacidade estimada para 220 litros. Rendimento calculado segundo o catalogo técnico, Não foi possível determinar a data da instalação do equipamento. Não foi possível aferir o isolamento térmico nas tubagens de água quente sanitária."},{"id":"T13","g":"Splits e climatização","f":"CLIMA","m":["split"],"l":"Com ficha técnica, ano desconhecido, 1 unidade","r":3.47,"t":"Sistema do tipo Split com permuta ar-ar para aquecimento e arrefecimento, marca Daikin e modelo 3MXS52DVMB constituído por 1 unidade exterior e 1 unidade interior instalada na sala. Este sistema, com base na ficha técnica fornecida pelo fabricante, possui uma potência de aquecimento e arrefecimento de 6,80 kW e 5,20 kW, respectivamente, COP de 4,04 e EER de 3,05. O equipamento encontra-se em funcionamento e em bom estado de conservação. Não sendo conhecido o ano de fabrico do equipamento e considerando a ausência de contrato de manutenção, este teve o seu rendimento reduzido em 10%, considerando o intervalo de tempo entre 10 e 20 anos.","alt":["multi-split","ar condicionado"]},{"id":"T14","g":"Splits e climatização","f":"CLIMA","m":["split"],"l":"Com ficha técnica, ano desconhecido, 2 unidades","r":3.47,"t":"Sistema do tipo Split com permuta ar-ar para aquecimento e arrefecimento, marca Daikin e modelo 3MXS52DVMB constituído por 2 unidades exteriores e 2 unidades interiores instalada nos quartos e sala. Este sistema, com base na ficha técnica fornecida pelo fabricante, possui uma potência de aquecimento e arrefecimento de 6,80 kW e 5,20 kW, respectivamente, COP de 4,04 e EER de 3,05. O equipamento encontra-se em funcionamento e em bom estado de conservação. Não sendo conhecido o ano de fabrico do equipamento e considerando a ausência de contrato de manutenção, este teve o seu rendimento reduzido em 10%, considerando o intervalo de tempo entre 10 e 20 anos.","alt":["multi-split","ar condicionado"]},{"id":"T15","g":"Splits e climatização","f":"CLIMA","m":["split"],"l":"Com ficha técnica, ano conhecido","r":3.47,"t":"Sistema do tipo Split com permuta ar-ar para aquecimento e arrefecimento, marca Daikin e modelo 3MXS52DVMB constituído por 1 unidade exterior e 1 unidade interior instalada na sala. Este sistema, com base na ficha técnica fornecida pelo fabricante, possui uma potência de aquecimento e arrefecimento de 6,80 kW e 5,20 kW, respectivamente, COP de 4,04 e EER de 3,05. O equipamento encontra-se em funcionamento e em bom estado de conservação. Sendo conhecido o ano de fabrico do equipamento no ano de _____ e considerando a ausência de contrato de manutenção, este teve o seu rendimento reduzido em 10%, considerando o intervalo de tempo entre 10 e 20 anos.","alt":["multi-split","ar condicionado"]},{"id":"T16","g":"Splits e climatização","f":"CLIMA","m":["split"],"l":"Sem dados técnicos","r":2.25,"t":"Sistema de aquecimento e arrefecimento ambiente do tipo split, composto por uma unidade exterior e uma unidade interior, instalado na sala. Não foi possível determinar as potências de aquecimento e arrefecimento. O rendimento do equipamento considerando que o mesmo foi instalado na data de construção do imóvel segundo a Tabela 76 do Despacho n.º 6476-H/2021 são: eficiência de aquecimento (COP) de 2,25 e arrefecimento (EER) de 2,25. Não foi possível determinar se existe manutenção do equipamento. Sistema em bom estado de conservação.","alt":["multi-split","ar condicionado"]},{"id":"T17","g":"Splits e climatização","f":"CLIMA","m":["split"],"l":"Previsto em projecto","r":null,"t":"Sistema de aquecimento e arrefecimento ambiente previsto em projecto do tipo split, composto por uma unidade unidade interior, instalados na sala, com base na ficha técnica fornecida pelo fabricante, possui uma potência de aquecimento e arrefecimento de 5,80 kW e 5,00 kW, respectivamente, COP de 5,1 e EER de 4,60.","alt":["multi-split","ar condicionado"]},{"id":"T18","g":"Splits e climatização","f":"CLIMA","m":["split"],"l":"Novo, previsto em projecto","r":null,"t":"Sistema de aquecimento e arrefecimento ambiente previsto em projeto do tipo split, composto por uma unidade interior, instalada na sala de estar. Com um rendimento mínimo segundo a por falta de dados técnicos da constituição das paredes utilizou-se soluções por defeito do Manual SCE, classe energética classe A de aquecimento (COP) com 3,70 e arrefecimento classe A (EER) de 3.21.","alt":["multi-split","ar condicionado"]},{"id":"T19","g":"Lareiras, recuperadores e salamandras","f":"CLIMA","m":["lareira"],"l":"Recuperador de calor","r":0.68,"t":"Sistema de aquecimento ambiente é composto por uma lareira com recuperador de calor que utiliza fonte de energia lenha (biomassa), instalado na sala. Rendimento do equipamento determinado segundo a valor por defeito previsto na Tabela 76 do Despacho n.º 6476-H/2021. Não sendo conhecido o ano de fabrico e considerando a ausência de contrato de manutenção, foi reduzido o rendimento do equipamento em 5% considerando que o mesmo foi instalado na data de construção do imóvel (entre 10 e 20 anos). Rendimento considerado de 0.68.","alt":["salamandra","recuperador"]},{"id":"T20","g":"Lareiras, recuperadores e salamandras","f":"CLIMA","m":["lareira"],"l":"Salamandra","r":0.68,"t":"Sistema de aquecimento ambiente é composto por uma salamandra que utiliza fonte de energia lenha (biomassa), instalado na sala. Não sendo conhecido o ano de fabrico, foi reduzido o rendimento do equipamento considerando que o mesmo foi instalado na data de construção do imóvel. Rendimento do equipamento determinado segundo a Tabela 76 do Despacho n.º 6476-H/2021, foi reduzido em 5% considerando que o mesmo foi instalado na data de construção do imóvel (entre 10 e 20 anos). Rendimento considerado de 0.68","alt":["salamandra","recuperador"]},{"id":"T21","g":"Lareiras, recuperadores e salamandras","f":"CLIMA","m":["lareira"],"l":"Recuperador novo","r":0.75,"t":"Sistema de aquecimento ambiente é composto por uma lareira com recuperador de calor que utiliza fonte de energia lenha (biomassa), instalado na sala. Com uma potência de 12kW e um rendimento mínimo de 0,75, determinado segundo a Tabela 76 do Despacho n.º 6476-H/2021.","alt":["salamandra","recuperador"]},{"id":"T22","g":"Lareiras, recuperadores e salamandras","f":"CLIMA","m":["lareira"],"l":"Lareira com pavimento radiante","r":null,"t":"Sistema de aquecimento ambiente é composto por uma lareira com recuperador de calor que utiliza fonte de energia lenha (biomassa), instalado na sala, interligado a deposito para aquecimento de pavimento radiante. Rendimento do equipamento determinado segundo a valor por defeito previsto na Tabela 76 do Despacho n.º 6476-H/2021. Não sendo conhecido o ano de fabrico e considerando a ausência de contrato de manutenção, foi reduzido o rendimento do equipamento em 5% considerando que o mesmo foi instalado na data de construção do imóvel (entre 10 e 20 anos).","alt":["salamandra","recuperador"]},{"id":"T23","g":"Solar térmico","f":"AQS","m":["solar"],"l":"Solar circulação forçada — moradia","r":null,"t":"A moradia possui um sistema solar térmico individual circulação forçada para aquecimento de águas quentes sanitárias, marca Wikora, com 2 coletores solares com uma área aproximada de 4,00m2, instalados na cobertura orientado para Sul, instalado há cerca de 10 anos, com depósito em separado marca Wikora modelo WBO 302, com capacidade para cerca de 300 litros. Não foi apresentado contrato de manutenção com técnicos ou firma credenciada pela DGGE, a contribuição considerada para efeitos de cálculo é de 2804kwh/ano. Valor determinado segundo o programa SCE.ER - Dados e cálculos padronizados para sistemas de aproveitamento de Energias Renováveis​"},{"id":"T24","g":"Solar térmico","f":"AQS","m":["solar"],"l":"Solar circulação forçada","r":null,"t":"A fracção possui um sistema solar térmico individual circulação forçada para aquecimento de águas quentes sanitárias, marca Wikora, com 2 coletores solares com uma área aproximada de 4,00m2, instalados na cobertura do edifício orientado para Sul, instalado há cerca de 10 anos, com depósito em separado marca Wikora modelo WBO 302, com capacidade para cerca de 300 litros. Não foi apresentado contrato de manutenção com técnicos ou firma credenciada pela DGGE, a contribuição considerada para efeitos de cálculo é de 2804kwh/ano. Valor determinado segundo o programa SCE.ER - Dados e cálculos padronizados para sistemas de aproveitamento de Energias Renováveis​"},{"id":"T25","g":"Solar térmico","f":"AQS","m":["solar"],"l":"Solar Termossifão","r":null,"t":"A moradia possui um sistema solar térmico individual termossifão para aquecimento de águas quentes sanitárias, marca Baxi, modelo STS 300 LP, com 2 coletores solares com uma área aproximada de 3,84m2, instalados na cobertura orientado para Sul, depósito com resistência elétrica com capacidade para cerca de 300 litros. Não foi apresentado contrato de manutenção com técnicos ou firma credenciada pela DGGE, a contribuição considerada para efeitos de cálculo é de 1863kwh/ano. Valor determinado segundo o programa SCE.ER - Dados e cálculos padronizados para sistemas de aproveitamento de Energias Renováveis​"},{"id":"T26","g":"Solar térmico","f":"AQS","m":["solar"],"l":"Solar mais Aquecimento central","r":null,"t":"A moradia possui um sistema solar térmico individual para aquecimento de águas quentes sanitárias e aquecimento central, marca Chromagen, modelo PR, com 3 coletores solares com uma área aproximada de 5,31m2, instalados na cobertura orientado para Sul, depósito em separado com capacidade para cerca de 300 litros. Sistema de apoio composto por uma bomba de calor. Sistema de aquecimento central composto por radiadores instalados em todos os compartimentos da moradia. Não foi apresentado contrato de manutenção com técnicos ou firma credenciada pela DGGE, a contribuição foi de 2021kwh/ano. Valor determinado segundo o programa SCE.ER - Dados e cálculos padronizados para sistemas de aproveitamento de Energias Renováveis​"},{"id":"T27","g":"Solar térmico","f":"AQS","m":["solar"],"l":"Solar circulação forçada Projeto","r":null,"t":"Sistema de AQS será composto por um conjunto de painéis solares de instalação obrigatória circulação forçada com as seguintes características, marca Baxi modelo Slim 250 (ou equivalente) painel certificado, permita fornecer uma energia total anual mínima de 3161kWh/ano, com três colectores com área de 7,20m2 depósito em separado com capacidade com volume de 400 litros, o painel deverá ser montado e instalado por técnicos credenciados com orientação para Sul. Sistema de apoio ao painel solar será composto pela resistência elétrica incorporada no painel solar. Valor determinado segundo o programa SCE.ER - Dados e cálculos padronizados para sistemas de aproveitamento de Energias Renováveis​"},{"id":"T28","g":"Solar térmico","f":"AQS","m":["solar"],"l":"Solar termodinâmico","r":null,"t":"A fração possui um sistema bomba de calor solar termodinâmico para aquecimento de águas quentes sanitárias, marca Energie, modelo Eco 300, com 1 coletor solar, instalados na cobertura orientado para Sul, depósito 300 litros em separado. Não foi apresentado contrato de manutenção com técnicos ou firma credenciada pela DGGE, a contribuição foi de 1734,78kwh/ano."},{"id":"T29","g":"Solar térmico","f":"AQS","m":["solar"],"l":"Solar coletivo predio","r":null,"t":"A fracção possui um sistema solar térmico coletivo circulação forçada para aquecimento de águas quentes sanitárias, com 15 coletores solares com uma área aproximada de 33,80m2, instalados na cobertura do edifício orientado para Sul, cada fracção tem um deposito com capacidade para 160 litros, apoio é feito por deposito acumulador com capacidade para 80 litros e uma resistencia com 2kW. Não foi apresentado contrato de manutenção com técnicos ou firma credenciada pela DGGE, a contribuição considerada para efeitos de cálculo é de 2038kwh/ano. Valor determinado segundo o programa SCE.ER - Dados e cálculos padronizados para sistemas de aproveitamento de Energias Renováveis​"},{"id":"T30","g":"Bombas de calor","f":"AMBOS","m":["bomba de calor"],"l":"Bomba de calor — Climatização","r":4.3,"t":"Sistema do tipo Bomba de Calor interligada a um depósito com depósito de 80 litros, a eletricidade, para aquecimento ambiente, marca Baxi modelo AWHP 16 TR 2 composto por 1 unidade com eficiência (COP) de 4,22 e uma potência de 14,65kW para aquecimento ambiente, com base na informação do catalogo técnico do equipamento. O sistema satisfaz 100% do aquecimento ambiente através de pavimento radiante. O sistema contribui com 2443 kWh/ano de energia renovável (Eren). O sistema tem tido manutenção. O equipamento encontra-se em funcionamento e em bom estado de conservação. O sistema foi reduzido o rendimento do equipamento em 5% considerando que o mesmo foi instalado entre a 1 a 10 anos."},{"id":"T31","g":"Bombas de calor","f":"AMBOS","m":["bomba de calor"],"l":"Bomba de calor — AQS","r":3.53,"t":"Sistema do tipo Bomba de Calor com depósito de 265 litros, a eletricidade, para preparação de águas quentes sanitárias, marca Vaillant modelo Arostor VWL BM 270/5, composto por 1 unidade com eficiência (COP) de 3,53 e uma potência de 1,2 kW para aquecimento, com base na informação do catalogo técnico do equipamento. O sistema satisfaz 100% das necessidades de águas quentes sanitárias. O sistema contribui com 2443 kWh/ano de energia renovável (Eren). Instalado em 2020. O equipamento encontra-se em funcionamento e em bom estado de conservação. Não foi possível aferir isolamento das tubagens de águas quentes sanitárias."},{"id":"T32","g":"Chiller","f":"CLIMA","m":["chiller"],"l":"CHILLER","r":null,"t":"Sistema de arrefecimento ambiente é composto por um chiller de bombas de calor Ar Água marca Aquasnap modelo 30RA021, com uma potencia de 21kW, com uma potência absorvida de 8,68kw que perfaz um rendimento de 2,49, o sistema está interligado a condutas embutidas do teto/parede nos principais compartimentos da moradia."},{"id":"T33","g":"Fotovoltaico","f":"OUTRO","m":["fotovolt"],"l":"Fotovoltaico","r":null,"t":"Sistema de produção de energia para autoconsumo marca AstoSemi Polycrystalline PV Module, modelo 280Wp, composto por 4 com uma área de 6,6m2, painéis com uma eficiência de 16,9%, com uma degradação anual inferior a 0,5%, sem baterias. Produção de energia para autoconsumo 708kWh/ano,"}];
+
+// ── BIBLIOTECA DE TEXTOS-TIPO (BASE_2025_Térmico, folha "Equi") ──────────────
+// Escolher pelo CENÁRIO (com/sem chapa, com/sem ficha técnica, com/sem
+// manutenção, ano de fabrico conhecido) — é isso que determina o rendimento.
+// Terminologia corrigida face à fonte: idade e falta de manutenção REDUZEM o
+// rendimento; a base dizia "majorado" onde a conta era 0,90 × 0,90 = 0,81.
+
+// Substitui os dados do exemplo pelos do levantamento. Só troca o que existir —
+// o que faltar fica como «placeholder» e é apanhado na verificação.
+function aplicarDadosTexto(txt,esc){
+  const fmt=v=>String(v).replace('.',',');
+  const dados = esc==='AQS'
+    ? {marca:(/solar/i.test(D.aqsTipo||'')?(D.solMarca||D.aqsMarca):(D.aqsMarca||(D.aqsMarcas||[])[0])),
+       modelo:D.aqsModelo,nCol:D.solN,areaCol:D.solArea,
+       pot:D.aqsPotencia?fmt(D.aqsPotencia):null,cap:D.aqsCapacidade,ano:D.aqsAnoFabrico}
+    : (()=>{const g=esc.grupo||{},o=g.dados||{};
+         return {marca:g.marca||o.marca,modelo:g.modelo||o.modelo,
+                 pot:o.potencia_aquecimento_kw?fmt(o.potencia_aquecimento_kw):null,
+                 cap:null,ano:o.ano_fabrico,
+                 tipo:(g.tipos||[]).join(' + ')||null,
+                 nUE:g.nUnidades,nUI:g.multi?g.nInteriores:g.nUnidades,
+                 divs:(g.divs||[]).map(d=>d.toLowerCase()).join(', ')};})();
+  let t=txt;
+  // marca: apanha "marca X" e "marca X e modelo Y" da frase original
+  if(dados.marca) t=t.replace(/marca\s+[A-ZÀ-Ú][\wÀ-ú.\- ]{1,24}?(?=[,.]| e modelo| com | modelo)/g,'marca '+dados.marca);
+  if(dados.modelo) t=t.replace(
+    /modelo\s+[\wÀ-ú.\/\-]+(?:\s+[\wÀ-ú.\/\-]+){0,3}?(?=[,.]|\s+(?:com|constituído|composto|interligad|instalad|de\s|com\s))/gi,
+    'modelo '+dados.modelo);
+  if(dados.pot) t=t.replace(/potência de [\d.,]+\s?kW/gi,'potência de '+dados.pot+' kW');
+  if(dados.cap) t=t.replace(/(com|para cerca de|de)\s+\d+\s+litros/gi,'$1 '+dados.cap+' litros');
+  if(dados.nCol) t=t.replace(/com \d+ coletores? solares?/gi,'com '+dados.nCol+' coletor'+(dados.nCol>1?'es':'')+' solar'+(dados.nCol>1?'es':''));
+  if(dados.areaCol) t=t.replace(/área aproximada de [\d.,]+\s?m2/gi,'área aproximada de '+String(dados.areaCol).replace('.',',')+'m2');
+  if(dados.ano) t=t.replace(/«ano»/g,dados.ano);
+  // Nº de unidades: a exterior é a que conta para cálculo; as interiores só
+  // aparecem no texto. Multi-split = 1 exterior para N interiores.
+  if(dados.tipo){
+    t=t.replace(/Sistema do tipo Split\b/g,'Sistema do tipo '+dados.tipo)
+       .replace(/ambiente do tipo split\b/gi,'ambiente do tipo '+dados.tipo.toLowerCase());
+  }
+  if(dados.nUE!=null){
+    const pl=(n,s1,sN)=>n+' '+(n>1?sN:s1);
+    t=t.replace(/constituído por \d+ unidades? exterior(?:es)? e \d+ unidades? interior(?:es)?/gi,
+      'constituído por '+pl(dados.nUE,'unidade exterior','unidades exteriores')+
+      ' e '+pl(dados.nUI,'unidade interior','unidades interiores'));
+    t=t.replace(/composto por (?:uma|\d+) unidade exterior e (?:uma|\d+) unidade interior/gi,
+      'composto por '+pl(dados.nUE,'unidade exterior','unidades exteriores')+
+      ' e '+pl(dados.nUI,'unidade interior','unidades interiores'));
+  }
+  if(dados.divs) t=t.replace(/instalad[ao]s? (?:na sala|nos quartos e sala)/gi,
+    'instalada'+(dados.nUI>1?'s':'')+' em '+dados.divs);
+  return t;
+}
+
+// Bloco de UI: lista de cenários filtrada pelo equipamento escolhido + área de
+// texto editável. O texto final vai para o TXT tal como ficar aqui.
+function blocoTextoBase(form,esc){
+  const dadosAtuais=()=>{
+    const aq=esc==='AQS'||(esc&&esc.escopo==='AQS');
+    if(aq) return {marca:(/solar/i.test(D.aqsTipo||'')?(D.solMarca||D.aqsMarca):D.aqsMarca)||'',modelo:D.aqsModelo||''};
+    const g=(esc&&esc.grupo)||{};
+    return {marca:g.marca||'',modelo:g.modelo||''};
+  };
+  const ehAQS=esc==='AQS'||esc&&esc.escopo==='AQS';
+  const tipo=(ehAQS?(D.aqsTipo||'')
+    :((esc.grupo&&esc.grupo.tipos||[]).join(' ')||'')).toLowerCase();
+  if(!tipo) return;
+  const cands=TEXTOS_BASE.filter(x=>{
+    if(ehAQS&&x.f==='CLIMA') return false;
+    if(!ehAQS&&x.f==='AQS') return false;
+    if((x.no||[]).some(k=>tipo.includes(k))) return false;
+    return x.m.every(k=>tipo.includes(k))||(x.alt||[]).some(k=>tipo.includes(k));
+  });
+  if(!cands.length) return;
+
+  const kSel=ehAQS?'aqsTextoBaseId':'climaTextoBaseId_'+esc.chave;
+  const kTxt=ehAQS?'aqsTextoBase':'climaTextoBase_'+esc.chave;
+
+  const grp=document.createElement('div');grp.className='aqs-group';
+  const lbl=document.createElement('div');lbl.className='aqs-lbl';
+  lbl.textContent='Texto para o CE — escolher o cenário';
+  grp.appendChild(lbl);
+
+  const row=document.createElement('div');row.className='ve-chips';
+  const ta=document.createElement('textarea');
+  ta.style.cssText='width:100%;min-height:120px;margin-top:8px;padding:8px;font-size:13px;'+
+    'line-height:1.45;border-radius:8px;border:1px solid var(--bd);background:var(--bg2);color:var(--tx)';
+  ta.placeholder='Escolhe um cenário acima, ou escreve o texto à mão.';
+  ta.value=D[kTxt]||'';
+
+  const aviso=document.createElement('div');
+  aviso.style.cssText='font-size:11px;color:var(--tx3);margin-top:4px';
+  // O cenário escolhido pode contradizer o que foi levantado — o texto vai
+  // assinado, por isso avisa-se aqui e não só na auditoria final.
+  // Marcas e modelos que existem nos textos da base. Se um deles sobrevive no
+  // texto final e não é o do equipamento levantado, foi copiado do exemplo.
+  const MARCAS_EXEMPLO=['Junkers','Roca','Equation','Saunier Duval','Vaillant','Baxi',
+    'Wikora','Chromagen','Energie','AstoSemi','Daikin','Arostor','Aquasnap','Geodis',
+    'Argenta','tmoSTOR','3MXS52DVMB','Vitoria 20/20','STS 300 LP','Power Control','AWHP 16','30RA021'];
+  function incoerencias(){
+    const v=ta.value,av=[];
+    const meus=[dadosAtuais().marca,dadosAtuais().modelo].filter(Boolean);
+    const sobra=MARCAS_EXEMPLO.filter(m=>v.indexOf(m)>=0&&!meus.some(a=>m.indexOf(a)>=0||a.indexOf(m)>=0));
+    if(sobra.length) av.push('ficaram dados do exemplo por substituir: '+sobra.join(', '));
+    const anoConhecido=ehAQS?!!D.aqsAnoFabrico
+      :!!((esc.grupo&&esc.grupo.dados)||{}).ano_fabrico;
+    if(anoConhecido&&/[Nn]ão sendo conhecido o ano de fabrico/.test(v))
+      av.push('ano de fabrico está registado mas o texto diz que é desconhecido');
+    if(!anoConhecido&&/[Cc]onhecido o ano de fabrico|comprado a \d/.test(v)&&!/Não sendo/.test(v))
+      av.push('texto assume ano de fabrico conhecido mas não há registo');
+    if(ehAQS&&D.aqsManutencao==='sim'&&/ausência de contrato de manutenção|sem manutenção/i.test(v))
+      av.push('há manutenção documentada mas o texto diz que não há');
+    if(ehAQS&&D.aqsManutencao!=='sim'&&/existe contrato de manutenção/i.test(v))
+      av.push('texto afirma contrato de manutenção que não foi registado');
+    return av;
+  }
+  function verificar(){
+    const ph=(ta.value.match(/«[^»]+»/g)||[]);
+    const inc=incoerencias();
+    const partes=[];
+    if(ph.length) partes.push('⚠ Por substituir: '+[...new Set(ph)].join(' '));
+    inc.forEach(x=>partes.push('⚠ Cenário incoerente — '+x));
+    aviso.textContent=partes.length?partes.join('\n')
+      :(ta.value?'✓ Sem campos por preencher — confirmar marca, modelo e potência.':'');
+    aviso.style.whiteSpace='pre-line';
+    aviso.style.color=(ph.length||inc.length)?'var(--red)':'var(--tx3)';
+  }
+
+  cands.forEach(x=>{
+    const c=document.createElement('div');
+    c.className='ve-chip'+(D[kSel]===x.id?' on':'');
+    c.textContent=x.l+(x.r!=null?'  ('+String(x.r).replace('.',',')+')':'');
+    c.onclick=()=>{
+      D[kSel]=x.id;
+      D[kTxt]=aplicarDadosTexto(x.t,esc);
+      ta.value=D[kTxt];
+      row.querySelectorAll('.ve-chip').forEach(y=>y.classList.remove('on'));
+      c.classList.add('on');
+      verificar();
+    };
+    row.appendChild(c);
+  });
+  ta.oninput=()=>{D[kTxt]=ta.value;verificar();};
+
+  grp.appendChild(row);grp.appendChild(ta);grp.appendChild(aviso);
+  const nota=document.createElement('div');
+  nota.style.cssText='font-size:11px;color:var(--tx3);margin-top:6px';
+  nota.textContent='Os valores são do exemplo da base — confirmar marca, modelo, potência, '+
+    'capacidade e local. O rendimento entre parênteses é o do cenário-tipo; recalcular pela Tabela 76.';
+  grp.appendChild(nota);
+  form.appendChild(grp);
+  verificar();
 }
 
 function gerarTextoAQS(){
