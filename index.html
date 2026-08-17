@@ -333,6 +333,7 @@ body.com-planta #visDivisoria.a-arrastar::after{color:#04140c}
       <button class="btn-next" style="flex:1;background:var(--bg3);color:var(--tx)" onclick="copiarItecons()">📋 Copiar tabelas ITeCons</button>
       <button class="btn-next" style="flex:1;background:var(--bg3);color:var(--tx)" onclick="descarregarItecons()">⤓ .tsv ITeCons</button>
     </div>
+    <button class="btn-next" style="background:var(--bg3);color:var(--tx)" onclick="exportarDV()">📄 Extrato para a Declaração de Visita</button>
     <button class="btn-next" style="background:var(--acl);color:var(--acd);border:1px solid var(--ac);font-weight:700" onclick="abrirVistoriaFinal('comp')">🔍 Vistoria final — rever e corrigir</button>
     <button class="btn-next" style="background:var(--bg3);color:var(--tx)" onclick="abrirAnexarDocumentos()">📑 Anexar documentos (caderneta, certidão…)</button>
     <div id="pacote-status" style="font-size:12px;color:var(--tx2);text-align:center;padding:4px;display:none"></div>
@@ -540,7 +541,7 @@ const DIVS_BASE=[
 // VERSÃO — fonte única (selo no ecrã inicial + cabeçalho do TXT exportado).
 // Subir aqui a cada alteração ao ficheiro.
 // ═══════════════════════════════════════
-const APP_VERSION='v2026.08.13-FIX193';
+const APP_VERSION='v2026.08.16-FIX198';
 
 // ═══════════════════════════════════════
 // ESTADO
@@ -555,6 +556,10 @@ const D={
   espParede:'',espVidros:'',caixaArGlobal:6,fotoEtiquetas:[],
   localidade:'',freguesia:'',concelho:'',zonaClimatica:'I1-V3',zonaClimaticaAuto:true,anoConstrucao:'',inerciaTermica:'Forte',nPisosEdificio:'',
   numeroMatriz:'',numeroFracao:'',moradaCaderneta:'',certidaoPermanenteNumero:'',concelhoCaderneta:'',anoInscricaoMatriz:'',numeroDescricaoPredial:'',
+  /* Extrato para a Declaração de Visita (projeto "DV extrato"): dados que a
+     caderneta não dá e que se perguntam uma vez, no fim. */
+  dvRequerente:'',dvTelemovel:'',dvData:'',dvHoraInicio:'',
+  dvCodDistrito:'',dvCodConcelho:'',dvCodFreguesia:'',dvAndar:'',dvCodPostal:'',
   fotosCampos:{},areasPlanta:[],areaUtilPlantaTotal:null,_hist:[],
   divisoesDados:{}
   // divisoesDados[div] = { comprimentos:{Norte:'3.15 m',...}, vaos:[{id:'VE1',larg:'',alt:'',tipo:'',prot:''}] }
@@ -810,6 +815,17 @@ function buildQs(){
     key:'fotosRevisao'});
 
   // OBSERVAÇÕES
+  /* DECLARAÇÃO DE VISITA — no FIM, tudo numa pergunta só.
+     A visita é sempre agendada para depois do levantamento, por isso as opções
+     são amanhã e depois de amanhã. O resto — morada, matriz, requerente — sai
+     da caderneta e não se volta a perguntar. */
+  qs.push({id:'dv',ctx:'Declaração de Visita',
+    text:'Quando é a visita, e a que horas?',
+    hint:'Serve para o extrato da DV. A hora de fim é sempre 30 min depois; '+
+         'o telemóvel pode ficar em branco e preencher-se mais tarde.',
+    isDVInline:true,
+    key:'dv'});
+
   qs.push({id:'obs',ctx:'Observações',
     text:'Observações gerais sobre o imóvel?',
     hint:'Tudo o que não se enquadre nos campos anteriores.',
@@ -3985,6 +4001,10 @@ function renderQ(){
     inlWrap.style.display='block';inlWrap.innerHTML='';
     document.getElementById('ans-box').style.display='none';
     renderFotosRevisaoInline(inlWrap);
+  } else if(q.isDVInline){
+    inlWrap.style.display='block';inlWrap.innerHTML='';
+    document.getElementById('ans-box').style.display='none';
+    renderDVInline(inlWrap);
   } else if(q.isObsInline){
     // observações — gravação áudio
     inlWrap.style.display='block';inlWrap.innerHTML='';
@@ -6442,6 +6462,31 @@ function ventFachadasExpostas(){
   });
   return o.size;
 }
+/* Constrói a lista de condutas a partir do que foi respondido no levantamento.
+   A app pergunta o tipo (só exaustão / admissão e exaustão / não existem), a
+   abrangência e quais as I.S. abrangidas. A folha do ITeCons pede uma linha por
+   conduta, com as sete colunas. */
+function condutasDoLevantamento(){
+  const tipo=String(D.ventCondutasIS||'').trim();
+  if(!tipo||tipo==='Não existem condutas') return [];
+  const escoamento=(tipo==='Admissão e exaustão')?'Admissão e exaustão':'Exaustão';
+  let n;
+  // as I.S. indicadas mandam sempre — só se não houver nenhuma é que se contam
+  if((D.ventCondutasISWCs||[]).length) n=D.ventCondutasISWCs.length;
+  else {
+    const sem=x=>String(x).normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+    n=(D.divisoes||[]).filter(d=>/^(wc|i\.?s\.?|casa de banho|banho)/i.test(sem(d))).length||1;
+  }
+  return [{
+    escoamento, ventax:'Não',
+    perdaCarga:'Baixa',            // conduta corrente e desimpedida
+    cobertura:(D.coberturaInclinada==='Sim')?'Inclinada (10° a 30°)':'Terraço, inclinada (<10°)',
+    n, altura:null,                // não se mede em obra; a folha estima
+    quais:(D.ventCondutasISWCs||[]).slice(),
+    detalhe:D.ventCondutasISDetalhe||'',
+  }];
+}
+
 function ventAlturas(){
   const pd=_n(D.peDireitoMedio)||
     (Object.values(D.peDireitos||{}).map(_n).filter(x=>x>0)[0])||2.60;
@@ -6449,9 +6494,23 @@ function ventAlturas(){
   const nFrac=parseInt(D.pisos)||1;
   // altura por piso: pé-direito + espessura da laje (0,30 m, valor corrente)
   const hPiso=pd+0.30;
+  /* H_FA é a altura do PAVIMENTO da fracção acima do solo, não a altura da
+     fracção em si. Estava a usar o nº de pisos DA FRACÇÃO — num apartamento é
+     sempre 1 — e dava a altura de um piso em vez da cota a que ele está.
+     Num 2.º andar (pisoLocal 3), o pavimento está a 2 pisos do solo. */
+  const pl=String(D.pisoLocal||'').trim();
+  let nAbaixo=null;
+  if(/^r\/?c$|^0$|^r[ée]s/i.test(pl)) nAbaixo=0;
+  else{
+    const nn=parseInt(pl);
+    // pisoLocal é a ordem no prédio: 1=R/C, 2=1º, 3=2º… → pisos abaixo = n-1
+    if(isFinite(nn)&&nn>0) nAbaixo=nn-1;
+  }
+  const hFA=(nAbaixo===null)?(nFrac*hPiso):(nAbaixo*hPiso);
   return {peDireito:+pd.toFixed(2),
     hEdificio:+(nEdif*hPiso).toFixed(1),
-    hFracao:+(nFrac*hPiso).toFixed(1),
+    hFracao:+hFA.toFixed(1),
+    hFracaoBase:(nAbaixo!==null?nAbaixo:null),
     pisosEdificio:nEdif,pisosFracao:nFrac};
 }
 function ventVolume(){
@@ -6487,7 +6546,11 @@ function ventResumoITeCons(){
     hObstaculo:_n(D.ventHObstaculo)||null,
     dObstaculo:_n(D.ventDObstaculo)||null,
     aberturasAdmissao:D.ventAberturas||'',
-    condutas:(D.ventCondutas||[]),
+    /* AS CONDUTAS SAEM DA PERGUNTA QUE JÁ EXISTE.
+       Lia D.ventCondutas — campo que nunca existiu — em vez de
+       D.ventCondutasIS, que é onde a resposta fica gravada. Resultado: dizia
+       sempre "não existem condutas", mesmo tendo sido respondido o contrário. */
+    condutas:condutasDoLevantamento(),
   };
 }
 
@@ -6624,6 +6687,442 @@ function textoParedePorDefeito(espCm,anoConstrucao){
       'um coeficiente de transmissão térmica U = '+uTxt+' W/(m².°C).'};
 }
 
+/* ══════════ CERTIFICADO MAIS PARECIDO ══════════
+   A listagem dos certificados já emitidos, com as características de cada um.
+   Serve para, ao começar um levantamento novo, apontar o processo anterior mais
+   próximo — poupa reabrir meia dúzia de ficheiros à procura de um parecido.
+   Substituída por inteiro quando chegar uma listagem actualizada. */
+const LISTAGEM_CE=[{"tipo":"Apartamento","n":"1","cidade":"Lagos","piso":"Último","espParede":"0.3","isolamento":"SIM","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Portada","paredesInt":"SIM","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"Terraço","aqs":"Termoacumulador","avac":"SIM","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"2","cidade":"Lagos","piso":"Intermédio","espParede":"0.3","isolamento":"NÃO","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"SIM","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"N.A.","aqs":"Esquentador A+","avac":"SIM","lareira":"SIM","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"3","cidade":"Lagos","piso":"Sobre garagem","espParede":"0.3","isolamento":"NÃO","vidros":"Duplos","caixilharia":"PVC","protecao":"Persiana","paredesInt":"SIM","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"N.A.","aqs":"Termoacumulador","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"4","cidade":"Lagos","piso":"Térreo","espParede":"0.3","isolamento":"NÃO","vidros":"Duplos","caixilharia":"Corte Térmico","protecao":"Persiana","paredesInt":"SIM","adjacente":"SIM","pavInt":"NÃO","marquise":"NÃO","cobertura":"N.A.","aqs":"Termoacumulador","avac":"SIM","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"5","cidade":"Lagos","piso":"Sobre garagem","espParede":"0.3","isolamento":"NÃO","vidros":"Duplos e Simples","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"SIM","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"N.A.","aqs":"Caldeira","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"6","cidade":"Lagos","piso":"Último","espParede":"0.27","isolamento":"NÃO","vidros":"Simples","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"SIM","adjacente":"SIM","pavInt":"NÃO","marquise":"SIM","cobertura":"Terraço","aqs":"Esquentador A+","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"7","cidade":"Lagos","piso":"Intermédio","espParede":"0.3","isolamento":"SIM","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"SIM","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"N.A.","aqs":"Painel Solar","avac":"NÃO","lareira":"NÃO","solar":"SIM","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"8","cidade":"Lagos","piso":"Intermédio","espParede":"0.3","isolamento":"NÃO","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Cortina opaca","paredesInt":"NÃO","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"N.A.","aqs":"Termoacumulador","avac":"SIM","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"9","cidade":"Portimão","piso":"Intermédio","espParede":"0.25","isolamento":"NÃO","vidros":"Simples","caixilharia":"Madeira","protecao":"Persiana","paredesInt":"NÃO","adjacente":"SIM","pavInt":"NÃO","marquise":"SIM","cobertura":"N.A.","aqs":"Esquentador","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"10","cidade":"Portimão","piso":"Último","espParede":"0.25","isolamento":"NÃO","vidros":"Duplos e Simples","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"SIM","adjacente":"NÃO","pavInt":"NÃO","marquise":"SIM","cobertura":"Desvão","aqs":"Esquentador A+","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"11","cidade":"Lagos","piso":"Térreo","espParede":"0.3","isolamento":"NÃO","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"SIM","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"N.A.","aqs":"Termoacumulador","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"12.1","cidade":"Silves","piso":"Último","espParede":"0.3","isolamento":"NÃO","vidros":"Simples","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"NÃO","adjacente":"SIM","pavInt":"SIM","marquise":"SIM","cobertura":"Desvão","aqs":"Termoacumulador","avac":"SIM","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"12","cidade":"Portimão","piso":"Térreo","espParede":"0.3","isolamento":"NÃO","vidros":"Duplos","caixilharia":"Alumínio","protecao":"None","paredesInt":"SIM","adjacente":"SIM","pavInt":"SIM","marquise":"SIM","cobertura":"Desvão","aqs":"Termoacumulador","avac":"SIM","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"13","cidade":"Albufeira","piso":"Sobre garagem","espParede":"0.28","isolamento":"NÃO","vidros":"Simples","caixilharia":"Alumínio","protecao":"Sem proteção exterior","paredesInt":"NÃO","adjacente":"NÃO","pavInt":"SIM","marquise":"NÃO","cobertura":"N.A.","aqs":"N.A.","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"14","cidade":"Portimão","piso":"Térreo","espParede":"0.3","isolamento":"NÃO","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Portada","paredesInt":"NÃO","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"N.A.","aqs":"Esquentador","avac":"SIM","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"15","cidade":"Lagoa","piso":"Último","espParede":"0.3","isolamento":"SIM","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Sem proteção exterior","paredesInt":"NÃO","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"Terraço","aqs":"Termoacumulador","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"16","cidade":"Lagos","piso":"Último","espParede":"0.3","isolamento":"SIM","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"SIM","adjacente":"NÃO","pavInt":"NÃO","marquise":"SIM","cobertura":"Desvão","aqs":"Painel Solar","avac":"SIM","lareira":"SIM","solar":"SIM","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"17","cidade":"Lagoa","piso":"Último","espParede":"0.25","isolamento":"NÃO","vidros":"Simples","caixilharia":"Madeira","protecao":"Sem proteção exterior","paredesInt":"SIM","adjacente":"SIM","pavInt":"NÃO","marquise":"NÃO","cobertura":"Desvão e Terraço","aqs":"Termoacumulador","avac":"SIM","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"18","cidade":"Lagoa","piso":"Último","espParede":"0.3","isolamento":"SIM","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Portada","paredesInt":"NÃO","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"Desvão","aqs":"Termoacumulador","avac":"SIM","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"19","cidade":"Lagoa","piso":"Térreo","espParede":"0.3","isolamento":"NÃO","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Portada","paredesInt":"NÃO","adjacente":"NÃO","pavInt":"NÃO","marquise":"SIM","cobertura":"Terraço","aqs":"Termoacumulador","avac":"SIM","lareira":"SIM","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"20","cidade":"Vila do Bispo","piso":"Último","espParede":"0.3","isolamento":"NÃO","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"SIM","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"Desvão","aqs":"Caldeira","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"21","cidade":"Lagos","piso":"Intermédio","espParede":"0.3","isolamento":"NÃO","vidros":"Simples","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"SIM","adjacente":"SIM","pavInt":"NÃO","marquise":"SIM","cobertura":"N.A.","aqs":"Esquentador","avac":"SIM","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"22","cidade":"Lagos","piso":"Sobre garagem","espParede":"0.3","isolamento":"SIM","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"NÃO","adjacente":"NÃO","pavInt":"SIM","marquise":"SIM","cobertura":"N.A.","aqs":"Termoacumulador","avac":"SIM","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"23","cidade":"Portimão","piso":"Último","espParede":"0.3","isolamento":"NÃO","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Portada","paredesInt":"NÃO","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"Desvão","aqs":"Termoacumulador","avac":"SIM","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"24","cidade":"Portimão","piso":"Intermédio","espParede":"0.3","isolamento":"NÃO","vidros":"Simples","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"SIM","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"N.A.","aqs":"Termoacumulador","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"25","cidade":"Albufeira","piso":"Sobre garagem","espParede":"0.28","isolamento":"NÃO","vidros":"Duplos e Simples","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"SIM","adjacente":"NÃO","pavInt":"SIM","marquise":"NÃO","cobertura":"N.A.","aqs":"Termoacumulador","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"26","cidade":"Albufeira","piso":"Último","espParede":"0.3","isolamento":"NÃO","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"SIM","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"Terraço","aqs":"Caldeira","avac":"SIM","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"27","cidade":"Silves","piso":"Sobre garagem","espParede":"0.3","isolamento":"NÃO","vidros":"Simples","caixilharia":"Madeira","protecao":"Persiana","paredesInt":"SIM","adjacente":"NÃO","pavInt":"SIM","marquise":"SIM","cobertura":"N.A.","aqs":"Esquentador","avac":"SIM","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"28","cidade":"Portimão","piso":"Sobre garagem","espParede":"0.3","isolamento":"NÃO","vidros":"Simples","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"SIM","adjacente":"NÃO","pavInt":"SIM","marquise":"NÃO","cobertura":"N.A.","aqs":"Esquentador","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"29","cidade":"Lagos","piso":"Intermédio","espParede":"0.3","isolamento":"SIM","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Portada","paredesInt":"SIM","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"N.A.","aqs":"Esquentador","avac":"NÃO","lareira":"SIM","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"30","cidade":"Portimão","piso":"Intermédio","espParede":"0.3","isolamento":"SIM","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"SIM","adjacente":"SIM","pavInt":"NÃO","marquise":"NÃO","cobertura":"N.A.","aqs":"Esquentador A+","avac":"SIM","lareira":"SIM","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"31","cidade":"Portimão","piso":"Intermédio","espParede":"0.25","isolamento":"NÃO","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"SIM","adjacente":"SIM","pavInt":"NÃO","marquise":"NÃO","cobertura":"N.A.","aqs":"Termoacumulador","avac":"SIM","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"32","cidade":"Portimão","piso":"Último","espParede":"0.27","isolamento":"NÃO","vidros":"Simples","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"NÃO","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"Terraço","aqs":"Termoacumulador","avac":"SIM","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"33","cidade":"Lagos","piso":"Intermédio","espParede":"0.25","isolamento":"NÃO","vidros":"Simples","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"SIM","adjacente":"SIM","pavInt":"NÃO","marquise":"SIM","cobertura":"N.A.","aqs":"Esquentador","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"34","cidade":"Lagos","piso":"Térreo","espParede":"0.3","isolamento":"NÃO","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Sem proteção exterior","paredesInt":"NÃO","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"Inclinado + Desvão","aqs":"Caldeira","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"35","cidade":"Lagos","piso":"Intermédio","espParede":"0.3","isolamento":"SIM","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"SIM","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"N.A.","aqs":"Termoacumulador","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"36","cidade":"Portimão","piso":"Intermédio","espParede":"0.3","isolamento":"NÃO","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"SIM","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"N.A.","aqs":"Esquentador","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"37","cidade":"Vila do Bispo","piso":"Último","espParede":"0.35","isolamento":"NÃO","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Blackout","paredesInt":"SIM","adjacente":"SIM","pavInt":"NÃO","marquise":"NÃO","cobertura":"Desvão","aqs":"Esquentador","avac":"SIM","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"38","cidade":"Lagos","piso":"Último","espParede":"0.35","isolamento":"SIM","vidros":"Duplos","caixilharia":"Corte Térmico","protecao":"Persiana","paredesInt":"SIM","adjacente":"SIM","pavInt":"NÃO","marquise":"NÃO","cobertura":"Terraço","aqs":"Painel Solar","avac":"SIM","lareira":"NÃO","solar":"SIM","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"39","cidade":"Lagos","piso":"Último","espParede":"0.3","isolamento":"NÃO","vidros":"Duplos e Simples","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"NÃO","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"Desvão","aqs":"Termoacumulador","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"39.01","cidade":"Portimão","piso":"Intermédio","espParede":"0.3","isolamento":"NÃO","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"SIM","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"N.A.","aqs":"Termoacumulador","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"39.02","cidade":"Lagos","piso":"Último","espParede":"0.3","isolamento":"NÃO","vidros":"Duplos","caixilharia":"PVC","protecao":"Sem proteção exterior","paredesInt":"SIM","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"Terraço","aqs":"Esquentador A+","avac":"SIM","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"39.03","cidade":"Lagos","piso":"Intermédio","espParede":"0.3","isolamento":"SIM","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"SIM","adjacente":"SIM","pavInt":"NÃO","marquise":"NÃO","cobertura":"N.A.","aqs":"Caldeira","avac":"SIM","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"39.04","cidade":"Lagos","piso":"Intermédio","espParede":"0.35","isolamento":"NÃO","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"NÃO","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"N.A.","aqs":"Termoacumulador","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"39.05","cidade":"Portimão","piso":"Sobre garagem","espParede":"0.27","isolamento":"NÃO","vidros":"Simples","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"SIM","adjacente":"NÃO","pavInt":"SIM","marquise":"SIM","cobertura":"N.A.","aqs":"Esquentador","avac":"SIM","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"39.06","cidade":"Lagos","piso":"Último","espParede":"0.3","isolamento":"NÃO","vidros":"Simples","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"SIM","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"Terraço + Desvão","aqs":"Caldeira","avac":"SIM","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"39.07","cidade":"Portimão","piso":"Térreo","espParede":"0.27","isolamento":"NÃO","vidros":"Simples","caixilharia":"Alumínio e Madeira","protecao":"Persiana","paredesInt":"SIM","adjacente":"SIM","pavInt":"NÃO","marquise":"NÃO","cobertura":"N.A.","aqs":"Esquentador A+","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"39.08","cidade":"Portimão","piso":"Intermédio","espParede":"0.3","isolamento":"SIM","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"SIM","adjacente":"SIM","pavInt":"NÃO","marquise":"SIM","cobertura":"N.A.","aqs":"Esquentador A+","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"39.09","cidade":"Silves","piso":"Último","espParede":"0.27","isolamento":"NÃO","vidros":"Simples","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"SIM","adjacente":"SIM","pavInt":"NÃO","marquise":"SIM","cobertura":"Desvão","aqs":"Esquentador","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"39.10","cidade":"Lagos","piso":"Último","espParede":"0.3","isolamento":"SIM","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"SIM","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"Terraço","aqs":"Caldeira","avac":"SIM","lareira":"SIM","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"39.11","cidade":"Lagos","piso":"Intermédio","espParede":"0.3","isolamento":"NÃO","vidros":"Simples","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"NÃO","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"N.A.","aqs":"Termoacumulador","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"39.12","cidade":"Portimão","piso":"Térreo","espParede":"0.3","isolamento":"NÃO","vidros":"Simples","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"SIM","adjacente":"NÃO","pavInt":"NÃO","marquise":"SIM","cobertura":"N.A.","aqs":"Esquentador","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"39.13","cidade":"Portimão","piso":"Último","espParede":"0.3","isolamento":"NÃO","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Portada","paredesInt":"NÃO","adjacente":"SIM","pavInt":"NÃO","marquise":"NÃO","cobertura":"Desvão","aqs":"Esquentador","avac":"SIM","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"39.14","cidade":"Lagos","piso":"Intermédio","espParede":"0.25","isolamento":"NÃO","vidros":"Simples","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"NÃO","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"N.A.","aqs":"Termoacumulador","avac":"SIM","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"39.15","cidade":"Portimão","piso":"Último","espParede":"0.25","isolamento":"NÃO","vidros":"Simples","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"NÃO","adjacente":"SIM","pavInt":"SIM","marquise":"NÃO","cobertura":"Terraço + Desvão","aqs":"Esquentador A+","avac":"SIM","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"39.16","cidade":"Lagos","piso":"Térreo","espParede":"0.3","isolamento":"NÃO","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"NÃO","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"Terraço","aqs":"Esquentador A+","avac":"SIM","lareira":"SIM","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"39.17","cidade":"Portimão","piso":"Sobre garagem","espParede":"0.3","isolamento":"NÃO","vidros":"Simples","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"SIM","adjacente":"SIM","pavInt":"SIM","marquise":"NÃO","cobertura":"Terraço","aqs":"Termoacumulador","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"39.18","cidade":"Portimão","piso":"Intermédio","espParede":"0.3","isolamento":"NÃO","vidros":"Simples","caixilharia":"Madeira","protecao":"Persiana","paredesInt":"SIM","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"N.A.","aqs":"Termoacumulador","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"39.19","cidade":"Lagos","piso":"Último","espParede":"0.3","isolamento":"NÃO","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"SIM","adjacente":"NÃO","pavInt":"NÃO","marquise":"SIM","cobertura":"Desvão","aqs":"Esquentador","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"39.20","cidade":"Silves","piso":"Intermédio","espParede":"0.3","isolamento":"NÃO","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"SIM","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"N.A.","aqs":"Esquentador","avac":"SIM","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"39.21","cidade":"Loulé","piso":"Sobre exterior","espParede":"0.3","isolamento":"NÃO","vidros":"Simples","caixilharia":"Alumínio","protecao":"Portada","paredesInt":"SIM","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"N.A.","aqs":"Termoacumulador","avac":"NÃO","lareira":"SIM","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"39.22","cidade":"Portimão","piso":"Último","espParede":"0.35","isolamento":"NÃO","vidros":"Simples","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"SIM","adjacente":"SIM","pavInt":"NÃO","marquise":"NÃO","cobertura":"Desvão","aqs":"Esquentador","avac":"SIM","lareira":"SIM","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"39.23","cidade":"Lagos","piso":"Intermédio","espParede":"0.3","isolamento":"NÃO","vidros":"Simples","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"SIM","adjacente":"SIM","pavInt":"NÃO","marquise":"NÃO","cobertura":"N.A.","aqs":"Termoacumulador","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"39.24","cidade":"Portimão","piso":"Último","espParede":"0.3","isolamento":"NÃO","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"SIM","adjacente":"SIM","pavInt":"SIM","marquise":"NÃO","cobertura":"Desvão","aqs":"Termoacumulador","avac":"SIM","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"39.25","cidade":"Lagos","piso":"Intermédio","espParede":"0.25","isolamento":"NÃO","vidros":"Simples","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"SIM","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"N.A.","aqs":"Esquentador A+","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"39.26","cidade":"Lagos","piso":"Intermédio","espParede":"0.3","isolamento":"SIM","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"SIM","adjacente":"SIM","pavInt":"NÃO","marquise":"NÃO","cobertura":"N.A.","aqs":"Esquentador A+","avac":"SIM","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"39.27","cidade":"Silves","piso":"Sobre garagem","espParede":"0.3","isolamento":"SIM","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"SIM","adjacente":"SIM","pavInt":"SIM","marquise":"NÃO","cobertura":"N.A.","aqs":"Esquentador","avac":"SIM","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"39.28","cidade":"Lagos","piso":"Sobre garagem","espParede":"0.27","isolamento":"NÃO","vidros":"Simples","caixilharia":"Alumínio","protecao":"Portada","paredesInt":"NÃO","adjacente":"NÃO","pavInt":"SIM","marquise":"NÃO","cobertura":"N.A.","aqs":"Termoacumulador","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"39.29","cidade":"Portimão","piso":"Sobre garagem","espParede":"0.3","isolamento":"NÃO","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"SIM","adjacente":"NÃO","pavInt":"SIM","marquise":"SIM","cobertura":"N.A.","aqs":"Esquentador","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"39.30","cidade":"Lagos","piso":"Último","espParede":"0.3","isolamento":"NÃO","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Portada","paredesInt":"SIM","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"Desvão","aqs":"Esquentador A+","avac":"SIM","lareira":"SIM","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"39.31","cidade":"Lagos","piso":"Último","espParede":"0.3","isolamento":"SIM","vidros":"Duplos","caixilharia":"Madeira","protecao":"Sem proteção exterior","paredesInt":"NÃO","adjacente":"SIM","pavInt":"SIM","marquise":"NÃO","cobertura":"Inclinada + Desvão","aqs":"Termoacumulador","avac":"SIM","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"39.32","cidade":"Lagos","piso":"Sobre garagem","espParede":"0.3","isolamento":"SIM","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"SIM","adjacente":"NÃO","pavInt":"SIM","marquise":"NÃO","cobertura":"N.A.","aqs":"Termoacumulador","avac":"SIM","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"39.33","cidade":"Lagos","piso":"Último","espParede":"0.3","isolamento":"NÃO","vidros":"Duplos e Simples","caixilharia":"Madeira","protecao":"Persiana","paredesInt":"SIM","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"Terraço","aqs":"Termoacumulador","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"39.34","cidade":"Lagos","piso":"Sobre garagem","espParede":"0.3","isolamento":"SIM","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"SIM","adjacente":"NÃO","pavInt":"SIM","marquise":"NÃO","cobertura":"N.A.","aqs":"Termoacumulador","avac":"SIM","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"39.35","cidade":"Lagos","piso":"Moradia","espParede":"0.3","isolamento":"SIM","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"NÃO","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"Desvão","aqs":"Caldeira","avac":"SIM","lareira":"SIM","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"39.36","cidade":"Silves","piso":"Último","espParede":"0.35","isolamento":"NÃO","vidros":"Simples","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"SIM","adjacente":"NÃO","pavInt":"NÃO","marquise":"SIM","cobertura":"Desvão","aqs":"Esquentador","avac":"SIM","lareira":"SIM","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"39.37","cidade":"Lagos","piso":"Moradia","espParede":"0.35","isolamento":"NÃO","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"NÃO","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"Inclinado + Desvão","aqs":"Termoacumulador","avac":"SIM","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"39.38","cidade":"Lagos","piso":"Moradia","espParede":"0.3","isolamento":"NÃO","vidros":"Simples","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"NÃO","adjacente":"SIM","pavInt":"NÃO","marquise":"NÃO","cobertura":"Terraço + Desvão","aqs":"Esquentador A+","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"39.39","cidade":"Portimão","piso":"Moradia","espParede":"0.3","isolamento":"NÃO","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Portada","paredesInt":"NÃO","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"Desvão","aqs":"Esquentador A+","avac":"SIM","lareira":"SIM","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"39.40","cidade":"Lagoa","piso":"Moradia","espParede":"0.3","isolamento":"NÃO","vidros":"Duplos e Simples","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"NÃO","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"Inclinado","aqs":"Termoacumulador","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"39.41","cidade":"Portimão","piso":"Intermédio","espParede":"0.3","isolamento":"NÃO","vidros":"Simples","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"SIM","adjacente":"NÃO","pavInt":"NÃO","marquise":"SIM","cobertura":"N.A.","aqs":"Termoacumulador","avac":"SIM","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"39.42","cidade":"Lagos","piso":"Sobre garagem","espParede":"0.3","isolamento":"NÃO","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"SIM","adjacente":"SIM","pavInt":"SIM","marquise":"NÃO","cobertura":"N.A.","aqs":"Termoacumulador","avac":"SIM","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"39.43","cidade":"Lagos","piso":"Último","espParede":"0.3","isolamento":"NÃO","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"SIM","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"Terraço","aqs":"Esquentador A+","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"39.44","cidade":"Lagoa","piso":"Moradia","espParede":"0.3","isolamento":"NÃO","vidros":"Duplos","caixilharia":"Aluminio","protecao":"Persiana","paredesInt":"Não","adjacente":"NÃO","pavInt":"None","marquise":"NÃO","cobertura":"Terraço+Desvão","aqs":"Termoacumulador","avac":"SIM","lareira":"SIM","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"39.45","cidade":"Lagoa","piso":"Último","espParede":"0.3","isolamento":"NÃO","vidros":"Duplos","caixilharia":"Aluminio","protecao":"Persiana","paredesInt":"Não","adjacente":"SIM","pavInt":"SIM","marquise":"NÃO","cobertura":"Terraço+Desvão","aqs":"Termoacumulador","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Apartamento","n":"39.46","cidade":"Lagoa","piso":"Último","espParede":"0.3","isolamento":"NÃO","vidros":"Simples","caixilharia":"Aluminio","protecao":"Portada","paredesInt":"SIM","adjacente":"NÃO","pavInt":"SIM","marquise":"NÃO","cobertura":"Terraço","aqs":"Termoacumulador","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Moradias","n":"40","cidade":"Aljezur","piso":"Térreo","espParede":"0.6","isolamento":"NÃO","vidros":"Duplos","caixilharia":"Alumínio","protecao":"None","paredesInt":"Arrumos","adjacente":"SIM","pavInt":"NÃO","marquise":"NÃO","cobertura":"Inclinada","aqs":"Termoacumulador","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Moradias","n":"41","cidade":"Lagos","piso":"2 Pisos","espParede":"0.3","isolamento":"SIM","vidros":"Duplos","caixilharia":"Alumínio","protecao":"None","paredesInt":"Garagem","adjacente":"SIM","pavInt":"Sim (garagem)","marquise":"NÃO","cobertura":"Desvão","aqs":"Caldeira","avac":"SIM","lareira":"SIM","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Moradias","n":"42","cidade":"Vila do Bispo","piso":"Térreo","espParede":"0.3","isolamento":"NÃO","vidros":"Duplos","caixilharia":"Alumínio","protecao":"None","paredesInt":"N.A.","adjacente":"SIM","pavInt":"NÃO","marquise":"NÃO","cobertura":"Inclinada + Desvão","aqs":"Painel Solar","avac":"SIM","lareira":"SIM","solar":"SIM","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Moradias","n":"43","cidade":"Silves","piso":"1º (PH)","espParede":"0.55","isolamento":"NÃO","vidros":"Simples","caixilharia":"Alumínio","protecao":"None","paredesInt":"Loja","adjacente":"NÃO","pavInt":"Sim (loja)","marquise":"NÃO","cobertura":"Terraço","aqs":"Painel Solar","avac":"SIM","lareira":"NÃO","solar":"SIM","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Moradias","n":"44","cidade":"Lagoa","piso":"1º (PH)","espParede":"0.55","isolamento":"NÃO","vidros":"Simples","caixilharia":"Alumínio","protecao":"None","paredesInt":"Loja","adjacente":"NÃO","pavInt":"Sim (loja)","marquise":"NÃO","cobertura":"Desvão","aqs":"Esquentador","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Moradias","n":"45","cidade":"Lagoa","piso":"Térreo","espParede":"0.3","isolamento":"NÃO","vidros":"Simples","caixilharia":"Alumínio e Madeira","protecao":"None","paredesInt":"N.A.","adjacente":"SIM","pavInt":"NÃO","marquise":"NÃO","cobertura":"Terraço","aqs":"Esquentador","avac":"SIM","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Moradias","n":"46","cidade":"Monchique","piso":"2 Pisos","espParede":"0.25","isolamento":"NÃO","vidros":"Duplos e Simples","caixilharia":"Alumínio e Madeira","protecao":"None","paredesInt":"N.A.","adjacente":"NÃO","pavInt":"Sim (garagem)","marquise":"NÃO","cobertura":"Desvão","aqs":"Esquentador","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Moradias","n":"47","cidade":"Lagos","piso":"Térreo","espParede":"0.55","isolamento":"NÃO","vidros":"Simples","caixilharia":"Alumínio","protecao":"None","paredesInt":"N.A.","adjacente":"SIM","pavInt":"NÃO","marquise":"NÃO","cobertura":"Desvão","aqs":"Esquentador","avac":"NÃO","lareira":"SIM","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Moradias","n":"48","cidade":"Lagos","piso":"Térreo (PH)","espParede":"0.7","isolamento":"NÃO","vidros":"Simples","caixilharia":"Madeira","protecao":"None","paredesInt":"N.A.","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"N.A.","aqs":"Termoacumulador","avac":"SIM","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Moradias","n":"49","cidade":"Vila do Bispo","piso":"Térreo","espParede":"0.25","isolamento":"NÃO","vidros":"Duplos e Simples","caixilharia":"Alumínio","protecao":"None","paredesInt":"N.A.","adjacente":"SIM","pavInt":"NÃO","marquise":"NÃO","cobertura":"Desvão","aqs":"Esquentador","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Moradias","n":"50","cidade":"Aljezur","piso":"Térreo","espParede":"0.4","isolamento":"NÃO","vidros":"Duplos","caixilharia":"Madeira","protecao":"None","paredesInt":"N.A.","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"Inclinada","aqs":"Caldeira","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Moradias","n":"51","cidade":"Lagos","piso":"2 Pisos","espParede":"0.3","isolamento":"NÃO","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Portada","paredesInt":"N.A.","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"Inclinada + Terraço","aqs":"Painel Solar","avac":"SIM","lareira":"SIM","solar":"SIM","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Moradias","n":"52","cidade":"Lagos","piso":"2 Pisos","espParede":"0.3","isolamento":"SIM","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"N.A.","adjacente":"SIM","pavInt":"NÃO","marquise":"NÃO","cobertura":"Desvão","aqs":"Esquentador","avac":"SIM","lareira":"SIM","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Moradias","n":"53","cidade":"Lagoa","piso":"2 Pisos","espParede":"0.3","isolamento":"NÃO","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Portada","paredesInt":"Garagem","adjacente":"NÃO","pavInt":"Sim (garagem)","marquise":"NÃO","cobertura":"Desvão","aqs":"Painel Solar","avac":"SIM","lareira":"SIM","solar":"SIM","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Moradias","n":"54","cidade":"Vila do Bispo","piso":"2 Pisos","espParede":"0.35","isolamento":"SIM","vidros":"Duplos","caixilharia":"Corte Térmico","protecao":"Persiana","paredesInt":"Garagem","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"Inclinada + Desvão","aqs":"Painel Solar","avac":"SIM","lareira":"SIM","solar":"SIM","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Moradias","n":"55","cidade":"Lagos","piso":"2 Pisos","espParede":"0.3","isolamento":"NÃO","vidros":"Duplos","caixilharia":"Alumínio e PVC","protecao":"N.A.","paredesInt":"Garagem","adjacente":"SIM","pavInt":"NÃO","marquise":"NÃO","cobertura":"Terraço + Desvão","aqs":"Esquentador","avac":"SIM","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Moradias","n":"56","cidade":"Vila do Bispo","piso":"2 Pisos","espParede":"0.3","isolamento":"NÃO","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Portada","paredesInt":"N.A.","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"Desvão","aqs":"Esquentador","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Moradias","n":"57","cidade":"Albufeira","piso":"2 Pisos","espParede":"0.5","isolamento":"NÃO","vidros":"Simples","caixilharia":"Madeira","protecao":"Portada","paredesInt":"N.A.","adjacente":"SIM","pavInt":"NÃO","marquise":"NÃO","cobertura":"Inclinada + Terraço","aqs":"Termoacumulador","avac":"SIM","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Moradias","n":"58","cidade":"Lagos","piso":"2 Pisos","espParede":"0.6","isolamento":"NÃO","vidros":"Duplos","caixilharia":"Madeira","protecao":"N.A.","paredesInt":"N.A.","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"Inclinada","aqs":"Termoacumulador","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Moradias","n":"59","cidade":"Lagos","piso":"2 Pisos","espParede":"0.3","isolamento":"NÃO","vidros":"Duplos","caixilharia":"PVC","protecao":"Persiana","paredesInt":"N.A.","adjacente":"SIM","pavInt":"NÃO","marquise":"NÃO","cobertura":"Inclinada + Terraço","aqs":"Painel Solar","avac":"SIM","lareira":"NÃO","solar":"SIM","fotovoltaico":"SIM","bombaCalor":"NÃO"},{"tipo":"Moradias","n":"60","cidade":"Vila do Bispo","piso":"2 Pisos","espParede":"0.3","isolamento":"SIM","vidros":"Duplos","caixilharia":"Corte Térmico","protecao":"Persiana","paredesInt":"N.A.","adjacente":"SIM","pavInt":"NÃO","marquise":"NÃO","cobertura":"Terraço + Desvão","aqs":"Termoacumulador","avac":"SIM","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Moradias","n":"61","cidade":"Lagos","piso":"2 Pisos","espParede":"0.3","isolamento":"SIM","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"Garagem","adjacente":"NÃO","pavInt":"Sim (garagem)","marquise":"NÃO","cobertura":"Terraço","aqs":"Esquentador","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Moradias","n":"62","cidade":"Portimão","piso":"2 Pisos","espParede":"0.3","isolamento":"SIM","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"N.A.","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"Terraço","aqs":"Termoacumulador","avac":"SIM","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Moradias","n":"63","cidade":"Silves","piso":"2 Pisos","espParede":"0.25","isolamento":"NÃO","vidros":"Simples","caixilharia":"Alumínio","protecao":"Portada","paredesInt":"Arrumos","adjacente":"SIM","pavInt":"NÃO","marquise":"SIM","cobertura":"Desvão","aqs":"N.A.","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Moradias","n":"64","cidade":"Lagos","piso":"2 Pisos","espParede":"0.25","isolamento":"NÃO","vidros":"Duplos e Simples","caixilharia":"Alumínio","protecao":"N.A.","paredesInt":"N.A.","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"Inclinada","aqs":"Termoacumulador","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Moradias","n":"65","cidade":"Silves","piso":"Térreo","espParede":"0.3","isolamento":"NÃO","vidros":"Simples","caixilharia":"Madeira","protecao":"Portada","paredesInt":"Garagem","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"Desvão","aqs":"N.A.","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Moradias","n":"66","cidade":"Silves","piso":"Térreo","espParede":"0.55","isolamento":"NÃO","vidros":"Simples","caixilharia":"Madeira","protecao":"Portada interior","paredesInt":"Arrumos","adjacente":"SIM","pavInt":"NÃO","marquise":"SIM","cobertura":"Inclinada leve","aqs":"N.A.","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Moradias","n":"67","cidade":"Lagos","piso":"2 Pisos","espParede":"0.3","isolamento":"NÃO","vidros":"Duplos e Simples","caixilharia":"PVC e Alumínio","protecao":"Persiana","paredesInt":"Garagem","adjacente":"NÃO","pavInt":"Sim (garagem)","marquise":"NÃO","cobertura":"Terraço + Desvão","aqs":"Termoacumulador","avac":"SIM","lareira":"SIM","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Moradias","n":"68","cidade":"Lagos","piso":"Térreo","espParede":"0.3","isolamento":"NÃO","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Portada","paredesInt":"Arrumos","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"Desvão","aqs":"Esquentador","avac":"NÃO","lareira":"SIM","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Moradias","n":"69","cidade":"Portimão","piso":"2 Pisos","espParede":"0.25","isolamento":"NÃO","vidros":"Simples","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"N.A.","adjacente":"SIM","pavInt":"Sim (garagem)","marquise":"NÃO","cobertura":"Terraço + Desvão","aqs":"Esquentador","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Moradias","n":"70","cidade":"Lagoa","piso":"Térreo","espParede":"0.3","isolamento":"NÃO","vidros":"Duplos e Simples","caixilharia":"Alumínio","protecao":"Portada","paredesInt":"Garagem","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"Inclinada + Terraço","aqs":"Termoacumulador","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Moradias","n":"71","cidade":"Lagos","piso":"2 Pisos","espParede":"0.25","isolamento":"NÃO","vidros":"Duplos e Simples","caixilharia":"Alumínio","protecao":"Portada","paredesInt":"N.A.","adjacente":"SIM","pavInt":"NÃO","marquise":"NÃO","cobertura":"Terraço + Desvão","aqs":"Termoacumulador","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Moradias","n":"72","cidade":"Lagoa","piso":"Térreo","espParede":"0.55","isolamento":"NÃO","vidros":"Simples","caixilharia":"Alumínio e Madeira","protecao":"N.A.","paredesInt":"N.A.","adjacente":"SIM","pavInt":"NÃO","marquise":"NÃO","cobertura":"Terraço + Desvão","aqs":"Esquentador","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Moradias","n":"73","cidade":"Portimão","piso":"2 Pisos","espParede":"0.3","isolamento":"NÃO","vidros":"Simples","caixilharia":"Alumínio","protecao":"Portada","paredesInt":"Garagem","adjacente":"SIM","pavInt":"Sim (garagem)","marquise":"SIM","cobertura":"Terraço + Desvão","aqs":"Esquentador","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Moradias","n":"74","cidade":"Lagos","piso":"2 Pisos","espParede":"0.3","isolamento":"SIM","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Portada","paredesInt":"Garagem","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"Terraço + Desvão","aqs":"Esquentador","avac":"NÃO","lareira":"SIM","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Moradias","n":"75","cidade":"Lagoa","piso":"Térreo","espParede":"0.3","isolamento":"NÃO","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Portada","paredesInt":"N.A.","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"Inclinada + Terraço","aqs":"Painel Solar","avac":"NÃO","lareira":"SIM","solar":"SIM","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Moradias","n":"76","cidade":"Monchique","piso":"Térreo","espParede":"0.5","isolamento":"NÃO","vidros":"Duplos e Simples","caixilharia":"Alumínio","protecao":"N.A.","paredesInt":"Garagem","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"Inclinado + Desvão","aqs":"N.A.","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Moradias","n":"77","cidade":"Lagoa","piso":"Térreo","espParede":"0.3","isolamento":"NÃO","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Portada","paredesInt":"N.A.","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"Desvão","aqs":"Termoacumulador","avac":"NÃO","lareira":"SIM","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Moradias","n":"78","cidade":"Lagos","piso":"Térreo","espParede":"0.3","isolamento":"NÃO","vidros":"Duplos","caixilharia":"Madeira","protecao":"Portada","paredesInt":"N.A.","adjacente":"SIM","pavInt":"NÃO","marquise":"NÃO","cobertura":"Inclinado + Desvão","aqs":"Termoacumulador","avac":"SIM","lareira":"SIM","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Moradias","n":"79","cidade":"Vila do Bispo","piso":"Térreo","espParede":"0.25","isolamento":"NÃO","vidros":"Duplos","caixilharia":"Corte Térmico","protecao":"Persiana","paredesInt":"N.A.","adjacente":"SIM","pavInt":"NÃO","marquise":"NÃO","cobertura":"Terraço + Desvão","aqs":"Esquentador","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Moradias","n":"80","cidade":"Lagos","piso":"2 Pisos","espParede":"0.3","isolamento":"NÃO","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Portada","paredesInt":"N.A.","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"Terraço + Desvão","aqs":"Caldeira","avac":"NÃO","lareira":"SIM","solar":"SIM","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Moradias","n":"81","cidade":"Portimão","piso":"2 Pisos","espParede":"0.6","isolamento":"NÃO","vidros":"Simples","caixilharia":"Madeira","protecao":"Portada","paredesInt":"N.A.","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"Inclinado + Terraço + Desvão","aqs":"Painel Solar","avac":"NÃO","lareira":"NÃO","solar":"SIM","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Moradias","n":"82","cidade":"Lagos","piso":"2 Pisos","espParede":"0.3","isolamento":"NÃO","vidros":"Simples","caixilharia":"Alumínio e Madeira","protecao":"N.A.","paredesInt":"N.A.","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"Inclinado + Terraço + Desvão","aqs":"Painel Solar","avac":"SIM","lareira":"SIM","solar":"SIM","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Moradias","n":"83","cidade":"Lagos","piso":"Térreo","espParede":"0.3","isolamento":"NÃO","vidros":"Simples","caixilharia":"Alumínio","protecao":"Portada","paredesInt":"N.A.","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"Desvão","aqs":"Caldeira","avac":"NÃO","lareira":"SIM","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Moradias","n":"84","cidade":"Lagos","piso":"2 Pisos","espParede":"0.3","isolamento":"NÃO","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"Garagem","adjacente":"SIM","pavInt":"NÃO","marquise":"NÃO","cobertura":"Desvão","aqs":"Esquentador","avac":"SIM","lareira":"SIM","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Moradias","n":"85","cidade":"Lagoa","piso":"2 Pisos","espParede":"0.3","isolamento":"NÃO","vidros":"Duplos","caixilharia":"PVC e Alumínio","protecao":"Portada","paredesInt":"N.A.","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"Terraço + Desvão","aqs":"Caldeira","avac":"SIM","lareira":"SIM","solar":"SIM","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Moradias","n":"86","cidade":"Portimão","piso":"3 Pisos","espParede":"0.3","isolamento":"SIM","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"SIM","adjacente":"SIM","pavInt":"SIM","marquise":"SIM","cobertura":"Terraço + Desvão","aqs":"Painel Solar","avac":"SIM","lareira":"NÃO","solar":"SIM","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Moradias","n":"87","cidade":"Lagos","piso":"2 Pisos","espParede":"0.3","isolamento":"NÃO","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Portada","paredesInt":"N.A.","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"Terraço","aqs":"Termoacumulador","avac":"SIM","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Moradias","n":"88","cidade":"Vila do Bispo","piso":"2 Pisos","espParede":"0.3","isolamento":"NÃO","vidros":"Duplos e Simples","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"SIM","adjacente":"SIM","pavInt":"NÃO","marquise":"NÃO","cobertura":"Inclinado + Desvão","aqs":"Esquentador A+","avac":"NÃO","lareira":"SIM","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Moradias","n":"89","cidade":"Vila do Bispo","piso":"2 Pisos","espParede":"0.3","isolamento":"NÃO","vidros":"Duplos","caixilharia":"Madeira","protecao":"N.A.","paredesInt":"N.A.","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"Inclinada","aqs":"Esquentador A+","avac":"SIM","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Moradias","n":"90","cidade":"Lagos","piso":"2 Pisos","espParede":"0.3","isolamento":"NÃO","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Portada","paredesInt":"N.A.","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"Terraço + Desvão","aqs":"Painel Solar","avac":"SIM","lareira":"SIM","solar":"SIM","fotovoltaico":"SIM","bombaCalor":"SIM"},{"tipo":"Moradias","n":"91","cidade":"Lagos","piso":"2 Pisos","espParede":"0.3","isolamento":"SIM","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"N.A.","adjacente":"SIM","pavInt":"NÃO","marquise":"NÃO","cobertura":"Terraço + Desvão","aqs":"Painel Solar","avac":"SIM","lareira":"SIM","solar":"SIM","fotovoltaico":"NÃO","bombaCalor":"SIM"},{"tipo":"Moradias","n":"92","cidade":"Lagos","piso":"1 Piso","espParede":"0.3","isolamento":"NÃO","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Portada","paredesInt":"N.A.","adjacente":"NÃO","pavInt":"NÃO","marquise":"NÃO","cobertura":"Desvão","aqs":"Esquentador A+","avac":"SIM","lareira":"SIM","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Moradias","n":"93","cidade":"Portimão","piso":"3 Pisos","espParede":"0.3","isolamento":"NÃO","vidros":"Simples","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"N.A.","adjacente":"SIM","pavInt":"NÃO","marquise":"NÃO","cobertura":"Inclinado + Terraço","aqs":"Esquentador","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Moradias","n":"94","cidade":"Silves","piso":"1 Piso","espParede":"0.55","isolamento":"NÃO","vidros":"Duplos e Simples","caixilharia":"Alumínio","protecao":"Portada","paredesInt":"N.A.","adjacente":"SIM","pavInt":"NÃO","marquise":"NÃO","cobertura":"Desvão","aqs":"N.A.","avac":"NÃO","lareira":"NÃO","solar":"NÃO","fotovoltaico":"NÃO","bombaCalor":"NÃO"},{"tipo":"Moradias","n":"95","cidade":"Silves","piso":"2 Pisos","espParede":"0.3","isolamento":"NÃO","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Persiana","paredesInt":"N.A.","adjacente":"NÃO","pavInt":"SIM","marquise":"NÃO","cobertura":"Desvão","aqs":"Termoacumulador","avac":"SIM","lareira":"SIM","solar":"SIM","fotovoltaico":"NÃO","bombaCalor":"SIM"},{"tipo":"Moradias","n":"96","cidade":"Silves","piso":"2 Pisos","espParede":"0.3","isolamento":"NÃO","vidros":"Duplos","caixilharia":"Alumínio","protecao":"Portada","paredesInt":"N.A.","adjacente":"SIM","pavInt":"SIM","marquise":"NÃO","cobertura":"Terraço + Desvão","aqs":"Painel Solar","avac":"SIM","lareira":"NÃO","solar":"SIM","fotovoltaico":"NÃO","bombaCalor":"NÃO"}];
+
+/* Pesos por ordem de importância, como pedido: tipo de edifício primeiro, depois
+   o vidro, o AQS, o AVAC, e por fim o piso (só conta em apartamentos).
+   Os restantes campos entram com peso pequeno — desempatam sem mandar. */
+/* A cidade NÃO entra: mudar a localidade num certificado é trivial, e um
+   processo de Lagos pode servir perfeitamente para uma obra em Lagoa. O que
+   interessa é a construção. */
+/* Pasta onde estão os certificados de referência. Só serve para escrever o
+   caminho no TXT — a app nunca lê daqui, o browser não o permite. Alterar aqui
+   se a pasta mudar de sítio. */
+const PASTA_CE_BASE='C:\\Users\\renat\\OneDrive\\Área de Trabalho\\1_EM CURSO\\- BASE CE E PRJ\\__CERTIFIFICADOS__-__';
+
+const PESO_MATCH={tipo:100,vidros:60,aqs:45,avac:30,piso:25,
+  caixilharia:12,protecao:10,isolamento:8,cobertura:8,espParede:6,
+  lareira:5,solar:5,adjacente:4};
+
+function _norm(x){
+  return String(x||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .toLowerCase().replace(/\s+/g,' ').trim();
+}
+/* Traduz o levantamento para o vocabulário da listagem. Os nomes não coincidem
+   — a app diz "Termoacumulador elétrico", a listagem diz "Termoacumulador". */
+function _perfilDoLevantamento(){
+  const aqs=_norm(D.aqsTipo);
+  let aqsL='';
+  if(/termoacumulador|cilindro|deposito/.test(aqs)) aqsL='Termoacumulador';
+  else if(/esquentador/.test(aqs))
+    aqsL=/condensa|a\+/.test(_norm(D.aqsRendimento)+aqs)?'Esquentador A+':'Esquentador';
+  else if(/caldeira/.test(aqs)) aqsL='Caldeira';
+  else if(/bomba de calor|termodinam/.test(aqs)) aqsL='Bomba de Calor';
+  else if(/solar/.test(aqs)) aqsL='Painel Solar';
+  else if(aqs) aqsL=D.aqsTipo;
+
+  // vidros: olhar aos vãos, que é onde está a verdade
+  let nD=0,nS=0;
+  (D.divisoes||[]).forEach(dv=>{
+    ((D.divisoesDados[dv]||{}).vaos||[]).forEach(v=>{
+      const t=_norm(v.tipo);
+      if(/duplo/.test(t)) nD++; else if(/simples/.test(t)) nS++;
+    });
+  });
+  const vidros=(nD&&nS)?'Duplos e Simples':(nD?'Duplos':(nS?'Simples':''));
+
+  // AVAC: há sistema de climatização em alguma divisão?
+  let avac='NÃO';
+  Object.values(D.climaDivisoes||{}).forEach(c=>{
+    if((c.tipos||[]).some(t=>!/lareira|salamandra|recuperador/i.test(t))) avac='SIM';
+  });
+  let lareira='NÃO';
+  Object.values(D.climaDivisoes||{}).forEach(c=>{
+    if((c.tipos||[]).some(t=>/lareira|salamandra|recuperador/i.test(t))) lareira='SIM';
+  });
+
+  // piso: só faz sentido em apartamentos
+  const tipo=/moradia/i.test(D.edificioTipo||'')?'Moradias':'Apartamento';
+  let piso='';
+  if(tipo==='Apartamento'){
+    const pl=_norm(D.pisoLocal), nE=parseInt(D.nPisosEdificio)||0, n=parseInt(D.pisoLocal);
+    /* pisoLocal é a ordem no prédio: 1 = R/C, 2 = 1º andar, 3 = 2º… A app
+       também aceita a palavra escrita. O nº 1 é o rés-do-chão. */
+    if(/^r\/?c$|^0$|terreo|^1$/.test(pl)) piso='Térreo';
+    else if(n&&nE&&n>=nE) piso='Último';
+    else if(n&&n>1) piso='Intermédio';
+  } else piso=(parseInt(D.pisos)||1)>1?'2 Pisos':'Moradia';
+
+  const prot=(()=>{
+    const p=new Set();
+    (D.divisoes||[]).forEach(dv=>((D.divisoesDados[dv]||{}).vaos||[])
+      .forEach(v=>{ if(v.prot) p.add(_norm(v.prot)); }));
+    const j=[...p].join(' ');
+    if(/persiana|estore/.test(j)) return 'Persiana';
+    if(/portada/.test(j)) return 'Portada';
+    if(/sem protec/.test(j)) return 'Sem proteção exterior';
+    if(/cortina/.test(j)) return 'Cortina opaca';
+    return '';
+  })();
+  const caix=(()=>{
+    const m=new Set();
+    (D.divisoes||[]).forEach(dv=>((D.divisoesDados[dv]||{}).vaos||[])
+      .forEach(v=>{ if(v.caixMat) m.add(_norm(v.caixMat)); if(v.corteTerm) m.add('corte'); }));
+    if(m.has('corte')) return 'Corte Térmico';
+    const l=[...m];
+    if(l.length>1) return l.map(x=>x[0].toUpperCase()+x.slice(1)).join(' e ');
+    return l.length?l[0][0].toUpperCase()+l[0].slice(1):'';
+  })();
+
+  return {tipo,piso,vidros,aqs:aqsL,avac,lareira,caixilharia:caix,protecao:prot,
+    cidade:D.concelho||D.localidade||'',
+    espParede:D.espParede?String(parseFloat(D.espParede)/100):'',
+    isolamento:/sim/i.test(D.paredeIsolamento||'')?'SIM':'NÃO',
+    solar:/sim/i.test(D.solar||'')?'SIM':'NÃO',
+    adjacente:(D.divisoes||[]).some(dv=>
+      Object.keys((D.divisoesDados[dv]||{}).envInt||{})
+        .some(k=>/adjacente/i.test(k)))?'SIM':'NÃO',
+    cobertura:'',
+  };
+}
+function certificadosParecidos(n){
+  const p=_perfilDoLevantamento();
+  const pontos=LISTAGEM_CE.map(c=>{
+    let s=0,max=0,iguais=[],difs=[];
+    Object.entries(PESO_MATCH).forEach(([k,w])=>{
+      const a=_norm(p[k]), b=_norm(c[k]);
+      if(!a||!b) return;                      // campo sem informação não pesa
+      max+=w;
+      if(a===b||a.includes(b)||b.includes(a)){ s+=w; iguais.push(k); }
+      else difs.push(k+': '+c[k]+' ≠ '+p[k]);
+    });
+    return {c,s,pct:max?Math.round(s/max*100):0,iguais,difs};
+  });
+  // o tipo tem de bater — um apartamento nunca se compara a uma moradia
+  const mesmoTipo=pontos.filter(x=>_norm(x.c.tipo)===_norm(p.tipo));
+  const base=mesmoTipo.length?mesmoTipo:pontos;
+  return {perfil:p,lista:base.sort((a,b)=>b.s-a.s).slice(0,n||3)};
+}
+
+
+
+/* Painel único da DV: data, hora e telemóvel. Tudo em chips — em obra
+   escreve-se mal e devagar; tocar é mais rápido e não erra. */
+const DV_HORAS=['08:30','09:00','09:30','10:00','10:30','11:00','11:30','12:00',
+  '14:00','14:30','15:00','15:30','16:00','16:30','17:00','17:30'];
+function renderDVInline(wrap){
+  wrap.innerHTML='';
+  const dt=_dvDatasSugeridas();
+  const sec=(titulo)=>{
+    const d=document.createElement('div');
+    d.className='aqs-lbl'; d.style.marginTop='12px'; d.textContent=titulo;
+    wrap.appendChild(d); return d;
+  };
+  const linha=()=>{ const r=document.createElement('div'); r.className='ve-chips';
+    wrap.appendChild(r); return r; };
+
+  // ── data ──
+  sec('Dia da visita');
+  const rD=linha();
+  [['Amanhã',dt.amanha],['Depois de amanhã',dt.depois]].forEach(([lbl,val])=>{
+    const c=document.createElement('div');
+    c.className='chip'+(D.dvData===val?' on':'');
+    c.innerHTML=lbl+'<br><span style="font-size:11px;opacity:.75">'+val+'</span>';
+    c.onclick=()=>{ D.dvData=val; autoSave(); renderDVInline(wrap); };
+    rD.appendChild(c);
+  });
+  {
+    const outra=document.createElement('div');
+    const jaEscolhida=(D.dvData&&D.dvData!==dt.amanha&&D.dvData!==dt.depois);
+    outra.className='chip'+(jaEscolhida?' on':'');
+    outra.textContent=jaEscolhida?D.dvData:'Outra data';
+    outra.onclick=()=>{
+      const r=prompt('Data da visita (dd/mm/aaaa):',D.dvData||dt.amanha);
+      if(r===null) return;
+      D.dvData=r.trim(); autoSave(); renderDVInline(wrap);
+    };
+    rD.appendChild(outra);
+  }
+
+  // ── hora ──
+  sec('Hora de início');
+  const rH=linha();
+  DV_HORAS.forEach(h=>{
+    const c=document.createElement('div');
+    c.className='chip'+(D.dvHoraInicio===h?' on':'');
+    c.textContent=h;
+    c.onclick=()=>{ D.dvHoraInicio=h; autoSave(); renderDVInline(wrap); };
+    rH.appendChild(c);
+  });
+  if(D.dvHoraInicio){
+    const nota=document.createElement('div');
+    nota.style.cssText='font-size:12.5px;color:var(--tx2);margin-top:6px';
+    nota.textContent='Fim: '+_dvHoraFim(D.dvHoraInicio)+'  (30 min depois)';
+    wrap.appendChild(nota);
+  }
+
+  // ── telemóvel ──
+  sec('Telemóvel (opcional)');
+  const inp=document.createElement('input');
+  inp.className='aqs-inp'; inp.type='tel'; inp.inputMode='tel';
+  inp.placeholder='pode ficar em branco';
+  inp.value=D.dvTelemovel||'';
+  inp.oninput=()=>{ D.dvTelemovel=inp.value.trim(); autoSave(); };
+  wrap.appendChild(inp);
+
+  // ── o que já se sabe da caderneta ──
+  const box=document.createElement('div');
+  box.style.cssText='margin-top:14px;padding:11px 12px;background:var(--bg2);'+
+    'border:1px solid var(--br);border-radius:11px';
+  const tit=document.createElement('div');
+  tit.style.cssText='font-size:11px;color:var(--tx2);font-weight:700;'+
+    'text-transform:uppercase;letter-spacing:.06em;margin-bottom:7px';
+  tit.textContent='Da caderneta';
+  box.appendChild(tit);
+  const l=(k,v,falta)=>{
+    const d=document.createElement('div');
+    d.style.cssText='font-size:13px;line-height:1.5;color:'+(falta?'var(--am)':'var(--tx)');
+    d.textContent=k+': '+(v||'— por preencher');
+    box.appendChild(d);
+  };
+  l('Requerente',D.dvRequerente||D.nome);
+  l('Morada',[D.moradaCaderneta||'',D.morada||''].sort((a,b)=>b.length-a.length)[0]);
+  l('Matriz',D.numeroMatriz,!D.numeroMatriz);
+  l('Fração',D.numeroFracao||(/moradia/i.test(D.edificioTipo||'')?'não aplicável':''),
+    !D.numeroFracao&&!/moradia/i.test(D.edificioTipo||''));
+  const codigos=[D.dvCodDistrito,D.dvCodConcelho,D.dvCodFreguesia].filter(Boolean);
+  l('Códigos distrito/concelho/freguesia',codigos.length===3?codigos.join(' / '):'',
+    codigos.length!==3);
+  const bt=document.createElement('button');
+  bt.type='button';
+  bt.style.cssText='margin-top:9px;width:100%;padding:10px;background:var(--bg3);'+
+    'color:var(--tx);border:1px solid var(--br);border-radius:9px;font-size:13px;'+
+    'min-height:42px';
+  bt.textContent='✎ Corrigir requerente ou códigos';
+  bt.onclick=()=>{
+    let r=prompt('Nome do requerente (da caderneta):',D.dvRequerente||D.nome||'');
+    if(r!==null) D.dvRequerente=r.trim();
+    r=prompt('Códigos da matriz — distrito/concelho/freguesia\n\n'+
+      'Vêm da caderneta. Em branco se ainda não os tens.',
+      [D.dvCodDistrito,D.dvCodConcelho,D.dvCodFreguesia].filter(Boolean).join('/'));
+    if(r!==null){
+      const pt=r.split(/[\/\-\s]+/).filter(Boolean);
+      D.dvCodDistrito=pt[0]||''; D.dvCodConcelho=pt[1]||''; D.dvCodFreguesia=pt[2]||'';
+    }
+    autoSave(); renderDVInline(wrap);
+  };
+  box.appendChild(bt);
+  wrap.appendChild(box);
+}
+
+/* ══════════ EXTRATO PARA A DECLARAÇÃO DE VISITA ══════════
+   Um segundo TXT, à parte do levantamento, com o que o formulário da DV pede:
+   identificação do imóvel pela caderneta, requerente, data e hora da visita.
+   No fim traz o texto pronto a colar no Claude do Chrome, que é quem preenche
+   o formulário.
+   Os códigos de distrito/concelho/freguesia vêm da CADERNETA — a app não os
+   adivinha e não os inventa: pergunta-os e deixa-os em branco se não houver. */
+function _dvHoraFim(inicio){
+  const m=String(inicio||'').match(/^(\d{1,2})\D?(\d{2})?/);
+  if(!m) return '';
+  let h=+m[1], mi=+(m[2]||0);
+  mi+=30; if(mi>=60){ mi-=60; h++; }        // a DV assume sempre 30 min
+  if(h>=24) h-=24;
+  return String(h).padStart(2,'0')+':'+String(mi).padStart(2,'0');
+}
+function _dvDatasSugeridas(){
+  const f=d=>String(d.getDate()).padStart(2,'0')+'/'+
+    String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();
+  /* A visita é sempre agendada para depois do levantamento — por isso as
+     opções são amanhã e depois de amanhã, não hoje. */
+  return {hoje:f(new Date()),
+    amanha:f(new Date(Date.now()+864e5)),
+    depois:f(new Date(Date.now()+2*864e5))};
+}
+/* O andar sai do piso onde a fracção está; numa moradia não se aplica. */
+function _dvAndar(){
+  if(D.dvAndar) return D.dvAndar;
+  if(/moradia/i.test(D.edificioTipo||'')) return '—  (moradia)';
+  const pl=String(D.pisoLocal||'').trim();
+  if(!pl) return '';
+  if(/^r\/?c$|^1$/i.test(pl)) return 'R/C';
+  const n=parseInt(pl);
+  return (isFinite(n)&&n>1) ? (n-1)+'º' : pl;
+}
+function _dvCodPostal(){
+  if(D.dvCodPostal) return D.dvCodPostal;
+  // procura nas duas moradas: a da caderneta raramente traz o CP, a do
+  // levantamento quase sempre
+  const m=(String(D.moradaCaderneta||'')+' '+String(D.morada||''))
+    .match(/\b(\d{4}-\d{3})\b/);
+  return m?m[1]:'';
+}
+/* Decompõe a morada nos campos que o formulário da DV pede em separado.
+   "R. Cândido dos Reis Nº 60, 2º" → tipo de via "Rua", nome "Cândido dos Reis",
+   porta "60", piso "2º". O que não se reconhece fica em branco — o formulário
+   aceita campos vazios, um palpite errado não. */
+const DV_TIPOS_VIA=[
+  /* O limite é (?=[\s.]|$) e não \b: depois de um ponto o \b não casa com um
+     espaço, e "R. Cândido" ficava sem tipo de via. */
+  [/^(r\.|rua)(?=[\s.]|$)/i,'Rua'],[/^(av\.?|avenida)(?=[\s.]|$)/i,'Avenida'],
+  [/^(tv\.?|travessa)(?=[\s.]|$)/i,'Travessa'],[/^(lg\.?|largo)(?=[\s.]|$)/i,'Largo'],
+  [/^(pr?ç\.?|praça|praca)(?=[\s.]|$)/i,'Praça'],[/^praceta(?=[\s.]|$)/i,'Praceta'],
+  [/^(estr\.?|estrada)(?=[\s.]|$)/i,'Estrada'],[/^(s[ií]tio|stio)(?=[\s.]|$)/i,'Sítio'],
+  [/^(cam\.?|caminho)(?=[\s.]|$)/i,'Caminho'],[/^beco(?=[\s.]|$)/i,'Beco'],
+  [/^(cal[çc]ada)(?=[\s.]|$)/i,'Calçada'],[/^alameda(?=[\s.]|$)/i,'Alameda'],
+  [/^(urb\.?|urbaniza[çc][aã]o)(?=[\s.]|$)/i,'Urbanização'],[/^quinta(?=[\s.]|$)/i,'Quinta'],
+  [/^monte(?=[\s.]|$)/i,'Monte'],[/^bairro(?=[\s.]|$)/i,'Bairro'],
+  [/^loteamento(?=[\s.]|$)/i,'Loteamento'],
+  [/^vale(?=[\s.]|$)/i,'Vale'],[/^cerro(?=[\s.]|$)/i,'Cerro'],
+  [/^azinhaga(?=[\s.]|$)/i,'Azinhaga'],
+];
+const DV_TIPOS_EDIF=[
+  [/\blote\s*([\w-]+)/i,'Lote'],[/\bbloco\s*([\w-]+)/i,'Bloco'],
+  [/\bed(?:if[íi]cio)?\.?\s+([\w-]+)/i,'Edifício'],[/\bvivenda\s*([\w-]+)/i,'Vivenda'],
+  [/\btorre\s*([\w-]+)/i,'Torre'],[/\bpr[ée]dio\s*([\w-]+)/i,'Prédio'],
+];
+function dvMorada(){
+  // a mais completa das duas
+  let m=[D.moradaCaderneta||'',D.morada||''].sort((a,b)=>b.length-a.length)[0]||'';
+  const out={tipoVia:'',nomeVia:'',tipoEdif:'',designacao:'',porta:'',cp:'',localidade:''};
+  // código postal e o que vem depois dele é localidade
+  const cp=m.match(/\b(\d{4}-\d{3})\s*(.*)$/);
+  if(cp){ out.cp=cp[1]; out.localidade=(cp[2]||'').replace(/^[,\s]+/,'').trim();
+    m=m.slice(0,cp.index).replace(/[,\s]+$/,''); }
+  /* Tipo de via primeiro de todos: é o que está no princípio da morada. Tirar
+     a designação do edifício antes desalinhava o princípio e o "R." deixava de
+     ser reconhecido. */
+  for(const [re,nome] of DV_TIPOS_VIA){
+    if(re.test(m.trim())){ out.tipoVia=nome;
+      m=m.trim().replace(re,'').replace(/^[\s.]+/,''); break; }
+  }
+  // designação do edifício — lote, bloco…
+  for(const [re,nome] of DV_TIPOS_EDIF){
+    const g=m.match(re);
+    if(g){ out.tipoEdif=nome; out.designacao=(g[1]||'').replace(/[,.]$/,'');
+      m=m.replace(g[0],'').replace(/\s{2,}/g,' ').replace(/[,\s]+$/,''); break; }
+  }
+  /* Porta: lida DEPOIS do tipo de via — se se tirasse antes, o "n" de "Nº"
+     apanhava letras no meio de nomes ("António" dava porta "io"). */
+  /* Porta: só "Nº 60" ou "n.º 60" com o n no princípio de palavra E seguido de
+     º/. ou espaço — nunca o "n" no meio de uma palavra. */
+  const porta=m.match(/(?:^|[\s,])n\.?[ºo°]\s*([\w-]+)/i)||
+              m.match(/(?:^|[\s,])n\.?\s+(\d+[\w-]*)/i);
+  if(porta){ out.porta=porta[1]; m=m.replace(porta[0],' ').replace(/\s{2,}/g,' ')
+    .replace(/[,\s]+$/,''); }
+  // o que sobra, sem o piso, é o nome da via
+  out.nomeVia=m.replace(/,?\s*\d+\.?[ºo°]\s*(esq|dt[ºo°]?|dir|frt|tr[ºs]?)?\.?\s*$/i,'')
+    .replace(/[,\s]+$/,'').replace(/^[,\s]+/,'').trim();
+  if(!out.porta&&out.nomeVia){
+    // "Rua X, 60" — número solto no fim
+    const n=out.nomeVia.match(/,\s*(\d+[\w-]*)$/);
+    if(n){ out.porta=n[1]; out.nomeVia=out.nomeVia.slice(0,n.index).trim(); }
+  }
+  return out;
+}
+function dvPisoAndar(){
+  if(D.dvAndar) return D.dvAndar;
+  if(/moradia/i.test(D.edificioTipo||'')) return 'R/C';
+  /* O piso pode vir escrito na morada ("2º"). Tira-se primeiro o código postal:
+     em "8600-605" o "605" seguido de vírgula podia passar por piso. */
+  const semCP=String(D.moradaCaderneta||D.morada||'').replace(/\b\d{4}-\d{3}\b/g,'');
+  const m=semCP.match(/(?:^|[\s,])(\d{1,2})\.?[ºo°]/);
+  if(m) return m[1]+'º';
+  const pl=String(D.pisoLocal||'').trim();
+  if(/^r\/?c$|^1$/i.test(pl)) return 'R/C';
+  const n=parseInt(pl);
+  return (isFinite(n)&&n>1)?(n-1)+'º':(pl||'');
+}
+// Os códigos vão dígito a dígito, uma caixa por dígito — daí o espaço.
+function dvCodigo(v){
+  const d=String(v||'').replace(/\D/g,'');
+  return d?d.split('').join(' '):'';
+}
+function buildDV(){
+  const nl='\n';
+  const mor=dvMorada();
+  const conc=D.concelhoCaderneta||D.concelho||'';
+  const concT=conc?conc.charAt(0)+conc.slice(1).toLowerCase():'';
+  const L=(k,v)=>'* '+k+': '+((v===''||v==null)?'':v)+nl;
+  let t='';
+
+  t+='Secção 1'+nl+nl;
+  t+=L('Data',D.dvData);
+  t+=L('Hora de início',D.dvHoraInicio);
+  t+=L('Hora de fim',_dvHoraFim(D.dvHoraInicio));
+  t+=nl;
+
+  t+='Secção 2 – Identificação do Edifício/Fração'+nl+nl;
+  t+=L('Tipo de edificação (afetação)','Habitação');
+  t+=L('Código Postal',mor.cp||_dvCodPostal());
+  t+=L('Concelho',concT);
+  t+=L('Tipo de via',mor.tipoVia);
+  t+=L('Nome da via',mor.nomeVia);
+  t+=L('Tipo de Designação do Edifício',mor.tipoEdif);
+  t+=L('Designação',mor.designacao);
+  t+=L('Porta',mor.porta);
+  t+=L('Piso/Andar',dvPisoAndar());
+  t+=L('De Registo Predial de',
+    (concT||'')+(D.numeroDescricaoPredial?' — registo n.º '+D.numeroDescricaoPredial:''));
+  t+=L('Distrito',dvCodigo(D.dvCodDistrito));
+  t+=L('Concelho',dvCodigo(D.dvCodConcelho));
+  t+=L('Freguesia',dvCodigo(D.dvCodFreguesia));
+  t+=nl;
+  t+='Nota para o Claude do Chrome: nos campos Distrito, Concelho e Freguesia '+
+     'introduz apenas o código numérico, um dígito por caixa. Não escrever o nome.'+nl;
+  t+=nl;
+  t+=L('Artigo Matricial',D.numeroMatriz);
+  t+=L('Fração',D.numeroFracao);
+  t+=nl;
+
+  t+='Secção 3 – Dados Declarante/Proprietário'+nl+nl;
+  t+=L('Qualidade',D.dvQualidade||'Proprietário');
+  t+=L('Nome',D.dvRequerente||D.nome||'');
+  t+=L('Contacto',D.dvTelemovel);
+  t+=nl;
+
+  t+='Texto para o Claude do Chrome:'+nl;
+  t+='"Preenche os dados com base na informação fornecida, a hora do fim é '+
+     'sempre 30 min depois do início, tipo de edificação é Habitação. No fim '+
+     'guarda e faz o download do ficheiro."'+nl;
+  return t;
+}
+/* As respostas já foram dadas no fim do levantamento (pergunta "Declaração de
+   Visita"). Aqui só se avisa do que ficou por preencher — sem voltar a
+   interromper com prompts. */
+function faltasDV(){
+  const f=[];
+  if(!D.dvData) f.push('dia da visita');
+  if(!D.dvHoraInicio) f.push('hora de início');
+  if(!D.numeroMatriz) f.push('nº matricial');
+  if(![D.dvCodDistrito,D.dvCodConcelho,D.dvCodFreguesia].every(Boolean))
+    f.push('códigos de distrito/concelho/freguesia');
+  return f;
+}
+
+async function exportarDV(){
+  const faltam=faltasDV();
+  if(faltam.length&&!confirm('Falta preencher:\n\n  · '+faltam.join('\n  · ')+
+    '\n\nO extrato sai na mesma, com esses campos por preencher.\n\nContinuar?'))
+    return;
+  const txt=buildDV();
+  const nome=(D.nome||'projeto').replace(/[^a-zA-Z0-9À-ú ]/g,'_')+'_DV.txt';
+  try{
+    const blob=new Blob([txt],{type:'text/plain;charset=utf-8'});
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob); a.download=nome; a.click();
+    setTimeout(()=>URL.revokeObjectURL(a.href),3000);
+  }catch(e){}
+  try{ await navigator.clipboard.writeText(txt); }catch(e){}
+  alert('Extrato DV gerado.\n\nO ficheiro foi descarregado e o texto ficou '+
+    'copiado — podes colar directamente no Claude do Chrome.');
+}
+
 function buildTxt(){
   // cabeçalho com a versão do levantamento — ver registarExportacao()
   if(!Array.isArray(D.divisoes)) D.divisoes=[];
@@ -6648,6 +7147,25 @@ function buildTxt(){
   let t='';
   t+=`# CERTIFICADO ENERGÉTICO — RECOLHA DE DADOS\n`;
   t+=ln('Projeto',D.nome);t+=ln('Morada',D.morada);t+=ln('Data',d);
+  /* CERTIFICADO MAIS PARECIDO — logo no cabeçalho, que é onde se olha primeiro.
+     Poupa reabrir meia dúzia de processos à procura de um semelhante. */
+  try{
+    const par=certificadosParecidos(3);
+    if(par.lista.length&&par.lista[0].pct>=45){
+      t+='\n';
+      t+=ln('▸ CE mais parecido',
+        'nº '+par.lista[0].c.n+' ('+par.lista[0].c.cidade+') — '+par.lista[0].pct+'% de coincidência');
+      par.lista.slice(1).forEach(x=>
+        t+=ln('  também parecidos','nº '+x.c.n+' ('+x.c.cidade+') — '+x.pct+'%'));
+      const p0=par.lista[0];
+      t+=ln('  batem',p0.iguais.join(', '));
+      if(p0.difs.length) t+=ln('  diferem',p0.difs.slice(0,4).join(' · '));
+      /* Caminho pronto a colar no Explorador. A app não pode ler a pasta — o
+         browser não deixa, e ainda bem — mas pode poupar a procura. */
+      t+=ln('  pasta',PASTA_CE_BASE);
+      t+=ln('  procurar por','"'+p0.c.n+'"  (nº do certificado no nome do ficheiro)');
+    }
+  }catch(e){}
   // Versão DO LEVANTAMENTO (1 = levantado no local; 2+ = revisto depois).
   // Distinta da versão da app, que identifica o programa.
   const _v=versaoLevantamento();
@@ -6725,12 +7243,29 @@ function buildTxt(){
   if((D.areasPlanta||[]).length){
     t+=sep('ÁREAS EXTRAÍDAS DA PLANTA ANEXADA');
     t+='(reconhecidas automaticamente a partir da planta — confirmar contra o desenho original)\n\n';
-    D.areasPlanta.forEach(d=>{
-      const tag=isAreaExterior(d.nome)?' [ÁREA EXTERIOR — não conta para a área útil]'
-        :d.tipo==='bruta'?' [ÁREA BRUTA — não útil]'
-        :d.tipo==='indefinido'?' [tipo não indicado na planta]':'';
-      t+=ln(d.nome,d.area.toFixed(2)+' m²'+tag);
+    /* SEPARAR AS DUAS FAMÍLIAS.
+       Numa lista corrida, um "abrigo de carro" de 21 m² no meio das divisões
+       passa despercebido e vai parar à área útil — aconteceu no levantamento
+       dos Lombos. Separadas e somadas à parte, a diferença salta à vista. */
+    const _uteis=D.areasPlanta.filter(d=>!isAreaExterior(d.nome)&&d.tipo!=='bruta');
+    const _fora=D.areasPlanta.filter(d=>isAreaExterior(d.nome)||d.tipo==='bruta');
+    _uteis.forEach(d=>{
+      t+=ln(d.nome,d.area.toFixed(2)+' m²'+
+        (d.tipo==='indefinido'?' [tipo não indicado na planta]':''));
     });
+    const _somaUteis=_uteis.reduce((a,d)=>a+(+d.area||0),0);
+    if(_uteis.length>1) t+=ln('  soma dos interiores',_somaUteis.toFixed(2)+' m²');
+    if(_fora.length){
+      t+='\n── NÃO CONTAM PARA A ÁREA ÚTIL ──\n';
+      _fora.forEach(d=>{
+        t+=ln(d.nome,d.area.toFixed(2)+' m²'+
+          (d.tipo==='bruta'?'  (área bruta)':'  (exterior)'));
+      });
+      const _somaFora=_fora.reduce((a,d)=>a+(+d.area||0),0);
+      t+=ln('  soma excluída',_somaFora.toFixed(2)+' m²');
+      t+='Terraços, varandas, alpendres, pátios, garagens e abrigos NÃO são área útil\n'+
+         'nem entram no cálculo. Se alguma destas devia contar, corrige na app.\n\n';
+    }
     if(D.areaUtilPlantaTotal!=null){
       t+=ln('TOTAL (área útil de pavimento)',D.areaUtilPlantaTotal.toFixed(2)+' m²');
     }else{
@@ -6927,6 +7462,77 @@ function buildTxt(){
     t+='\nNota: os valores assinalados como estimados saem do nº de pisos e do pé-direito\n'+
        'medidos. Confirma-os na folha antes de calcular — a altura entra na velocidade\n'+
        'do vento e essa afeta o caudal de renovação.\n';
+    /* BLOCO PRONTO A COPIAR, NA ORDEM DA FOLHA
+       O bloco acima é para ler; este é para transcrever. Segue exactamente a
+       ordem em que os campos aparecem na folha do ITeCons, um por linha, sem
+       comentários pelo meio — assim percorre-se a folha de cima a baixo sem
+       ter de procurar cada valor. */
+    t+='\n'+'─'.repeat(50)+'\n';
+    t+='PARA COPIAR — folha "Ventilação", pela ordem dos campos\n';
+    t+='─'.repeat(50)+'\n';
+    const cp=(campo,valor)=>{ t+=campo.padEnd(38)+String(valor)+'\n'; };
+    cp('Tipo de edifício',(D.anoConstrucao&&+D.anoConstrucao<2013)?'Existente':'Novo');
+    cp('Concelho',D.concelho||'—');
+    cp('Altitude (m)',v.altitude!=null?String(v.altitude):'—');
+    cp('Região',v.regiao||'—');
+    cp('Rugosidade',(v.rugosidade||'I')+'  ← CONFIRMAR');
+    t+='\n';
+    cp('Nº de pisos da fracção',String(v.pisosFracao));
+    cp('Velocidade do vento, u10 (m/s)','Por defeito');
+    cp('Nº fachadas expostas',v.fachadasExpostas>=2?'>=2':String(v.fachadasExpostas));
+    cp('Altura do edifício, Hedf (m)',v.hEdificio.toFixed(2).replace('.',','));
+    cp('Altura da fracção, HFA (m)',v.hFracao.toFixed(2).replace('.',','));
+    cp('Edifícios/obstáculos?',v.obstaculos||'não indicado — deixar por marcar');
+    if(v.hObstaculo) cp('Altura do obstáculo, Hobs (m)',v.hObstaculo.toFixed(1).replace('.',','));
+    if(v.dObstaculo) cp('Distância ao obstáculo, Dobs (m)',v.dObstaculo.toFixed(1).replace('.',','));
+    t+='\n';
+    cp('Área útil (m²)',v.areaUtil.toFixed(2).replace('.',','));
+    cp('Pé-direito (m)',v.peDireito.toFixed(2).replace('.',','));
+    cp('Volume (m³)',v.volume.toFixed(2).replace('.',','));
+    t+='\n';
+    /* A resposta do LEVANTAMENTO é que manda: há uma pergunta com três opções
+       — só exaustão, admissão e exaustão, não existem. Olhar só à lista de
+       condutas detalhadas dizia "não existem" a quem tinha respondido que sim. */
+    const respCond=String(D.ventCondutasIS||'').trim();
+    const temCond=/exaust|admiss/i.test(respCond)||!!(v.condutas&&v.condutas.length);
+    cp('Existem condutas de vent. natural?',
+      !respCond ? 'por responder no levantamento'
+      : temCond ? 'SIM — marcar' : 'NÃO — deixar por marcar');
+    if(temCond&&!(v.condutas&&v.condutas.length)){
+      // respondeu que existem mas não detalhou cada uma: dá-se o essencial e
+      // assinala-se o que fica ao critério de quem preenche
+      const soExaustao=/^só exaust/i.test(respCond);
+      const wcs=(D.ventCondutasISWCs||[]);
+      t+='\n  Do levantamento: '+respCond+
+         (wcs.length?(' — em: '+wcs.join(', ')):'')+'\n';
+      if(D.ventCondutasISDetalhe) t+='  Detalhe: '+D.ventCondutasISDetalhe+'\n';
+      t+='  Conduta V_N 1\n';
+      t+='    Tipo de escoamento              '+(soExaustao?'Exaustão':'Admissão e exaustão')+'\n';
+      t+='    Exaustores tipo ventax?         Não  ← confirmar\n';
+      t+='    Perda de carga                  Baixa  ← confirmar (Alta se tiver cotovelos ou grelha suja)\n';
+      t+='    Tipo de cobertura               ← conforme a cobertura do edifício\n';
+      t+='    Número de condutas semelhantes  '+(wcs.length||1)+'\n';
+      t+='    Altura da conduta conhecida?    Não\n';
+      t+='       (não sabendo, a folha estima pela altura do edifício: '+
+         v.hEdificio.toFixed(2).replace('.',',')+' m)\n';
+    }
+    if(temCond){
+      v.condutas.forEach((c,i2)=>{
+        t+='\n  Conduta V_N '+(i2+1)+'\n';
+        /* O escoamento e o número saem do levantamento. O resto são valores
+           correntes que a app não tem forma de saber — vão assinalados, para
+           não passarem por medidos. */
+        t+='    Tipo de escoamento              '+(c.escoamento||'Exaustão')+'\n';
+        t+='    Exaustores tipo ventax?         '+(c.ventax||'Não')+'  ← confirmar\n';
+        t+='    Perda de carga                  '+(c.perdaCarga||'Baixa')+'  ← confirmar\n';
+        t+='    Tipo de cobertura               '+(c.cobertura||'Inclinada (10° a 30°)')+
+           '  ← conforme a cobertura do edifício\n';
+        t+='    Número de condutas semelhantes  '+(c.n||1)+'\n';
+        t+='    Altura da conduta conhecida?    '+(c.altura?'Sim':'Não')+'\n';
+        if(c.altura) t+='    Altura da conduta (m)           '+String(c.altura).replace('.',',')+'\n';
+      });
+    }
+    t+='\nO Rph e o n50 NÃO se introduzem: são resultado do cálculo da folha.\n';
   }
 
   // ── CLIMATIZAÇÃO ──
@@ -8818,8 +9424,30 @@ function gerarTextoAQS(){
 // terraços, aparecem em plantas portuguesas pátios, logradouros, galerias,
 // alpendres, loggias, decks e telheiros.
 function isAreaExterior(nome){
-  return /varand|terra[cç]|alpendre|marquise|p[aá]tio|logradouro|galeria|loggia|deck|telheiro|solario|sol[aá]rio|balc[aã]o|coberto\b|churrasq/i
-    .test(String(nome||''));
+  /* Duas famílias, ambas fora da área útil de pavimento:
+     · EXTERIORES — varandas, terraços, alpendres, pátios, jardins, piscinas,
+       abrigos de carro. Não têm envolvente que as separe do exterior.
+     · NÃO ÚTEIS (ENU) — garagens, arrecadações, caves, sótãos não habitáveis.
+       São interiores, mas não são espaço útil: entram no cálculo como ENU com
+       o seu bztu, nunca na área útil.
+     Num levantamento real (Lombos, Lagoa) um "abrigo de carro" de 21,20 m² e
+     uma garagem passaram para a área útil — 44% da planta era exterior.
+     ARRUMOS e DESPENSA dentro do fogo CONTAM: têm envolvente para o exterior e
+     perdem calor. Só ficam fora quando o nome diz que estão fora ("arrumos na
+     cave"). "Arrecadação" fica fora, que é quase sempre fora do fogo. */
+  const n=String(nome||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+  // exteriores
+  if(/varand|terrac|alpendre|marquise|patio|logradouro|galeria|loggia|deck|telheiro|solario|balcao|coberto\b|churrasq|jardim|quintal|piscina|horta|estendal|passeio|escadas? exterior/i.test(n))
+    return true;
+  // abrigo de carro / carport — coberto aberto, não é espaço
+  if(/abrigo|carport|garagem aberta|cobertura de (carro|viatura)|parqueamento coberto/i.test(n))
+    return true;
+  // qualquer nome que diga "exterior" — zona, espaço, área
+  if(/\bexterior(es)?\b|\bao ar livre\b|\bdescoberto\b/i.test(n)) return true;
+  // espaços não úteis
+  if(/garagem|garage\b|box\b|estacionamento|parqueamento|aparcament|arrecada|arrumos? (da|na|em) (cave|garagem|exterior)|arrumacao|cave\b|sotao|desvao|agua[s]? furtada|casa das? maquinas|caldeira[s]?\b|contador|lixo|anexo\b|barraca|adega|celeiro/i.test(n))
+    return true;
+  return false;
 }
 
 // Normaliza um nome de divisão/compartimento para comparar a lista D.divisoes
@@ -8844,6 +9472,21 @@ function resolverAreaDaPlanta(div){
   const chave=chaveMatchDivisao(div);
   const candidatos=lista.filter(d=>!isAreaExterior(d.nome)&&chaveMatchDivisao(d.nome)===chave);
   if(!candidatos.length) return '';
+  /* UMA ÁREA DA PLANTA SERVE UMA DIVISÃO SÓ.
+     A chave ignora o número — "Circulação 1" e "Circulação 2" dão a mesma — e
+     a mesma área da planta era somada às duas. Num caso real, a Circulação 2
+     do 1º andar herdou os 4,60 m² do hall do R/C, que nem sequer é dela.
+     Quando há várias divisões com a mesma chave, distribui-se: a primeira fica
+     com a primeira área, a segunda com a segunda, e quem sobrar fica sem — que
+     é o correcto, porque falta mesmo medir. */
+  const irmas=(D.divisoes||[]).filter(x=>chaveMatchDivisao(x)===chave);
+  if(irmas.length>1){
+    const i=irmas.indexOf(div);
+    if(i<0) return '';
+    if(i>=candidatos.length) return '';        // não há área para esta
+    const a=parseFloat(candidatos[i].area)||0;
+    return a>0?a.toFixed(2):'';
+  }
   const soma=candidatos.reduce((s,d)=>s+(parseFloat(d.area)||0),0);
   return soma>0?soma.toFixed(2):'';
 }
