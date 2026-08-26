@@ -541,7 +541,7 @@ const DIVS_BASE=[
 // VERSÃO — fonte única (selo no ecrã inicial + cabeçalho do TXT exportado).
 // Subir aqui a cada alteração ao ficheiro.
 // ═══════════════════════════════════════
-const APP_VERSION='v2026.08.25-FIX215';
+const APP_VERSION='v2026.08.26-FIX216';
 
 // ═══════════════════════════════════════
 // ESTADO
@@ -15725,13 +15725,71 @@ async function oneDriveContaLigada(){
   }catch(e){return null;}
 }
 
+/* ══════════ LIGAR AO ONEDRIVE: POPUP OU REDIRECIONAMENTO ══════════
+   O MSAL abre por defeito uma janela de popup. No telemóvel — e sobretudo em
+   ecrã dividido — o browser bloqueia-a e devolve
+   «popup_window_error: window.open returned null», que não diz nada a quem só
+   queria guardar o levantamento.
+
+   Nesses casos usa-se o redirecionamento: a página sai, autentica no site da
+   Microsoft e volta. É mais lento mas funciona em todo o lado.
+   Ao voltar, o handleRedirectPromise recolhe o resultado — sem ele a página
+   voltava sem conta ligada e ninguém percebia porquê. */
+function _popupProvavelmenteBloqueado(){
+  // ecrã estreito ou janela sem espaço para um popup: nem vale a pena tentar
+  if(!window.open) return true;
+  const estreito=Math.min(screen.width||9999,window.innerWidth||9999)<700;
+  const tocavel=('ontouchstart' in window)||navigator.maxTouchPoints>0;
+  return estreito&&tocavel;
+}
+function _ehErroDePopup(e){
+  const s=String((e&&(e.errorCode||e.message))||e||'');
+  /* «user_cancelled» é o utilizador a fechar o popup de propósito — aí pára-se,
+     não se insiste com um redirecionamento que ele não pediu. */
+  if(/user_cancelled|user_canceled/i.test(s)) return false;
+  return /popup_window_error|empty_window_error|popup_blocked|window\.open/i.test(s);
+}
+async function _msalPronto(app){
+  if(typeof app.initialize==='function') await app.initialize();
+  /* Se viemos de um redirecionamento, é aqui que se apanha o resultado. */
+  if(typeof app.handleRedirectPromise==='function'){
+    try{
+      const r=await app.handleRedirectPromise();
+      if(r&&r.account) return r.account;
+    }catch(e){ console.error('redirect MSAL',e); }
+  }
+  return null;
+}
 async function oneDriveLogin(){
   const app=await getMsalApp();
-  if(typeof app.initialize==='function') await app.initialize();
+  const doRedirect=await _msalPronto(app);
+  if(doRedirect) return doRedirect;
   const accounts=app.getAllAccounts();
   if(accounts.length) return accounts[0];
-  const result=await app.loginPopup({scopes:ONEDRIVE_SCOPES});
-  return result.account;
+
+  if(_popupProvavelmenteBloqueado()){
+    /* No telemóvel vai-se directo ao redirecionamento. A página SAI para o site
+       da Microsoft e volta — quem não souber julga que a app fechou sozinha, por
+       isso avisa-se antes. O levantamento fica guardado; a app repõe-no ao
+       voltar. */
+    /* GUARDAR ANTES DE SAIR.
+       O redirecionamento tira a página do ecrã. Sem gravar primeiro, um
+       levantamento por guardar perdia-se por se ter carregado num botão de
+       exportação — o pior sítio possível para perder trabalho. */
+    try{ autoSave&&autoSave(); }catch(e){}
+    try{ show&&show('A abrir a conta Microsoft… a app volta a seguir.'); }catch(e){}
+    await app.loginRedirect({scopes:ONEDRIVE_SCOPES});
+    return null;                      // a execução acaba aqui: a página saiu
+  }
+  try{
+    const result=await app.loginPopup({scopes:ONEDRIVE_SCOPES});
+    return result.account;
+  }catch(e){
+    if(!_ehErroDePopup(e)) throw e;
+    try{ autoSave&&autoSave(); }catch(e){}
+    await app.loginRedirect({scopes:ONEDRIVE_SCOPES});
+    return null;
+  }
 }
 
 async function oneDriveLogout(){
@@ -15744,17 +15802,45 @@ async function oneDriveLogout(){
 async function oneDriveGetToken(){
   const app=await getMsalApp();
   if(typeof app.initialize==='function') await app.initialize();
+  await _msalPronto(app);
   const accounts=app.getAllAccounts();
   if(!accounts.length){
-    const result=await app.loginPopup({scopes:ONEDRIVE_SCOPES});
-    return result.accessToken;
+    if(_popupProvavelmenteBloqueado()){
+      try{ autoSave&&autoSave(); }catch(e){}
+      try{ autoSave&&autoSave(); }catch(e){}
+    await app.loginRedirect({scopes:ONEDRIVE_SCOPES});
+      return null;
+    }
+    try{
+      const result=await app.loginPopup({scopes:ONEDRIVE_SCOPES});
+      return result.accessToken;
+    }catch(e){
+      if(!_ehErroDePopup(e)) throw e;
+      try{ autoSave&&autoSave(); }catch(e2){}
+      await app.loginRedirect({scopes:ONEDRIVE_SCOPES});
+      return null;
+    }
   }
   try{
     const result=await app.acquireTokenSilent({scopes:ONEDRIVE_SCOPES,account:accounts[0]});
     return result.accessToken;
   }catch(e){
-    const result=await app.loginPopup({scopes:ONEDRIVE_SCOPES,account:accounts[0]});
-    return result.accessToken;
+    // a sessão expirou: pedir de novo, pelo caminho que este aparelho aguenta
+    if(_popupProvavelmenteBloqueado()){
+      try{ autoSave&&autoSave(); }catch(e){}
+      try{ autoSave&&autoSave(); }catch(e){}
+    await app.acquireTokenRedirect({scopes:ONEDRIVE_SCOPES,account:accounts[0]});
+      return null;
+    }
+    try{
+      const result=await app.loginPopup({scopes:ONEDRIVE_SCOPES,account:accounts[0]});
+      return result.accessToken;
+    }catch(e2){
+      if(!_ehErroDePopup(e2)) throw e2;
+      try{ autoSave&&autoSave(); }catch(e3){}
+      await app.acquireTokenRedirect({scopes:ONEDRIVE_SCOPES,account:accounts[0]});
+      return null;
+    }
   }
 }
 
