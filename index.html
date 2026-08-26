@@ -541,7 +541,7 @@ const DIVS_BASE=[
 // VERSÃO — fonte única (selo no ecrã inicial + cabeçalho do TXT exportado).
 // Subir aqui a cada alteração ao ficheiro.
 // ═══════════════════════════════════════
-const APP_VERSION='v2026.08.16-FIX198';
+const APP_VERSION='v2026.08.25-FIX215';
 
 // ═══════════════════════════════════════
 // ESTADO
@@ -748,6 +748,58 @@ function buildQs(){
     key:'ventTipo'});
 
   // ELEMENTOS GERAIS
+  /* ISOLAMENTO — pergunta-se cedo porque muda a descrição de TODAS as
+     envolventes. As de pormenor (tijolos, material) só aparecem depois do sim,
+     e podem ficar por responder: nem sempre se sabe no local, às vezes só a
+     FTH o diz. A revisão no escritório preenche o que faltar. */
+  /* UMA PERGUNTA SÓ: ao dizer Sim, os pormenores abrem por baixo.
+     Cinco perguntas seguidas para o mesmo assunto obrigavam a cinco toques em
+     «seguinte» quando não há isolamento nenhum. */
+  qs.push({id:'isol-yn',ctx:'Isolamento térmico',
+    text:'O fogo tem isolamento térmico?',
+    hint:'Se disseres que sim, abrem-se os pormenores aqui mesmo. Não sabendo, '+
+         'responde Não sei — a revisão no escritório corrige.',
+    isIsolInline:true,
+    key:'temIsolamento'});
+
+  /* COBERTURA — a pergunta aparece sempre, porque um piso intermédio pode ter
+     uma parte de cobertura (recuados, terraços de cobertura parcial). É a
+     resposta «Não tem» que resolve, não esconder a pergunta. */
+  qs.push({id:'cob-tipo',ctx:'Cobertura',
+    text:'A cobertura do fogo é terraço ou tem desvão?',
+    hint:'Um desvão NÃO habitado não é cobertura exterior: a envolvente passa a '+
+         'ser a esteira por baixo dele, com b_tr da Tabela 22. Num piso '+
+         'intermédio costuma não haver cobertura — responde Não tem.',
+    chips:['Terraço','Inclinada com desvão','Inclinada sem desvão',
+           'Não tem / não aplicável'],
+    key:'coberturaTipoEsc'});
+
+  /* PAVIMENTO — o que está por baixo muda a descrição e o U. */
+  qs.push({id:'pav-baixo',ctx:'Pavimento',
+    text:'O que está por baixo do fogo?',
+    hint:'Define se o pavimento é térreo, interior sobre espaço não útil, ou '+
+         'sobre outro fogo — que não é envolvente e não conta.',
+    chips:['Terreno','Garagem','Arrecadação','Loja / comércio','Cave',
+           'Outro fogo','Não aplicável'],
+    key:'pavPorBaixo'});
+
+  /* A cave (ou garagem) ocupa TODA a área do piso de cima, ou só parte?
+     Quando ocupa parte, o piso de cima tem DUAS envolventes de baixo: a laje
+     sobre o espaço não útil e o pavimento em contacto com o solo no resto.
+     Assumir uma só era perder metade da envolvente. */
+  qs.push({id:'pav-abrangencia',ctx:'Pavimento',
+    text:'O espaço por baixo ocupa toda a área do fogo?',
+    hint:'Uma cave ou garagem que ocupe só parte deixa o resto do pavimento em '+
+         'contacto com o solo — e são duas envolventes diferentes.',
+    chips:['Toda a área','Só parte — o resto assenta no solo','Não sei'],
+    key:'pavAbrangencia',
+    cond:()=>{
+      const v=String(D.pavPorBaixo||'').toLowerCase();
+      if(/garagem|arrecada|loja|com[ée]rcio|cave/.test(v)) return true;
+      // sem resposta, pergunta-se quando há cave declarada como ENU
+      return !v&&!!((D.enuTipos||{})['Cave']);
+    }});
+
   qs.push({id:'esp-parede',ctx:'Paredes',
     text:'Qual a espessura da parede exterior em centímetros?',
     hint:'Ex: 22',isNumeric:true,key:'espParede'});
@@ -4001,6 +4053,10 @@ function renderQ(){
     inlWrap.style.display='block';inlWrap.innerHTML='';
     document.getElementById('ans-box').style.display='none';
     renderFotosRevisaoInline(inlWrap);
+  } else if(q.isIsolInline){
+    inlWrap.style.display='block';inlWrap.innerHTML='';
+    document.getElementById('ans-box').style.display='none';
+    renderIsolInline(inlWrap);
   } else if(q.isDVInline){
     inlWrap.style.display='block';inlWrap.innerHTML='';
     document.getElementById('ans-box').style.display='none';
@@ -6105,7 +6161,11 @@ function buildSum(){
         //  Piso sobre cave/ENU (1): pav. sobre ENU + pav. intermédio no teto — SEM cobertura
         //  Piso intermédio (2): pav. intermédio ×2
         const pl=D.pisoLocal||'';
-        if(pl==='4'){
+        /* Mesma escala antiga, mesmo problema — aqui só no ecrã, mas o técnico
+           lê e confia. */
+        const _rBP=String(D.pavPorBaixo||'').toLowerCase();
+        const _terreoOkP=_rBP?/terreno|solo/.test(_rBP):podeTocarOSolo();
+        if(pl==='4'&&_terreoOkP){
           h+=`<div style="${rowStyle}">
             <span style="font-size:13px;color:var(--tx)">Fachada com pavimento térreo</span>
             <span style="font-size:14px;font-weight:700;color:var(--tx);text-align:right">${compTotal.toFixed(2)} m</span></div>`;
@@ -6705,9 +6765,16 @@ const LISTAGEM_CE=[{"tipo":"Apartamento","n":"1","cidade":"Lagos","piso":"Últim
    se a pasta mudar de sítio. */
 const PASTA_CE_BASE='C:\\Users\\renat\\OneDrive\\Área de Trabalho\\1_EM CURSO\\- BASE CE E PRJ\\__CERTIFIFICADOS__-__';
 
-const PESO_MATCH={tipo:100,vidros:60,aqs:45,avac:30,piso:25,
-  caixilharia:12,protecao:10,isolamento:8,cobertura:8,espParede:6,
-  lareira:5,solar:5,adjacente:4};
+/* ORDEM DE PRIORIDADE, dada pelo Renato em 17/08:
+     1º AVAC (tem ou não tem)   2º vidros   3º piso   4º AQS   depois o resto.
+   O AVAC e o tipo de edifício não pesam — FILTRAM. Um apartamento sem
+   climatização não se compara com um que tenha: o sistema muda tudo no
+   certificado, e mostrar um "94% parecido" com ar condicionado é pior do que
+   não mostrar nada. */
+const FILTRA=['tipo','avac'];
+const PESO_MATCH={vidros:100,piso:60,aqs:45,
+  caixilharia:14,protecao:12,isolamento:10,cobertura:8,espParede:6,
+  lareira:6,solar:5,adjacente:4};
 
 function _norm(x){
   return String(x||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'')
@@ -6736,26 +6803,53 @@ function _perfilDoLevantamento(){
   });
   const vidros=(nD&&nS)?'Duplos e Simples':(nD?'Duplos':(nS?'Simples':''));
 
-  // AVAC: há sistema de climatização em alguma divisão?
-  let avac='NÃO';
+  /* AVAC: só conta um tipo com NOME.
+     A app grava tipos:[''] quando a pergunta foi aberta e fechada sem escolher.
+     O teste era some(t=>!/lareira/.test(t)), que dá VERDADEIRO para a string
+     vazia — e um apartamento sem climatização nenhuma saía com "AVAC SIM".
+     Na Quinta da Benposta isso levou o comparador a processos com ar
+     condicionado, que é o oposto do que se procurava. */
+  let avac='NÃO', lareira='NÃO';
   Object.values(D.climaDivisoes||{}).forEach(c=>{
-    if((c.tipos||[]).some(t=>!/lareira|salamandra|recuperador/i.test(t))) avac='SIM';
-  });
-  let lareira='NÃO';
-  Object.values(D.climaDivisoes||{}).forEach(c=>{
-    if((c.tipos||[]).some(t=>/lareira|salamandra|recuperador/i.test(t))) lareira='SIM';
+    (c.tipos||[]).forEach(t=>{
+      const nome=String(t||'').trim();
+      if(!nome||/sem sistema/i.test(nome)) return;
+      if(/lareira|salamandra|recuperador/i.test(nome)) lareira='SIM';
+      else avac='SIM';
+    });
   });
 
   // piso: só faz sentido em apartamentos
   const tipo=/moradia/i.test(D.edificioTipo||'')?'Moradias':'Apartamento';
   let piso='';
   if(tipo==='Apartamento'){
-    const pl=_norm(D.pisoLocal), nE=parseInt(D.nPisosEdificio)||0, n=parseInt(D.pisoLocal);
-    /* pisoLocal é a ordem no prédio: 1 = R/C, 2 = 1º andar, 3 = 2º… A app
-       também aceita a palavra escrita. O nº 1 é o rés-do-chão. */
-    if(/^r\/?c$|^0$|terreo|^1$/.test(pl)) piso='Térreo';
-    else if(n&&nE&&n>=nE) piso='Último';
-    else if(n&&n>1) piso='Intermédio';
+    /* A MORADA MANDA SOBRE O pisoLocal.
+       Na Quinta da Benposta o pisoLocal tinha ficado com 4 — o nº de pisos do
+       prédio — e a fracção é RC104, rés-do-chão. O comparador foi buscar
+       processos de ÚLTIMO piso, que é o oposto. */
+    const mor=String(D.moradaCaderneta||'')+' '+String(D.morada||'');
+    const nE=parseInt(D.nPisosEdificio)||0;
+    /* Fracção sobre garagem: o pavimento dá para espaço não útil, não para o
+       solo. É um caso próprio na listagem e não se confunde com térreo. */
+    const enu=Object.keys(D.enuTipos||{}).join(' ')+' '+String(D.enuMedida||'');
+    const sobreGaragem=/garagem|estacionament|box\b/i.test(enu)&&
+      /pavimento|ch[aã]o|inferior|baixo/i.test(enu);
+    if(sobreGaragem){ piso='Sobre garagem'; }
+    else if(/\bR\/?C\s*\d*\b|\brés-?do-?ch[aã]o\b|\bres do chao\b|\bcave\b/i.test(mor)){
+      piso='Térreo';
+    }else{
+      const andar=mor.replace(/\b\d{4}-\d{3}\b/g,'')
+        .match(/(?:^|[\s,])(\d{1,2})\.?[ºo°]/);
+      if(andar){
+        const na=parseInt(andar[1]);
+        piso=(nE&&na>=nE-1)?'Último':'Intermédio';
+      }else{
+        const pl=_norm(D.pisoLocal), n=parseInt(D.pisoLocal);
+        if(/^r\/?c$|^0$|terreo|^1$/.test(pl)) piso='Térreo';
+        else if(n&&nE&&n>=nE) piso='Último';
+        else if(n&&n>1) piso='Intermédio';
+      }
+    }
   } else piso=(parseInt(D.pisos)||1)>1?'2 Pisos':'Moradia';
 
   const prot=(()=>{
@@ -6792,24 +6886,114 @@ function _perfilDoLevantamento(){
 }
 function certificadosParecidos(n){
   const p=_perfilDoLevantamento();
-  const pontos=LISTAGEM_CE.map(c=>{
-    let s=0,max=0,iguais=[],difs=[];
+  /* A listagem foi escrita à mão ao longo dos anos e tem sinónimos: "Sobre
+     garagem" e "Sobre exterior" são pisos térreos para efeito de comparação,
+     "Térreo (PH)" é térreo, "1 Piso" é uma moradia de um piso. Sem os
+     equiparar, 15 certificados nunca podiam ser escolhidos — ficavam mortos na
+     listagem. */
+  /* Sinónimos de escrita, NÃO de conteúdo. A listagem foi escrita à mão ao
+     longo dos anos: "Térreo (PH)" é térreo, "1 Piso" é uma moradia de um piso,
+     "1º (PH)" é um piso intermédio.
+     "Sobre garagem" e "Sobre exterior" NÃO entram aqui: um pavimento sobre
+     garagem é sobre espaço não útil, um térreo está em contacto com o solo —
+     são cálculos diferentes. Equipará-los daria um "95% parecido" num processo
+     com outra envolvente. Estes só saem quando o levantamento os produz. */
+  const SINONIMOS={
+    'terreo (ph)':'terreo','1 piso':'moradia','3 pisos':'2 pisos',
+    '1o (ph)':'intermedio','1º (ph)':'intermedio','n.a.':'',
+  };
+  const _sin=v=>{ const x=_norm(v); return SINONIMOS[x]!==undefined?SINONIMOS[x]:x; };
+  const igual=(a,b)=>{
+    const x=_sin(a), y=_sin(b);
+    if(!x||!y) return false;
+    return x===y||x.includes(y)||y.includes(x);
+  };
+  /* Primeiro filtra-se, depois pontua-se. Sem candidatos que passem o filtro,
+     não se mostra nada — é mais honesto do que apontar um processo errado. */
+  let base=LISTAGEM_CE.filter(c=>FILTRA.every(k=>!p[k]||!c[k]||igual(p[k],c[k])));
+  if(!base.length) return {perfil:p,lista:[],semFiltro:true};
+  const pontos=base.map(c=>{
+    let s=0,max=0,iguais=[...FILTRA.filter(k=>p[k]&&c[k])],difs=[];
     Object.entries(PESO_MATCH).forEach(([k,w])=>{
       const a=_norm(p[k]), b=_norm(c[k]);
       if(!a||!b) return;                      // campo sem informação não pesa
       max+=w;
-      if(a===b||a.includes(b)||b.includes(a)){ s+=w; iguais.push(k); }
+      if(igual(a,b)){ s+=w; iguais.push(k); }
       else difs.push(k+': '+c[k]+' ≠ '+p[k]);
     });
     return {c,s,pct:max?Math.round(s/max*100):0,iguais,difs};
   });
-  // o tipo tem de bater — um apartamento nunca se compara a uma moradia
-  const mesmoTipo=pontos.filter(x=>_norm(x.c.tipo)===_norm(p.tipo));
-  const base=mesmoTipo.length?mesmoTipo:pontos;
-  return {perfil:p,lista:base.sort((a,b)=>b.s-a.s).slice(0,n||3)};
+  return {perfil:p,lista:pontos.sort((a,b)=>b.s-a.s).slice(0,n||3)};
 }
 
 
+
+/* ══════════ ISOLAMENTO — TUDO NUMA PERGUNTA ══════════
+   Sim/Não/Não sei em cima; ao escolher Sim, os pormenores abrem por baixo.
+   Antes eram cinco perguntas seguidas, e quem não tem isolamento tinha de tocar
+   cinco vezes em «seguinte» para lá passar. */
+const ISOL_PAREDE_ESP=['3','4','5','6'];
+const ISOL_COB_ESP=['3','4','5','6','8','10'];
+const ISOL_TIJOLOS=['11+11','15+11','15+15','11+15','Capoto','Termoargila','Parede dupla'];
+const ISOL_MAT=['XPS','EPS','Poliuretano','Lã de rocha'];
+function renderIsolInline(wrap){
+  wrap.innerHTML='';
+  const sec=t2=>{const d=document.createElement('div');d.className='aqs-lbl';
+    d.style.marginTop='14px';d.textContent=t2;wrap.appendChild(d);return d;};
+  const linha=()=>{const r=document.createElement('div');r.className='ve-chips';
+    wrap.appendChild(r);return r;};
+  const grupo=(rotulo,opts,campo,extra)=>{
+    sec(rotulo);
+    const r=linha();
+    [...opts,...(extra||['Não sei'])].forEach(o=>{
+      const c=document.createElement('div');
+      c.className='chip'+(D[campo]===o?' on':'');
+      c.textContent=o;
+      c.onclick=()=>{ D[campo]=(D[campo]===o?'':o); autoSave(); renderIsolInline(wrap); };
+      r.appendChild(c);
+    });
+  };
+
+  // ── a pergunta principal ──
+  const r0=linha();
+  ['Sim','Não','Não sei'].forEach(o=>{
+    const c=document.createElement('div');
+    c.className='chip'+(D.temIsolamento===o?' on':'');
+    c.textContent=o;
+    c.onclick=()=>{
+      D.temIsolamento=o;
+      if(o!=='Sim'){   // muda de ideias: o que respondeu antes deixa de valer
+        D.isolParedeEsp=''; D.isolParedeTijolos=''; D.isolParedeMat=''; D.isolCobEsp='';
+      }
+      autoSave(); renderIsolInline(wrap);
+    };
+    r0.appendChild(c);
+  });
+
+  if(D.temIsolamento!=='Sim'){
+    const n=document.createElement('div');
+    n.style.cssText='font-size:12.5px;color:var(--tx3);margin-top:10px';
+    n.textContent=D.temIsolamento==='Não sei'
+      ? 'Fica marcado como por confirmar. As descrições saem sem isolamento até se corrigir.'
+      : 'As descrições saem das soluções sem isolamento térmico.';
+    wrap.appendChild(n);
+    return;
+  }
+
+  // ── pormenores, só depois do Sim ──
+  grupo('Espessura nas PAREDES (cm)',ISOL_PAREDE_ESP,'isolParedeEsp',['Não tem','Não sei']);
+  grupo('Tijolos da parede',ISOL_TIJOLOS,'isolParedeTijolos');
+  grupo('Material do isolamento',ISOL_MAT,'isolParedeMat');
+  grupo('Espessura na COBERTURA (cm)',ISOL_COB_ESP,'isolCobEsp',['Não tem','Não sei']);
+
+  const n=document.createElement('div');
+  n.style.cssText='font-size:12.5px;color:var(--tx2);margin-top:14px;'+
+    'padding:9px 11px;background:var(--bg2);border:1px solid var(--br);border-radius:9px';
+  n.innerHTML='O que não souberes agora fica por preencher — os tijolos às vezes '+
+    'só aparecem na ficha técnica. A descrição sai pela espessura e a revisão no '+
+    'escritório completa o resto.';
+  wrap.appendChild(n);
+}
 
 /* Painel único da DV: data, hora e telemóvel. Tudo em chips — em obra
    escreve-se mal e devagar; tocar é mais rápido e não erra. */
@@ -6985,6 +7169,11 @@ const DV_TIPOS_EDIF=[
   [/\blote\s*([\w-]+)/i,'Lote'],[/\bbloco\s*([\w-]+)/i,'Bloco'],
   [/\bed(?:if[íi]cio)?\.?\s+([\w-]+)/i,'Edifício'],[/\bvivenda\s*([\w-]+)/i,'Vivenda'],
   [/\btorre\s*([\w-]+)/i,'Torre'],[/\bpr[ée]dio\s*([\w-]+)/i,'Prédio'],
+  /* Urbanização e quinta apanham o resto do nome, até à vírgula ou ao número —
+     "Urb. Quinta da Benposta Nº 73C" dá designação "Quinta da Benposta".
+     Sem isto, ficava tudo colado ao nome da via. */
+  [/\burb(?:aniza[çc][aã]o)?\.?\s+([^,]*?)(?=\s*(?:,|n\.?[ºo°]|$))/i,'Urbanização'],
+  [/\bcondom[íi]nio\s+([^,]*?)(?=\s*(?:,|n\.?[ºo°]|$))/i,'Condomínio'],
 ];
 function dvMorada(){
   // a mais completa das duas
@@ -7015,9 +7204,19 @@ function dvMorada(){
               m.match(/(?:^|[\s,])n\.?\s+(\d+[\w-]*)/i);
   if(porta){ out.porta=porta[1]; m=m.replace(porta[0],' ').replace(/\s{2,}/g,' ')
     .replace(/[,\s]+$/,''); }
-  // o que sobra, sem o piso, é o nome da via
-  out.nomeVia=m.replace(/,?\s*\d+\.?[ºo°]\s*(esq|dt[ºo°]?|dir|frt|tr[ºs]?)?\.?\s*$/i,'')
-    .replace(/[,\s]+$/,'').replace(/^[,\s]+/,'').trim();
+  /* O que sobra é o nome da via, depois de limpo:
+     · o piso no fim ("2º Dtº")
+     · a referência da fracção ("RC104", "1ºE") — é fracção, não via
+     · traços e vírgulas soltos, que ficam onde se tirou alguma coisa */
+  out.nomeVia=m
+    .replace(/,?\s*\d+\.?[ºo°]\s*(esq|dt[ºo°]?|dir|frt|tr[ºs]?)?\.?\s*$/i,'')
+    .replace(/,?\s*\b(?:R\/?C|cave)\s*\d*[A-Z]?\b/ig,'')
+    .replace(/,?\s*\b\d+[ºo°][A-Z]\b/ig,'')
+    .replace(/\s{2,}/g,' ')
+    .replace(/[\s,\-–]+$/,'')          // traço ou vírgula largados no fim
+    .replace(/^[\s,\-–]+/,'')
+    .replace(/\s+,/g,',')
+    .trim();
   if(!out.porta&&out.nomeVia){
     // "Rua X, 60" — número solto no fim
     const n=out.nomeVia.match(/,\s*(\d+[\w-]*)$/);
@@ -7028,6 +7227,13 @@ function dvMorada(){
 function dvPisoAndar(){
   if(D.dvAndar) return D.dvAndar;
   if(/moradia/i.test(D.edificioTipo||'')) return 'R/C';
+  /* A morada costuma trazer o piso e manda sobre o pisoLocal: num prédio, a
+     fracção "RC104" é o rés-do-chão, por mais que o pisoLocal diga outra coisa.
+     Num levantamento real (Quinta da Benposta) o extrato saía "3º" para uma
+     fracção de R/C — o pisoLocal tinha ficado no nº de pisos do prédio. */
+  const mor=String(D.moradaCaderneta||'')+' '+String(D.morada||'');
+  if(/\bR\/?C\s*\d*\b|\brés-?do-?ch[aã]o\b|\bres do chao\b/i.test(mor)) return 'R/C';
+  if(/\bcave\b/i.test(mor)) return 'Cave';
   /* O piso pode vir escrito na morada ("2º"). Tira-se primeiro o código postal:
      em "8600-605" o "605" seguido de vírgula podia passar por piso. */
   const semCP=String(D.moradaCaderneta||D.morada||'').replace(/\b\d{4}-\d{3}\b/g,'');
@@ -7123,12 +7329,160 @@ async function exportarDV(){
     'copiado — podes colar directamente no Claude do Chrome.');
 }
 
+
+/* O fogo está no último piso? A morada manda sobre o pisoLocal — numa fracção
+   "RC104" o pisoLocal pode trazer o nº de pisos do prédio, e daí sair "último"
+   num rés-do-chão. Mesma regra do extrato DV e do comparador de CE. */
+// "Sim" nas respostas de chip; "Não sei" não é sim.
+function isSimTxt(v){ return /^sim$/i.test(String(v||'').trim()); }
+/* O fogo pode estar em contacto com o terreno? Só no piso térreo, na cave ou
+   numa moradia. Num apartamento de andar, o que está por baixo é sempre outro
+   fogo ou um espaço não útil — nunca o solo. */
+function podeTocarOSolo(){
+  if(/moradia/i.test(D.edificioTipo||'')) return true;
+  const mor=String(D.moradaCaderneta||'')+' '+String(D.morada||'');
+  if(/\bR\/?C\s*\d*\b|\brés-?do-?ch[aã]o\b|\bres do chao\b|\bcave\b/i.test(mor)) return true;
+  // um andar escrito na morada exclui logo
+  const andar=mor.replace(/\b\d{4}-\d{3}\b/g,'').match(/(?:^|[\s,])(\d{1,2})\.?[ºo°]/);
+  if(andar) return false;
+  const pl=String(D.pisoLocal||'').trim();
+  if(/^r\/?c$|^0$|terreo|t[ée]rreo|cave/i.test(pl)) return true;
+  const n=parseInt(pl);
+  if(isFinite(n)&&n>1) return false;        // pisoLocal 1 = R/C; 2+ é andar
+  return true;                              // sem informação, não se exclui
+}
+
+function ehUltimoPiso(){
+  if(/moradia/i.test(D.edificioTipo||'')) return true;
+  const mor=String(D.moradaCaderneta||'')+' '+String(D.morada||'');
+  if(/\bR\/?C\s*\d*\b|\brés-?do-?ch[aã]o\b|\bcave\b/i.test(mor)) return false;
+  const nE=parseInt(D.nPisosEdificio)||0;
+  const andar=mor.replace(/\b\d{4}-\d{3}\b/g,'').match(/(?:^|[\s,])(\d{1,2})\.?[ºo°]/);
+  if(andar&&nE) return parseInt(andar[1])>=nE-1;
+  const n=parseInt(D.pisoLocal);
+  return !!(n&&nE&&n>=nE);
+}
+
+/* ══════════ BASE TÉRMICA 2025 ══════════
+   As descrições que o Renato usa nos certificados, tiradas do
+   BASE_2025_Térmico.xlsb. Cada entrada traz o U e o texto completo — não se
+   redige nada, escolhe-se o que já está escrito e validado.
+   Para actualizar: substituir esta constante por inteiro a partir do xlsb. */
+const BASE2025={"paredes":[{"u":"1.3","isol":"SEM ISOLAMENTO","esp":null,"mat":null,"tij":null,"caixa":null,"espParede":"0.28","desc":"Paredes exteriores em alvenaria de tijolo (posterior a 1960) com uma espessura de 0,25m em alvenaria de tijolo, rebocadas por reboco tradicional de cor clara em ambas as faces, por falta de dados técnicos da constituição das paredes utilizou-se soluções por defeito do Manual SCE. Coeficiente de transmissão térmica de U=1,30w/m2.ºC"},{"u":"1.1","isol":"SEM ISOLAMENTO","esp":null,"mat":null,"tij":null,"caixa":null,"espParede":"0.3","desc":"Paredes exteriores em alvenaria de tijolo (posterior a 1960), com uma espessura de 0,30m em alvenaria de tijolo, rebocadas por reboco tradicional de cor clara em ambas as faces, por falta de dados técnicos da constituição das paredes utilizou-se soluções por defeito do Manual SCE. Coeficiente de transmissão térmica de U=1,10w/m2.ºC"},{"u":"0.96","isol":"SEM ISOLAMENTO","esp":null,"mat":null,"tij":null,"caixa":null,"espParede":"0.35","desc":"Paredes exteriores em alvenaria de tijolo (posterior a 1960), espessura total da parede com cerca de 0,35m, formando de caixa de ar e rebocadas com reboco tradicional em ambas as faces. Reboco exterior tradicional pintado de cor clara. Por falta de dados técnicos da constituição das paredes considerou-a informação por defeito do Manual SCE. Coeficiente de Transmissão térmica de U=0,96 (W/m2,ºC)."},{"u":"1.7","isol":"SEM ISOLAMENTO","esp":null,"mat":null,"tij":null,"caixa":null,"espParede":"0.2","desc":"Paredes exteriores em alvenaria de tijolo (posterior a 1960) com uma espessura de 0,20m em alvenaria de tijolo, rebocadas por reboco tradicional de cor clara em ambas as faces, por falta de dados técnicos da constituição das paredes utilizou-se soluções por defeito do Manual SCE. Coeficiente de transmissão térmica de U=1,70w/m2.ºC"},{"u":"2.2","isol":"Tj 11cm","esp":1,"mat":null,"tij":null,"caixa":null,"espParede":"0.15","desc":"Paredes exteriores em alvenaria de tijolo (posterior a 1960) com uma espessura de 0,15m em alvenaria de tijolo, rebocadas por reboco tradicional de cor clara em ambas as faces, por falta de dados técnicos da constituição das paredes utilizou-se soluções por defeito do Manual SCE. Coeficiente de transmissão térmica de U=2,20w/m2.ºC"},{"u":"2.65","isol":"pedra","esp":null,"mat":null,"tij":null,"caixa":null,"espParede":"0.5","desc":"Paredes exteriores simples (anterior a 1960) com espessura de 0,50m em alvenaria de pedra e argamassa, rebocadas com reboco tradicional em ambas as faces, reboco exterior pintado de cor clara, por falta de dados técnicos da constituição das paredes utilizou-se soluções por defeito do Manual SCE. Coeficiente de transmissão térmica é de U=2,65 W/m2.ºC."},{"u":"2.53","isol":"pedra","esp":null,"mat":null,"tij":null,"caixa":null,"espParede":"0.55","desc":"Paredes exteriores simples (anterior a 1960) com espessura de 0,55m em alvenaria de pedra e argamassa, rebocadas com reboco tradicional em ambas as faces, reboco exterior pintado de cor clara, por falta de dados técnicos da constituição das paredes utilizou-se soluções por defeito do Manual SCE. Coeficiente de transmissão térmica é de U=2,53 W/m2.ºC."},{"u":"2.4","isol":"pedra","esp":null,"mat":null,"tij":null,"caixa":null,"espParede":"0.6","desc":"Paredes exteriores simples (anterior a 1960) com espessura de 0,60m em alvenaria de pedra e argamassa, rebocadas com reboco tradicional em ambas as faces, reboco exterior pintado de cor clara, por falta de dados técnicos da constituição das paredes utilizou-se soluções por defeito do Manual SCE. Coeficiente de transmissão térmica é de U=2,40 W/m2.ºC."},{"u":"1.8","isol":"taipa","esp":null,"mat":null,"tij":null,"caixa":null,"espParede":"0.6","desc":"Parede de taipa, com espessura total de 60.00 cm e de cor Clara, com as seguintes camadas:1) Argamassa e reboco tradicional, com 1.5 cm de espessura e coeficiente de condutibilidade térmica de 1.300 W/(m·°C); 2) Taipa, com 57.0 cm de espessura e coeficiente de condutibilidade térmica de 1.100 W/(m·°C); 3) Argamassa e reboco tradicional, com 1.5 cm de espessura e coeficiente de condutibilidade térmica de 1.300 W/(m·°C)."},{"u":"0.64","isol":"0,03 Sem caixa de ar 11+11 XPS","esp":null,"mat":"XPS","tij":"11+11","caixa":false,"espParede":"0.3","desc":"Paredes exteriores em alvenaria de tijolo, com espessura de 0,30m, composta por reboco tradicional de cor clara um pano com tijolo de 30x20x11, formando de caixa de ar totalmente preenchida com isolamento térmico com 0,03m poliestireno expandido com uma condutibilidade térmica de 0,037(Wm.ºC), um pano de tijolo de 30x20x11, reboco interior estuque de massa fina de cor clara. Coeficiente de transmissão térmica de U=0,64(W/m2,ºC) (Valor retirado Quadro II.5 do ITE50)."},{"u":"0.67","isol":"0,03 Sem caixa de ar 11+11 Poliuretano","esp":null,"mat":"Poliuretano","tij":"11+11","caixa":false,"espParede":"0.3","desc":"Paredes exteriores em alvenaria de tijolo, com espessura de 0,30m, composta por reboco tradicional de cor clara, um pano com tijolo de 30x20x11, formando de caixa de ar totalmente preenchida com isolamento térmico com 0,03m poliuretano com uma condutibilidade térmica de 0,040(Wm.ºC), um pano de tijolo de 30x20x11, reboco interior estuque de massa fina de cor clara. Coeficiente de transmissão térmica de U=0,67(W/m2,ºC) (Valor retirado Quadro II.5 do ITE50)."},{"u":"0.6","isol":"0,03 caixa de ar 11+11 EPS","esp":null,"mat":"EPS","tij":"11+11","caixa":true,"espParede":"0.3","desc":"Paredes exteriores em alvenaria de tijolo, com espessura de 0,30m, composta por reboco tradicional de cor clara, um pano com tijolo de 30x20x11, formando de caixa de ar preenchida parcialmente com isolamento térmico com 0,03m com uma condutibilidade térmica de 0,042(Wm.ºC), um pano de tijolo de 30x20x11, reboco interior estuque de massa fina de cor clara. Coeficiente de transmissão térmica de U=0,60(W/m2,ºC) (Valor retirado Quadro II.6 do ITE50)."},{"u":"0.58","isol":"0,03 caixa de ar 11+11 XPS","esp":null,"mat":"XPS","tij":"11+11","caixa":true,"espParede":"0.3","desc":"Paredes exteriores em alvenaria de tijolo, com espessura de 0,30m, composta por reboco tradicional de cor clara, um pano com tijolo de 30x20x11, formando de caixa de ar preenchida parcialmente com isolamento térmico com 0,03m com uma condutibilidade térmica de 0,037(Wm.ºC), um pano de tijolo de 30x20x11, reboco interior estuque de massa fina de cor clara. Espessura total da parede 0,30m. Coeficiente de transmissão térmica de U=0,58(W/m2,ºC) (Valor retirado Quadro II.6 do ITE50)."},{"u":"0.57","isol":"11+4cm +11 poliuretano sem caixa de ar","esp":4,"mat":"Poliuretano","tij":null,"caixa":false,"espParede":"0.32","desc":"Paredes exteriores em alvenaria de tijolo, com espessura de 0,32m, composta por reboco tradicional de cor clara, um pano com tijolo de 30x20x11, formando de caixa de ar com 4 cm preenchida com isolamento térmico poliuretano com 0,04m com uma condutibilidade térmica de 0,042(Wm.ºC), um pano de tijolo de 30x20x11, reboco interior estuque de massa fina de cor clara. Coeficiente de transmissão térmica de U=0,57(W/m2,ºC) (Valor retirado Quadro II.6 do ITE50)."},{"u":"0.55","isol":"4cm sem caixa de ar 11+11 XPS","esp":4,"mat":"XPS","tij":"11+11","caixa":false,"espParede":"0.32","desc":"Paredes exteriores em alvenaria de tijolo, com espessura de 0,32m, composta por reboco tradicional de cor clara, um pano com tijolo de 30x20x11, formando de caixa de ar totalmente preenchida com isolamento térmico com 0,04m poliestireno expandido extrudido XPS com uma condutibilidade térmica de 0,037(Wm.ºC), um pano de tijolo de 30x20x11, reboco interior estuque de massa fina de cor clara. Coeficiente de transmissão térmica de U=0,55(W/m2,ºC) (Valor retirado Quadro II.5 do ITE50)."},{"u":"0.5","isol":"0,04 com caixa de ar 11+11 XPS","esp":null,"mat":"XPS","tij":"11+11","caixa":true,"espParede":"0.32","desc":"Paredes exteriores em alvenaria de tijolo, com espessura de 0,32m, composta por reboco tradicional de cor clara, um pano com tijolo de 30x20x11, formando de caixa de ar parcialmente preenchida com isolamento térmico com 0,04m poliestireno expandido extrudido XPS com uma condutibilidade térmica de 0,037(Wm.ºC), um pano de tijolo de 30x20x11, reboco interior estuque de massa fina de cor clara. Coeficiente de transmissão térmica de U=0,50(W/m2,ºC) (Valor retirado Quadro II.5 do ITE50)."},{"u":"0.49","isol":"0,05 XPS 11+11","esp":5,"mat":"XPS","tij":"11+11","caixa":null,"espParede":"0.3","desc":"Paredes exteriores em alvenaria de tijolo, com espessura de 0,30m, composta por reboco tradicional de cor clara, um pano com tijolo de 30x20x11, formando de caixa de ar com isolamento térmico XPS com 0,05m com uma condutibilidade térmica de 0,037(Wm.ºC), um pano de tijolo de 30x20x11, reboco interior estuque de massa fina de cor clara. Coeficiente de transmissão térmica de U=0,49(W/m2,ºC) (Valor retirado Quadro II.6 do ITE50)."},{"u":"0.46","isol":"0,06 XPS 11+11","esp":6,"mat":"XPS","tij":"11+11","caixa":null,"espParede":"0.3","desc":"Paredes exteriores em alvenaria de tijolo, com espessura de 0,30m, composta por reboco tradicional de cor clara, um pano com tijolo de 30x20x11, formando de caixa de ar com isolamento térmico XPS com 0,06m com uma condutibilidade térmica de 0,037(Wm.ºC), um pano de tijolo de 30x20x11, reboco interior estuque de massa fina de cor clara. Coeficiente de transmissão térmica de U=0,46(W/m2,ºC) (Valor retirado Quadro II.6 do ITE50)."},{"u":"0.63","isol":"0,03 Sem caixa de ar 15+11 Poliuretano","esp":null,"mat":"Poliuretano","tij":"15+11","caixa":false,"espParede":"0.35","desc":"Paredes exteriores em alvenaria de tijolo, com espessura de 0,35m, composta por reboco tradicional de cor clara, um pano com tijolo de 30x20x15, formando de caixa de ar totalmente preenchida com isolamento térmico com 0,03m poliuretano com uma condutibilidade térmica de 0,042(Wm.ºC), um pano de tijolo de 30x20x11, reboco interior estuque de massa fina de cor clara. Coeficiente de transmissão térmica de U=0,63(W/m2,ºC) (Valor retirado Quadro II.5 do ITE50)."},{"u":"0.6","isol":"0,03 s/ caixa de ar 15+11 XPS","esp":null,"mat":"XPS","tij":"15+11","caixa":false,"espParede":"0.35","desc":"Paredes exteriores em alvenaria de tijolo, com espessura de 0,35m, composta por reboco tradicional de cor clara, um pano com tijolo de 30x20x15, formando de caixa de ar totalmente preenchida com isolamento térmico com 0,03m de poliestireno expandido com uma condutibilidade térmica de 0,037(Wm.ºC), um pano de tijolo de 30x20x11, reboco interior estuque de massa fina de cor clara. Coeficiente de transmissão térmica de U=0,60(W/m2,ºC) (Valor retirado Quadro II.6 do ITE50)."},{"u":"0.54","isol":"0,04 Sem caixa de ar 15+11 Poliuretano","esp":null,"mat":"Poliuretano","tij":"15+11","caixa":false,"espParede":"0.35","desc":"Paredes exteriores em alvenaria de tijolo, com espessura de 0,35m, composta por reboco tradicional de cor clara, um pano com tijolo de 30x20x15, formando de caixa de ar totalmente preenchida com isolamento térmico com 0,04m poliuretano com uma condutibilidade térmica de 0,042(Wm.ºC), um pano de tijolo de 30x20x11, reboco interior estuque de massa fina de cor clara. Coeficiente de transmissão térmica de U=0,63(W/m2,ºC) (Valor retirado Quadro II.5 do ITE50)."},{"u":"0.51","isol":"0,04 s/ caixa de ar 15+11 XPS","esp":null,"mat":"XPS","tij":"15+11","caixa":false,"espParede":"0.35","desc":"Paredes exteriores em alvenaria de tijolo, com espessura de 0,35m, composta por reboco tradicional de cor clara, um pano com tijolo de 30x20x15, formando de caixa de ar totalmente preenchida com isolamento térmico com 0,04m de poliestireno expandido com uma condutibilidade térmica de 0,037(Wm.ºC), um pano de tijolo de 30x20x11, reboco interior estuque de massa fina de cor clara. Coeficiente de transmissão térmica de U=0,60(W/m2,ºC) (Valor retirado Quadro II.6 do ITE50)."},{"u":"0.54","isol":"ISSO XPS 3cm 15+11 Com caixa de ar","esp":3,"mat":"XPS","tij":"15+11","caixa":true,"espParede":"","desc":"Paredes exteriores em alvenaria de tijolo, com espessura de 0,36m, composta por reboco tradicional de cor clara, um pano com tijolo de 30x20x15, formando de caixa de ar preenchida parcialmente com isolamento térmico Walmate com 0,03m com uma condutibilidade térmica de 0,037(Wm.ºC), um pano de tijolo de 30x20x11, reboco interior estuque de massa fina de cor clara. Coeficiente de transmissão térmica de U=0,54(W/m2,ºC) (Valor retirado Quadro II.6 do ITE50)."},{"u":"0.47","isol":"ISSO XPS 4cm tj 15+11","esp":4,"mat":"XPS","tij":"15+11","caixa":null,"espParede":"0.36","desc":"Paredes exteriores em alvenaria de tijolo, com espessura de 0,36m, composta por reboco tradicional de cor clara, um pano com tijolo de 30x20x15, formando de caixa de ar com 6cm preenchida parcialmente com isolamento térmico Walmate com 0,04m com uma condutibilidade térmica de 0,037(Wm.ºC), um pano de tijolo de 30x20x11, reboco interior estuque de massa fina de cor clara. Coeficiente de transmissão térmica de U=0,47(W/m2,ºC) (Valor retirado Quadro II.6 do ITE50)."},{"u":"0.5","isol":"ISSO EPS/ MW 4cm tj 15+11","esp":4,"mat":"EPS","tij":"15+11","caixa":null,"espParede":"","desc":"Paredes exteriores em alvenaria de tijolo, com espessura de 0,35m, composta por reboco tradicional de cor clara, um pano com tijolo de 30x20x15, formando de caixa de ar com 5 cm preenchida parcialmente com isolamento térmico com 0,04m com uma condutibilidade térmica de 0,042(Wm.ºC), um pano de tijolo de 30x20x11, reboco interior estuque de massa fina de cor clara. Coeficiente de transmissão térmica de U=0,50(W/m2,ºC) (Valor retirado Quadro II.6 do ITE50)."},{"u":"0.56","isol":"0,03 XPS SEM CAIXA DE AR 15+15","esp":3,"mat":"XPS","tij":"15+15","caixa":false,"espParede":"","desc":"Paredes exteriores dupla em alvenaria de tijolo, com espessura de 0,40m, composta na parede exterior por reboco tradicional de cor clara, um pano com tijolo de 30x20x15, formando de caixa de ar preenchida com isolamento térmico poliestireno expandido com 0,03m com uma condutibilidade térmica de 0,037(Wm.ºC), um pano de tijolo de 30x20x15, reboco interior estuque de massa fina de cor clara. Coeficiente de transmissão térmica de U=0,56(W/m2,ºC) (Valor retirado Quadro II.6 do ITE50)."},{"u":"0.45","isol":"0,04 xps caixa de 15+15","esp":4,"mat":"XPS","tij":"15+15","caixa":true,"espParede":"","desc":"Paredes exteriores dupla em alvenaria de tijolo, com espessura de 0,39m, composta na parede exterior por reboco tradicional de cor clara, um pano com tijolo de 30x20x15, formando de caixa de ar preenchida com isolamento térmico poliestireno expandido com 0,04m com uma condutibilidade térmica de 0,037(Wm.ºC), um pano de tijolo de 30x20x15, reboco interior estuque de massa fina de cor clara. Coeficiente de transmissão térmica de U=0,45(W/m2,ºC) (Valor retirado Quadro II.6 do ITE50)."},{"u":"0.4","isol":"0,06 xps caixa de 11+15","esp":6,"mat":"XPS","tij":"11+15","caixa":true,"espParede":"","desc":"Paredes exteriores dupla em alvenaria de tijolo, com espessura de 0,35m, composta na parede exterior por reboco tradicional de cor clara, um pano com tijolo de 30x20x11, formando de caixa de ar preenchida com isolamento térmico poliestireno expandido com 0,06m com uma condutibilidade térmica de 0,037(Wm.ºC), um pano de tijolo de 30x20x15, reboco interior estuque de massa fina de cor clara. Coeficiente de transmissão térmica de U=0,40(W/m2,ºC) (Valor retirado Quadro II.6 do ITE50)."},{"u":"0.38","isol":"0,06 xps caixa de 15+15","esp":6,"mat":"XPS","tij":"15+15","caixa":true,"espParede":"","desc":"Paredes exteriores dupla em alvenaria de tijolo, com espessura de 0,40m, composta na parede exterior por reboco tradicional de cor clara, um pano com tijolo de 30x20x15, formando de caixa de ar preenchida com isolamento térmico poliestireno expandido com 0,06m com uma condutibilidade térmica de 0,037(Wm.ºC), um pano de tijolo de 30x20x15, reboco interior estuque de massa fina de cor clara. Coeficiente de transmissão térmica de U=0,38(W/m2,ºC) (Valor retirado Quadro II.6 do ITE50)."},{"u":"0.61","isol":"Termoargila 29","esp":null,"mat":null,"tij":"termoargila","caixa":null,"espParede":"","desc":"Parede simples com isolamento térmico pelo exterior, com espessura total de 32.00 cm e de cor Clara, com as seguintes camadas:1) Estuque tradicional, com 1.5 cm de espessura e coeficiente de condutibilidade térmica de 0.400 W/(m·°C); 2) Tijolo Termoargila 29, com 29.0 cm de espessura e coeficiente de condutibilidade térmica de 0.207 W/(m·°C); 3) Estuque projectado ou fino ou de elevada dureza, com 1.5 cm de espessura e coeficiente de condutibilidade térmica de 0.430 W/(m·°C)."},{"u":"0.46","isol":"0,05 xps 15+11","esp":5,"mat":"XPS","tij":"15+11","caixa":null,"espParede":"","desc":"Paredes exteriores em alvenaria de tijolo, com espessura de 0,35m, composta por reboco tradicional de cor clara, um pano com tijolo de 30x20x15, formando de caixa de ar com isolamento térmico XPS com 0,05m com uma condutibilidade térmica de 0,037(Wm.ºC), um pano de tijolo de 30x20x11, reboco interior estuque de massa fina de cor clara. Coeficiente de transmissão térmica de U=0,46(W/m2,ºC) (Valor retirado Quadro II.6 do ITE50)."},{"u":"0.67","isol":"Capoto com FTH 0,03 XPS","esp":3,"mat":"XPS","tij":"capoto","caixa":null,"espParede":"","desc":"Paredes exteriores em alvenaria de tijolo, com espessura de 0,30m, do interior para o exterior composta por reboco de massa fina de cor clara, um pano com tijolo de 30x20x25, isolamento térmico poliestireno expandido com 0,03m com uma condutibilidade térmica de 0,037(Wm.ºC), reboco exterior sistema tipo Alsecco. Coeficiente de transmissão térmica de U=0,67(W/m2,ºC) (Valor retirado Quadro II.2 do ITE50)."},{"u":"0.53","isol":"CAPOTO 0,04xps","esp":4,"mat":"XPS","tij":"capoto","caixa":null,"espParede":"","desc":"Parede dupla com isolamento térmico pelo exterior, com espessura total de 32.00 cm e de cor Clara, com as seguintes camadas:1) Reboco RTA 549, com 1.5 cm de espessura e coeficiente de condutibilidade térmica de 0.740 W/(m·°C); 2) Poliestireno expandido (EPS), com 4.0 cm de espessura e coeficiente de condutibilidade térmica de 0.042 W/(m·°C); 3) Tijolo cerâmico furado (11 cm), com 11.0 cm de espessura e coeficiente de condutibilidade térmica de 0.407 W/(m·°C); 4) Caixa de ar, com 3.0 cm de espessura e resistência térmica de 0.180 m²·°C/W; 5) Tijolo cerâmico furado (11 cm), com 11.0 cm de espessura e coeficiente de condutibilidade térmica de 0.407 W/(m·°C); 6) Estuque projectado ou fino ou de elevada dureza, com 1.5 cm de espessura e coeficiente de condutibilidade térmica de 0.430 W/(m·°C)."},{"u":"0.58","isol":"Capoto com FTH 0,04 XPS","esp":4,"mat":"XPS","tij":"capoto","caixa":null,"espParede":"","desc":"Paredes exteriores em alvenaria de tijolo, com espessura de 0,30m, do interior para o exterior composta por reboco de massa fina de cor clara, um pano com tijolo de 30x20x22, isolamento térmico poliestireno expandido com 0,04m com uma condutibilidade térmica de 0,037(Wm.ºC), reboco exterior sistema tipo Alsecco. Coeficiente de transmissão térmica de U=0,58(W/m2,ºC) (Valor retirado Quadro II.2 do ITE50)."},{"u":"0.4","isol":"0,05m Capoto + Tj termico 0,24","esp":5,"mat":null,"tij":"capoto","caixa":null,"espParede":"","desc":"Parede simples com isolamento térmico pelo exterior, com espessura total de 32.00 cm e de cor clara, com as seguintes camadas:1) Reboco+ malha Capoto, com 1.0 cm de espessura e coeficiente de condutibilidade térmica de 0.740 W/(m·°C); 2) Poliestireno expandido (EPS), com 5.0 cm de espessura e coeficiente de condutibilidade térmica de 0.042 W/(m·°C); 3) Tijolo termico 24, com 24.0 cm de espessura e coeficiente de condutibilidade térmica de 0.224 W/(m·°C); 4) Estuque projectado ou fino ou de elevada dureza, com 2.0 cm de espessura e coeficiente de condutibilidade térmica de 0.430 W/(m·°C)."},{"u":"0.4","isol":"capoto 0,06M","esp":6,"mat":null,"tij":"capoto","caixa":null,"espParede":"","desc":"Parede dupla com isolamento térmico pelo exterior, com espessura total de 40.00 cm e de cor Clara, com as seguintes camadas:1) Reboco RTA 549, com 2.0 cm de espessura e coeficiente de condutibilidade térmica de 0.740 W/(m·°C); 2) Poliestireno expandido (EPS), com 6.0 cm de espessura e coeficiente de condutibilidade térmica de 0.042 W/(m·°C); 3) Tijolo cerâmico furado (15 cm), com 15.0 cm de espessura e coeficiente de condutibilidade térmica de 0.385 W/(m·°C); 4) Caixa de ar, com 4.0 cm de espessura e resistência térmica de 0.180 m²·°C/W; 5) Tijolo cerâmico furado (11 cm), com 11.0 cm de espessura e coeficiente de condutibilidade térmica de 0.407 W/(m·°C); 6) Argamassa e reboco tradicional, com 2.0 cm de espessura e coeficiente de condutibilidade térmica de 1.300 W/(m·°C)."},{"u":"0.72","isol":"PEDRA com 0,04m e pladur","esp":4,"mat":null,"tij":null,"caixa":null,"espParede":"","desc":"Paredes exteriores simples (anterior a 1960) com espessura de 0,65m em alvenaria de pedra e argamassa, rebocadas com reboco tradicional na face exterior, reboco exterior pintado de cor clara, isolamento termico pela parte interior protegido por pladur, valor retirado informação do Quadro II.3. do ITE50 Coeficiente de transmissão térmica é de U=0,72W/m2.ºC."},{"u":"0.47","isol":"Parede dupla com la de rocha interior","esp":null,"mat":"Lã de rocha","tij":"dupla","caixa":null,"espParede":"","desc":"Paredes exteriores em alvenaria de tijolo (posterior a 1960), com uma espessura de 0,37m em alvenaria de tijolo, rebocadas por reboco tradicional de cor clara em ambas as faces, isolamento termico pelo interior preenchida com isolamento térmico com 0,04m lã de rocha com uma condutibilidade térmica de 0,042(Wm.ºC), protegido com parede de pladur. Coeficiente de transmissão térmica de U=0,47w/m2.ºC"},{"u":"0.37","isol":"Parede dupla +la de rocha pladur","esp":null,"mat":"Lã de rocha","tij":"dupla","caixa":null,"espParede":"","desc":"Paredes exteriores em alvenaria de tijolo (posterior a 1960), com uma espessura de 0,45m em alvenaria de tijolo, rebocadas por reboco tradicional de cor clara em ambas as faces, pelo interior composto por lã de rocha com 6cm, protegido por pladur .Coeficiente de transmissão térmica de U=0,37w/m2.ºC"}],"coberturas":[{"u":"2.6","isol":"SEM ISOLAMENTO","esp":null,"terraco":true,"desc":"Parte da cobertura exterior horizontal em terraço. Laje em betão armado, revestimento exterior em pavimento cerâmico ou pedra de cor clara assente com argamassa, revestimento interior em reboco tradicional de cor clara, por falta de informação mais detalhada não foi considerado isolamento térmico e utilizou-se as soluções por defeito do Manual SCE. Coeficiente de condutibilidade térmica de U=2,60 W/m2,ºC."},{"u":"3,4/2,3","isol":"SEM ISOLAMENTO","esp":null,"terraco":false,"desc":"Cobertura inclinada em betão armado, com revestimento exterior em telha cerâmica de cor clara, revestimento interior em reboco tradicional de cor clara. Por falta de dados mais detalhados foi considerada laje sem isolamento térmico e utilizou-se soluções por defeito do Manual SCE. Coeficiente de transmissão térmica de U= 3,40 W/m2.ºC."},{"u":"3,8/2,5","isol":"SEM ISOLAMENTO","esp":null,"terraco":false,"desc":"Cobertura inclinada em esteira leve, com revestimento exterior em telha cerâmica de cor clara. Por falta de dados mais detalhados foi considerada laje sem isolamento térmico e utilizou-se soluções por defeito do Manual SCE. Coeficiente de transmissão térmica de U = 3,80 W/m2.ºC."},{"u":"4.5","isol":"SEM ISOLAMENTO","esp":null,"terraco":true,"desc":"Parte da cobertura exterior horizontal em terraço. Laje em esteira leve, por falta de informação mais detalhada não foi considerado isolamento térmico e utilizou-se as soluções por defeito do Manual SCE. Coeficiente de condutibilidade térmica de U=4,50 W/m2,ºC."},{"u":"5,86/4,15","isol":"Fibrocimento","esp":null,"terraco":false,"desc":"Cobertura inclinada sem isolamento térmico, com espessura total de 2.00 cm e de cor Escura, com as seguintes camadas:1) Placa de fibrocimento com fibras de amianto, com 2.0 cm de espessura e coeficiente de condutibilidade térmica de 0.650 W/(m·°C)."},{"u":"4,33/3,32","isol":"Fibrocimento tecto falso","esp":null,"terraco":false,"desc":"Cobertura ligeira inclinação sem isolamento térmico, com espessura total de 2.00 cm e de cor Escura, com as seguintes camadas:1) Placa de fibrocimento com fibras de amianto, com 2.0 cm de espessura e coeficiente de condutibilidade térmica de 0.650 W/(m·°C), revestido por tecto falso. Coeficiente de condutibilidade térmica de U=4,33 W/m2,ºC."},{"u":"","isol":"","esp":null,"terraco":false,"desc":"COM ISOLAMENTO TÉRMICO"},{"u":"0,67/0,61","isol":"0,03 XPS","esp":3,"terraco":true,"desc":"Cobertura horizontal em terraço acessível com isolamento térmico. Constituição do exterior para o interior, pavimento cerâmico ou lajetas de cor clara, camada de proteção geotêxtil, sistema de impermeabilização, isolamento térmico com 0,03m de espessura poliestireno expandido extrudido com uma condutibilidade térmica de 0,037(Wm.ºC), camada de forma, laje em betão armado, reboco tradicional de cor clara. Coeficiente de condutibilidade térmica de U=0,67 (W/m2,ºC). (Valor Retirado do ITE50 Quadro II.14)"},{"u":"0,74/0,71","isol":"0,03 EPS","esp":3,"terraco":true,"desc":"Cobertura horizontal em terraço acessível com isolamento térmico. Constituição do exterior para o interior, pavimento cerâmico ou lajetas de cor clara, camada de proteção geotêxtil, sistema de impermeabilização, isolamento térmico com 0,03m de espessura com uma condutibilidade térmica de 0,042(Wm.ºC), camada de forma, laje em betão armado, reboco tradicional de cor clara. Coeficiente de condutibilidade térmica de U=0,67 (W/m2,ºC). (Valor Retirado do ITE50 Quadro II.14)"},{"u":"0,93/0,83","isol":"XPS 0,03 inclinado","esp":3,"terraco":false,"desc":"Cobertura inclinada em contacto com o exterior com isolamento térmico. Constituição do exterior para o interior, telha cerâmica, camada de proteção geotêxtil, sistema de impermeabilização, isolamento térmico com 0,03m de espessura poliestireno expandido extrudido com uma condutibilidade térmica de 0,037(Wm.ºC), camada de forma, laje em betão armado, reboco tradicional de cor clara. Coeficiente de condutibilidade térmica de U=0,93 (W/m2,ºC). (Valor Retirado do ITE50 Quadro II.18)"},{"u":"0,61/0,60","isol":"0,04 la de rocha","esp":4,"terraco":true,"desc":"Cobertura horizontal em terraço acessível com isolamento térmico. Constituição do exterior para o interior, pavimento cerâmico ou lajetas de cor clara, camada de proteção geotêxtil, sistema de impermeabilização, isolamento térmico com 0,04m de espessura lã de rocha com uma condutibilidade térmica de 0,042(Wm.ºC), camada de forma, laje em betão armado, reboco tradicional de cor clara. Coeficiente de condutibilidade térmica de U=0,61 (W/m2,ºC). (Valor Retirado do ITE50 Quadro II.14)"},{"u":"0,58/0,56","isol":"XPS 0,04cm","esp":4,"terraco":true,"desc":"Cobertura horizontal em terraço acessível com isolamento térmico. Constituição do exterior para o interior, pavimento cerâmico ou lajetas de cor clara, camada de proteção geotêxtil, sistema de impermeabilização, isolamento térmico com 0,04m de espessura poliestireno expandido extrudido com uma condutibilidade térmica de 0,037(Wm.ºC), camada de forma, laje em betão armado, reboco tradicional de cor clara. Coeficiente de condutibilidade térmica de U=0,58 (W/m2,ºC). (Valor Retirado do ITE50 Quadro II.14)"},{"u":"0,81/0,74","isol":"XPS 0,04cm","esp":4,"terraco":false,"desc":"Cobertura inclinada em contacto com o exterior com isolamento térmico. Constituição do exterior para o interior, telha cerâmica, camada de proteção geotêxtil, sistema de impermeabilização, isolamento térmico com 0,04m de espessura poliestireno expandido extrudido com uma condutibilidade térmica de 0,037(Wm.ºC), camada de forma, laje em betão armado, reboco tradicional de cor clara. Coeficiente de condutibilidade térmica de 0,81 (W/m2,ºC). (Valor Retirado do ITE50 Quadro II.18)"},{"u":"0,92/0,84","isol":"0,04 la de rocha LEVE","esp":4,"terraco":false,"desc":"Cobertura inclinada em contacto com o exterior com isolamento térmico. Constituição do exterior para o interior, telha cerâmica, camada de proteção geotêxtil, sistema de impermeabilização, isolamento térmico com 0,04m de espessura la de rocha com uma condutibilidade térmica de 0,042(Wm.ºC), protecçao composta por estrutura leve em madeira. Coeficiente de condutibilidade térmica de 0,92 (W/m2,ºC). (Valor Retirado do ITE50 Quadro II.18)"},{"u":"0,63/0,59","isol":"0,06 XPS Esteira Leve","esp":6,"terraco":false,"desc":"Cobertura inclinada em contacto com o exterior com isolamento térmico. Constituição do exterior para o interior, telha cerâmica, camada de proteção geotêxtil, sistema de impermeabilização, isolamento térmico com 0,06m de espessura XPS com uma condutibilidade térmica de 0,037(Wm.ºC), protecçao composta por estrutura leve em madeira. Coeficiente de condutibilidade térmica de 0,63(W/m2,ºC). (Valor Retirado do ITE50 Quadro II.18)"},{"u":"0,92/0,84","isol":"Telha Sanduich 40mm","esp":null,"terraco":false,"desc":"Cobertura inclinada em contacto com o exterior com isolamento térmico nas vertentes incinada. Constituição em esteira leve, por painéis sandwich com isolamento térmico em poliuretano com 0,04m de espessura com uma condutibilidade térmica de 0,042(Wm.ºC). Coeficiente de condutibilidade térmica de 0,92 (W/m2,ºC). (Valor Retirado do ITE50 Quadro II.18)"},{"u":"0,49/0,47","isol":"Telha Sanduich 80mm","esp":null,"terraco":false,"desc":"Cobertura inclinada em contacto com o exterior, com isolamento térmico nas vertentes inclinadas. Constituição em esteira leve, por painéis sandwich com isolamento térmico em poliuretano com 0,08m de espessura, condutibilidade térmica de 0,042 (W/m.ºC). Coeficiente de transmissão térmica de 0,49 (W/m².ºC)."},{"u":"0,51/0,5","isol":"XPS 5 cm terraço","esp":5,"terraco":true,"desc":"Cobertura horizontal em terraço acessível com isolamento térmico. Constituição do exterior para o interior, pavimento cerâmico ou lajetas de cor clara, camada de proteção geotêxtil, sistema de impermeabilização, isolamento térmico com 0,05m de espessura poliestireno expandido extrudido com uma condutibilidade térmica de 0,037(Wm.ºC), camada de forma, laje em betão armado, reboco tradicional de cor clara. Coeficiente de condutibilidade térmica de U=0,58 (W/m2,ºC). (Valor Retirado do ITE50 Quadro II.14)"},{"u":"0,44/0,43","isol":"XPS 0,06m","esp":6,"terraco":true,"desc":"Cobertura horizontal em terraço acessível com isolamento térmico. Constituição do exterior para o interior, pavimento cerâmico ou lajetas de cor clara, camada de proteção geotêxtil, sistema de impermeabilização, isolamento térmico com 0,06m de espessura poliestireno expandido extrudido com uma condutibilidade térmica de 0,037(Wm.ºC), camada de forma, laje em betão armado, reboco tradicional de cor clara. Coeficiente de condutibilidade térmica de U=0,44 (W/m2,ºC). (Valor Retirado do ITE50 Quadro II.14)"},{"u":"0,51/0,49","isol":"XPS 0,08m","esp":8,"terraco":false,"desc":"Cobertura inclinada em contacto com o exterior com isolamento térmico nas vertentes incinada. Constituição em esteira leve, com isolamento térmico em XPS com 0,10m de espessura com uma condutibilidade térmica de 0,037(Wm.ºC), acabamento em canas ou madeira. Coeficiente de condutibilidade térmica de U= 0,51 (W/m2,ºC). (Valor Retirado do ITE50 Quadro II.18)"},{"u":"0,44/0,43","isol":"XPS 0,10","esp":10,"terraco":false,"desc":"Cobertura inclinada em contacto com o exterior com isolamento térmico nas vertentes incinada. Constituição em esteira leve, com isolamento térmico em XPS com 0,10m de espessura com uma condutibilidade térmica de 0,037(Wm.ºC), acabamento em canas ou madeira. Coeficiente de condutibilidade térmica de U= 0,44 (W/m2,ºC). (Valor Retirado do ITE50 Quadro II.18)"},{"u":"0,64/0,61","isol":"La de rocha 0,05 tecto falso por dentro","esp":5,"terraco":true,"desc":"Cobertura horizontal em terraço acessível com isolamento térmico. Constituição do exterior para o interior, pavimento cerâmico, camada de proteção geotêxtil, camada de forma, laje em betão armado, sistema de impermeabilização, isolamento térmico com 0,05m de espessura em la mineral com uma condutibilidade térmica de 0,037(Wm.ºC) acabamento final em pladur. Coeficiente de condutibilidade térmica de U=0,64 (W/m2,ºC). (Valor Retirado do ITE50 Quadro II.14)"}],"pavTerreo":[{"desc":"Pavimento térreo com espessura desconhecida, não sendo possível identificar com mais exatidão, sendo que é possível determinar que é composta por laje em betão pesado, camada de assentamento, com revestimento superior em pavimento cerâmico.","isol":"SEM ISOLAMENTO"},{"desc":"Paredes interiores em contacto com solo, não foi possível determinar a espessura da parede, constituição da parede segundo a informação possível, parede em alvenaria betão armado, reboco interior tradicional pintado de cor clara.","isol":"SEM ISOLAMENTO"},{"desc":"Pavimento com isolamento térmico pelo exterior, com espessura total de 28.00 cm, com as seguintes camadas:1) Cerâmica vidrada/grés cerâmico, com 1.0 cm de espessura e coeficiente de condutibilidade térmica de 1.300 W/(m·°C); 2) Camada de enchimento, com 10.0 cm de espessura e coeficiente de condutibilidade térmica de 1.650 W/(m·°C); 3) Poliestireno extrudido (XPS), com 4.0 cm de espessura e coeficiente de condutibilidade térmica de 0.037 W/(m·°C); 4) Betonilha armada, com 12.0 cm de espessura e coeficiente de condutibilidade térmica de 1.650 W/(m·°C); 5) Manta Geotêxtil IMPERSEP 150, com 1.0 cm de espessura e coeficiente de condutibilidade térmica de 0.330 W/(m·°C).","isol":"4 XPS"}],"pavInterior":[{"u":"1.89","isol":"SEM ISOLAMENTO","desc":"Pavimento em interior em contacto com garagem sem isolamento térmico, constituído por laje em betão armado, camada de regularização, revestimento superior em material cerâmico e inferior em reboco tradicional de cor clara. Coeficiente de condutibilidade térmica de 1,89 W/m2,ºC valor retirado no Quadro II.7 do ITE50."},{"u":"2.21","isol":"SEM ISOLAMENTO","desc":"Pavimento em interior em contacto com garagem sem isolamento térmico, constituído segundo a informação possível de recolher laje em betão armado, revestimento superior em material cerâmico e inferior em reboco tradicional de cor clara. Coeficiente de condutibilidade térmica de U=2,21 W/m2,ºC, por falta de dados técnicos da constituição das pavimentos e coberturas utilizou-se soluções por defeito do Manual SCE."},{"u":"2.61","isol":"SEM ISOLAMENTO","desc":"Pavimento em interior em contacto com garagem sem isolamento térmico, constituído segundo a informação possível de recolher laje em betão armado, revestimento superior em material cerâmico e inferior em reboco tradicional de cor clara. Coeficiente de condutibilidade térmica de U=2,61 W/m2,ºC, por falta de dados técnicos da constituição das pavimentos e coberturas utilizou-se soluções por defeito do Manual SCE."},{"u":"2.2","isol":"Esteira Leve","desc":"Pavimento em interior em contacto com garagem sem isolamento térmico, constituído segundo a informação possível de recolher laje em esterira leve, em madeira do tipo barrotes e soalho. Coeficiente de condutibilidade térmica de U=2,20 W/m2,ºC, por falta de dados técnicos da constituição das pavimentos e coberturas utilizou-se soluções por defeito do Manual SCE."},{"u":"0.99","isol":"3cm de isolamento","desc":"Pavimento em interior em contacto com garagem com isolamento térmico pelo interior, constituído segundo a informação possível de recolher (projeto térmico) laje em betão armado, betonilha de regularização, isolamento térmico na parte inferior da laje, com 2mm de espessura com uma condutibilidade térmica de 0,037W/(m2.c) revestimento superior em material cerâmico e inferior em reboco tradicional de cor clara. Coeficiente de condutibilidade térmica de 0.99 W/m2,ºC valor retirado do ITE50."},{"u":"1.94","isol":"Estrutura leve","desc":"Pavimento em interior em contacto com arrecadação sem isolamento térmico, constituído por laje em estrutura leve, em pavimento de madeira de cor clara. Coeficiente de condutibilidade térmica de 1,94 W/m2,ºC valor retirado do ITE50. 13"},{"u":"0.71","isol":"4 cm la de rocha","desc":"Pavimento em interior em contacto com fracção de comércio, com isolamento térmico pelo interior, constituído segundo a informação possível de recolher (FTH) laje em betão armado, betonilha de regularização, isolamento térmico na parte inferior da laje, com 4cm de espessura com uma condutibilidade térmica de 0,042W/(m2.c) revestimento superior em material cerâmico e inferior em reboco tradicional de cor clara. Coeficiente de condutibilidade térmica de 0.71 W/m2,ºC valor retirado do ITE50."}]};
+
+/* Escolhe a descrição da PAREDE. Sem isolamento decide-se pela espessura; com
+   isolamento, pela espessura do isolante, tijolos e material — e o que não se
+   souber não filtra, em vez de excluir tudo. */
+function descParede2025(op){
+  op=op||{};
+  const lista=BASE2025.paredes||[];
+  if(!op.temIsol){
+    // aceita "30", "0,30" e "0.30" — a app pergunta em centímetros
+    const bruto=parseFloat(String(op.espParede||'').replace(',','.'));
+    if(!(bruto>0)) return null;
+    const esp=bruto>3?bruto/100:bruto;      // metros
+    /* PAREDE ANTIGA: pedra ou taipa.
+       Anteriores a 1960 e com 50 cm ou mais — nunca eram escolhidas porque o
+       filtro só olhava a "SEM ISOLAMENTO", e estas têm o material escrito no
+       campo do isolamento. */
+    if(op.material){
+      const m=lista.filter(x=>new RegExp(op.material,'i').test(x.isol));
+      if(m.length) return m.sort((a,b)=>
+        Math.abs(parseFloat(a.espParede||0)-esp)-Math.abs(parseFloat(b.espParede||0)-esp))[0];
+    }
+    const ano=parseInt(op.ano)||0;
+    if(esp>=0.45&&(!ano||ano<1960)){
+      const pedra=lista.filter(x=>/pedra|taipa/i.test(x.isol));
+      if(pedra.length) return pedra.sort((a,b)=>
+        Math.abs(parseFloat(a.espParede||0)-esp)-Math.abs(parseFloat(b.espParede||0)-esp))[0];
+    }
+    const semIsol=lista.filter(x=>/sem isolamento/i.test(x.isol)||/tj \d+cm/i.test(x.isol));
+    if(!semIsol.length) return null;
+    /* ARREDONDA PARA BAIXO, não para o mais próximo.
+       Uma parede de 33 cm não é uma de 35: escolher a de 35 dá um U mais baixo
+       e favorece o edifício com uma espessura que não foi medida. Fica a maior
+       entrada que NÃO ultrapassa o medido, e a diferença assinala-se. */
+    const ordenadas=semIsol.slice()
+      .sort((a,b)=>parseFloat(a.espParede||0)-parseFloat(b.espParede||0));
+    const cabem=ordenadas.filter(x=>parseFloat(x.espParede||0)<=esp+0.005);
+    const escolhida=cabem.length?cabem[cabem.length-1]:ordenadas[0];
+    const dif=esp-parseFloat(escolhida.espParede||0);
+    return Object.assign({},escolhida,
+      {difEsp:(Math.abs(dif)>0.005?dif:0),espMedida:esp});
+  }
+  let c=lista.filter(x=>x.esp);
+  if(op.espIsol) c=c.filter(x=>x.esp===+op.espIsol);
+  if(op.tijolos) c=c.filter(x=>x.tij===op.tijolos);
+  if(op.matIsol) c=c.filter(x=>x.mat===op.matIsol);
+  if(!c.length&&op.espIsol) c=lista.filter(x=>x.esp===+op.espIsol);
+  if(!c.length) return null;
+  // entre iguais, a de U mais alto — o lado seguro
+  return c.sort((a,b)=>parseFloat(b.u||0)-parseFloat(a.u||0))[0];
+}
+function descCobertura2025(op){
+  op=op||{};
+  const lista=BASE2025.coberturas||[];
+  const terraco=(op.tipo==='terraço'||op.tipo==='Terraço');
+  let c=lista.filter(x=>!!x.terraco===terraco);
+  if(!c.length) c=lista.slice();
+  if(op.temIsol&&op.espIsol){
+    const comIsol=c.filter(x=>x.esp===+op.espIsol);
+    if(comIsol.length) return comIsol.sort((a,b)=>parseFloat(b.u||0)-parseFloat(a.u||0))[0];
+    const qualquer=c.filter(x=>x.esp);
+    if(qualquer.length) return qualquer.sort((a,b)=>
+      Math.abs(a.esp-op.espIsol)-Math.abs(b.esp-op.espIsol))[0];
+  }
+  const sem=c.filter(x=>/sem isolamento/i.test(x.isol)||!x.esp);
+  return (sem.length?sem:c)[0]||null;
+}
+function descPavTerreo2025(){
+  return (BASE2025.pavTerreo||[]).find(x=>/^pavimento térreo/i.test(x.desc))||
+         (BASE2025.pavTerreo||[])[0]||null;
+}
+/* O pavimento interior muda com o que está por baixo — garagem, arrecadação ou
+   loja têm textos próprios na base. Sem isolamento fica o U=2,21, que é o
+   corrente (escolhido em 23/08). */
+function descPavInterior2025(op){
+  op=op||{};
+  const lista=BASE2025.pavInterior||[];
+  const alvo=String(op.porBaixo||'garagem').toLowerCase();
+  let c=lista.filter(x=>x.desc.toLowerCase().includes(alvo));
+  if(!c.length) c=lista.filter(x=>x.desc.toLowerCase().includes('garagem'));
+  if(op.temIsol){
+    const comIsol=c.filter(x=>/isolamento térmico pelo/i.test(x.desc));
+    if(comIsol.length) return comIsol[0];
+  }
+  const semIsol=c.filter(x=>/sem isolamento/i.test(x.desc));
+  return semIsol.find(x=>String(x.u)==='2.21')||semIsol[0]||c[0]||null;
+}
+
 function buildTxt(){
   // cabeçalho com a versão do levantamento — ver registarExportacao()
   if(!Array.isArray(D.divisoes)) D.divisoes=[];
   if(!D.divisoesDados||typeof D.divisoesDados!=='object') D.divisoesDados={};
   if(!D.peDireitos||typeof D.peDireitos!=='object') D.peDireitos={};
   if(!D.climaDivisoes||typeof D.climaDivisoes!=='object') D.climaDivisoes={};
+  /* SANEAMENTO ATÉ AO FUNDO.
+     As linhas acima protegiam só o topo. Um ficheiro em que `vaos` venha como
+     texto — importação de outra versão, edição à mão, recuperação parcial —
+     rebentava em «vaos.forEach is not a function» e não saía TXT nenhum.
+     Sem isto, um levantamento com um campo trocado perde-se por inteiro. */
+  if(!Array.isArray(D.areasPlanta)) D.areasPlanta=[];
+  if(!Array.isArray(D.fotosAlcado)) D.fotosAlcado=[];
+  if(!Array.isArray(D.fotoEtiquetas)) D.fotoEtiquetas=[];
+  D.divisoes.forEach(_d=>{
+    let dd=D.divisoesDados[_d];
+    if(!dd||typeof dd!=='object'){ dd=D.divisoesDados[_d]={}; }
+    if(!Array.isArray(dd.vaos)) dd.vaos=[];
+    if(!Array.isArray(dd.fotos)) dd.fotos=[];
+    if(!Array.isArray(dd.areaRect)) dd.areaRect=[];
+    if(!dd.trocos||typeof dd.trocos!=='object') dd.trocos={};
+    if(!dd.comprimentos||typeof dd.comprimentos!=='object') dd.comprimentos={};
+    if(!dd.envInt||typeof dd.envInt!=='object') dd.envInt={};
+    if(!dd.envIntTrocos||typeof dd.envIntTrocos!=='object') dd.envIntTrocos={};
+    // um vão tem de ser um objecto; o que não for, sai
+    dd.vaos=dd.vaos.filter(v=>v&&typeof v==='object');
+  });
   // Textos completos por sistema de climatização — preenchido na secção
   // CLIMATIZAÇÃO, lido mais tarde em SISTEMAS TÉCNICOS (evita repetir a lógica de
   // construção do texto duas vezes, e evita repetir o TEXTO em si no ficheiro).
@@ -7146,7 +7500,7 @@ function buildTxt(){
 
   let t='';
   t+=`# CERTIFICADO ENERGÉTICO — RECOLHA DE DADOS\n`;
-  t+=ln('Projeto',D.nome);t+=ln('Morada',D.morada);t+=ln('Data',d);
+  t+=ln('Projeto',D.nome);t+=ln('Morada',String(D.morada||'').toLocaleUpperCase('pt-PT'));t+=ln('Data',d);
   /* CERTIFICADO MAIS PARECIDO — logo no cabeçalho, que é onde se olha primeiro.
      Poupa reabrir meia dúzia de processos à procura de um semelhante. */
   try{
@@ -7222,7 +7576,7 @@ function buildTxt(){
   }
   const zonaTag=D.zonaClimaticaAuto===false?'escolhida à mão':
     (D.concelho&&nutsIIIDoConcelho(D.concelho)?`automática — ${nutsIIIDoConcelho(D.concelho)}`:'automática — altitude');
-  t+=ln('Zona climática',D.zonaClimatica+' ('+zonaTag+')');
+  t+=ln('Zona climática',(D.zonaClimatica||'— por definir')+' ('+zonaTag+')');
   t+=ln('Inércia térmica',D.inerciaTermica);
   t+=ln('Ano de construção',D.anoConstrucao||(D.anoInscricaoMatriz?D.anoInscricaoMatriz+' (aproximado — ano de inscrição na matriz)':''));
   t+=ln('Orientações',allOrients.join(', ')||'—');
@@ -7645,7 +7999,13 @@ function buildTxt(){
       const outrosSemUE=tiposUnicosSemUE.filter(t=>!['pavimento radiante','lareira/recuperador'].includes((t||'').toLowerCase()));
 
       const divsPavRadiante=climDivsSemUE.filter(([,cd])=>(cd.tipos||[cd.tipo]).some(x=>(x||'').toLowerCase()==='pavimento radiante')).map(([d])=>d.toLowerCase());
-      const divsLareira=climDivsSemUE.filter(([,cd])=>(cd.tipos||[cd.tipo]).some(x=>(x||'').toLowerCase()==='lareira/recuperador')).map(([d])=>d.toLowerCase());
+      /* Guardam-se as duas formas: a minúscula para o texto corrido, e a
+         ORIGINAL para ir buscar o que foi reconhecido na foto — as chaves de
+         D.lareiraTipo e D.climaDivisoes são o nome tal como está na divisão. */
+      const _lareiraPares=climDivsSemUE.filter(([,cd])=>(cd.tipos||[cd.tipo])
+        .some(x=>(x||'').toLowerCase()==='lareira/recuperador'));
+      const divsLareira=_lareiraPares.map(([d])=>d.toLowerCase());
+      const divsLareiraChave=_lareiraPares.map(([d])=>d);
       const divsOutrosSemUE=climDivsSemUE.filter(([,cd])=>(cd.tipos||[cd.tipo]).some(x=>outrosSemUE.includes((x||'').toLowerCase()))).map(([d])=>d.toLowerCase());
 
       if(temPavRadiante&&aqsIndicaCaldeira){
@@ -7659,7 +8019,23 @@ function buildTxt(){
         // construção do imóvel (não há outra referência possível).
         const anoConstrLareira=D.anoConstrucao?String(D.anoConstrucao):'';
         const instalTxt=anoConstrLareira?` Instalada na data de construção do imóvel (${anoConstrLareira}).`:'';
-        _textosSistemasClima.lareira=`Sistema de aquecimento ambiente composto por lareira com recuperador de calor, instalada em ${divsLareira.join(', ')}.${instalTxt} Equipamento a combustível sólido (lenha), de funcionamento autónomo e independente do sistema de AQS.`;
+        /* O tipo sai do que foi confirmado na foto, quando houve foto. Uma
+           lareira ABERTA e um recuperador fechado não têm o mesmo rendimento
+           por defeito (Tabela 76) — descrever tudo como "recuperador" é
+           favorável ao edifício e não corresponde ao que lá está. */
+        const _tiposLareira=[...new Set(divsLareiraChave
+          .map(dv=>(D.lareiraTipo||{})[dv]).filter(Boolean))];
+        const _desc=_tiposLareira.length===1 ? _tiposLareira[0]
+          : (_tiposLareira.length>1 ? _tiposLareira.join(' e ')
+                                    : 'lareira com recuperador de calor');
+        const _comb=/pellet/i.test(_desc)?'pellets':'lenha';
+        const _marcaLar=(()=>{
+          const ms=new Set();
+          divsLareiraChave.forEach(dv=>((D.climaDivisoes[dv]||{}).marcasPorTipo||{})
+            ['Lareira/recuperador']?.forEach(m=>{ if(m) ms.add(m); }));
+          return ms.size?', marca '+[...ms].join(', '):'';
+        })();
+        _textosSistemasClima.lareira=`Sistema de aquecimento ambiente composto por ${_desc}${_marcaLar}, instalada em ${divsLareira.join(', ')}.${instalTxt} Equipamento a combustível sólido (${_comb}), de funcionamento autónomo e independente do sistema de AQS.`;
       }
       if(outrosSemUE.length){
         _textosSistemasClima.outrosSemUE=`Sistema de aquecimento ambiente do tipo ${outrosSemUE.map(t=>t.toLowerCase()).join(', ')}, instalado em ${divsOutrosSemUE.join(', ')}. O equipamento encontra-se em bom funcionamento e em bom estado de conservação.`;
@@ -8150,6 +8526,41 @@ function buildTxt(){
       const _eIsol=(_isol.match(/([\d,.]+)\s*cm/i)||[])[1]||'';
       const _ui=_temIsol?uParedeComIsolamento(D.espParede,D.anoConstrucao,_eIsol,_matIsol):null;
       const su=_ui?null:textoParedePorDefeito(D.espParede,D.anoConstrucao);
+      /* ── DESCRIÇÃO DA BASE 2025 ──
+         Quando há entrada na base do Renato, é ESSA que sai: são os textos que
+         ele usa e que já passaram nos certificados. O cálculo próprio da app
+         fica como verificação ao lado — não se substitui um texto validado por
+         um redigido de raiz. */
+      {
+        const _bEsp=(D.isolParedeEsp&&/^\d+$/.test(D.isolParedeEsp))?+D.isolParedeEsp:null;
+        const _b=descParede2025({
+          temIsol:isSimTxt(D.temIsolamento)&&!!_bEsp,
+          espIsol:_bEsp,
+          tijolos:(D.isolParedeTijolos&&!/não sei/i.test(D.isolParedeTijolos))
+            ?D.isolParedeTijolos:null,
+          matIsol:(D.isolParedeMat&&!/não sei/i.test(D.isolParedeMat))
+            ?D.isolParedeMat:null,
+          espParede:D.espParede, ano:D.anoConstrucao,
+          material:D.paredeMaterial});
+        if(_b&&_b.desc){
+          t+=sep('PAREDE EXTERIOR — DESCRIÇÃO (BASE 2025)');
+          t+=_b.desc+'\n\n';
+          t+=ln('U da base',String(_b.u||'—')+' W/(m².°C)');
+          if(_b.isol) t+=ln('Solução',_b.isol);
+          /* A base tem entradas de 0,15 · 0,20 · 0,28 · 0,30 · 0,35 m. Uma
+             parede de 33 cm cai na de 30 — para baixo, que é o lado seguro:
+             escolher a de 35 daria um U mais baixo com uma espessura que não
+             foi medida. A diferença tem de ser dita. */
+          if(_b.difEsp)
+            t+='⚠ Mediste '+(_b.espMedida*100).toFixed(0)+' cm e a base tem '+
+               (parseFloat(_b.espParede)*100).toFixed(0)+' cm. Foi usada a entrada '+
+               'de baixo (lado seguro). Se a composição real for outra, corrige o U.\n';
+          if(!_bEsp&&isSimTxt(D.temIsolamento))
+            t+='⚠ Disseste que há isolamento mas não indicaste a espessura — '+
+               'esta descrição é a de parede SEM isolamento.\n';
+          t+='\n';
+        }
+      }
       if(_ui){
         t+=sep('PAREDE EXTERIOR — U SUGERIDO');
         const uT=v=>v.toFixed(2).replace('.',',');
@@ -8195,26 +8606,137 @@ function buildTxt(){
       // saía sempre vazia do TXT. Mantêm-se os dois campos como fonte
       // preferencial (para quando passarem a ser recolhidos) e cai-se no que
       // existe hoje.
-      const cobs=(D.coberturaTipos&&D.coberturaTipos.length)?D.coberturaTipos
+      /* O tecto dá TODO para o exterior? Só nesse caso a área da cobertura é a
+         área útil. Num piso intermédio o tecto é pavimento do vizinho; num fogo
+         de vários pisos, só o último tem cobertura. */
+      const _coberturaCobreTudo=()=>{
+        const nFrac=parseInt(D.pisos)||1;
+        if(nFrac>1) return false;                  // duplex: cada piso é diferente
+        if(/moradia/i.test(D.edificioTipo||'')) return true;
+        const nE=parseInt(D.nPisosEdificio)||0;
+        const mor=String(D.moradaCaderneta||'')+' '+String(D.morada||'');
+        const andar=mor.replace(/\b\d{4}-\d{3}\b/g,'').match(/(?:^|[\s,])(\d{1,2})\.?[ºo°]/);
+        if(andar&&nE) return parseInt(andar[1])>=nE-1;
+        const n=parseInt(D.pisoLocal);
+        return !!(n&&nE&&n>=nE);
+      };
+      const _areaUtilTotal=(D.divisoes||[]).reduce((s2,dv)=>{
+        const a=parseFloat(String(resolverAreaDivisaoGlobal(dv)||'').replace(',','.'));
+        return s2+(isFinite(a)?a:0);
+      },0);
+      /* «Não tem / não aplicável» é uma resposta, não um vazio: num piso
+         intermédio o tecto é o pavimento do vizinho e não há cobertura
+         nenhuma a descrever. */
+      const _semCob=/não tem|nao tem|não aplic|nao aplic/i.test(D.coberturaTipoEsc||'');
+      /* UMA MORADIA TEM SEMPRE COBERTURA.
+         Sem resposta à pergunta do tipo, a secção não aparecia — e numa moradia
+         a cobertura existe por definição, é o edifício inteiro. Assume-se
+         horizontal e assinala-se, em vez de a deixar fora do certificado. */
+      const _moradiaSemResposta=/moradia/i.test(D.edificioTipo||'')&&
+        !_semCob&&!D.coberturaTipoEsc&&!(D.coberturaTipos||[]).length&&
+        !D.coberturaTipo&&!D.coberturaInclinada;
+      const cobs=_semCob?[]
+        :_moradiaSemResposta?['Cobertura horizontal']
+        :(D.coberturaTipos&&D.coberturaTipos.length)?D.coberturaTipos
+        :(D.coberturaTipoEsc?[D.coberturaTipoEsc]      // resposta do levantamento
         :(D.coberturaTipo?[D.coberturaTipo]
         :(D.coberturaInclinada==='Sim'?['Cobertura inclinada']
-        :(D.coberturaInclinada==='Não'?['Cobertura horizontal']:[])));
+        :(D.coberturaInclinada==='Não'?['Cobertura horizontal']:[]))));
+      /* ── PAVIMENTO ──
+         O que está por baixo decide tudo. Terreno → pavimento térreo. Garagem,
+         arrecadação, loja ou cave → pavimento INTERIOR sobre espaço não útil,
+         que conta com a área útil total do fogo. Outro fogo → não é envolvente
+         e não entra.
+         Antes saía "pavimento intermédio", que é o caso de estar sobre outro
+         fogo — e nesses três casos estava errado. */
+      {
+        const _pb=String(D.pavPorBaixo||'').toLowerCase();
+        if(/terreno|solo/.test(_pb)){
+          const _pt=descPavTerreo2025();
+          if(_pt){
+            t+=sep('PAVIMENTO TÉRREO');
+            t+=_pt.desc+'\n\n';
+            t+=ln('Área',(_areaUtilTotal>0
+              ? _areaUtilTotal.toFixed(2).replace('.',',')+' m²   (= área útil total)'
+              : '______ m²   (por medir)'));
+            t+='\n';
+          }
+        } else if(/garagem|arrecada|loja|com[ée]rcio|cave/.test(_pb)){
+          const alvo=/arrecada/.test(_pb)?'arrecadação'
+            :(/loja|com[ée]rcio/.test(_pb)?'comércio':'garagem');
+          const _pi=descPavInterior2025({porBaixo:alvo,
+            temIsol:isSimTxt(D.temIsolamento)});
+          if(_pi){
+            t+=sep('PAVIMENTO INTERIOR — SOBRE '+alvo.toUpperCase());
+            t+=_pi.desc+'\n\n';
+            t+=ln('U da base',String(_pi.u||'—')+' W/(m².°C)');
+            t+=ln('Área',(_areaUtilTotal>0
+              ? _areaUtilTotal.toFixed(2).replace('.',',')+' m²   (= área útil total)'
+              : '______ m²   (por medir)'));
+            t+='O que está por baixo é espaço não útil: a área é a do fogo inteiro,\n'+
+               'e o cálculo entra pelo b_tr da Tabela 22.\n\n';
+          }
+        } else if(/outro fogo/.test(_pb)){
+          t+=sep('PAVIMENTO');
+          t+='Sobre outro fogo — não é envolvente e não entra no cálculo.\n\n';
+        }
+      }
+
       if(cobs.length){
         t+=sep('COBERTURAS');
         cobs.forEach((c,i2)=>{
-          const r=textoCoberturaPorDefeito(c,D.coberturaIsolCm,D.coberturaIsolMat);
+          /* A base 2025 primeiro; o cálculo próprio só quando ela não tem. */
+          const _cEsp=(D.isolCobEsp&&/^\d+$/.test(D.isolCobEsp))?+D.isolCobEsp:null;
+          const _bc=descCobertura2025({tipo:/terra[çc]o|horizontal/i.test(String(c))?'terraço':'inclinada',
+            temIsol:isSimTxt(D.temIsolamento)&&!!_cEsp,espIsol:_cEsp});
           t+=(cobs.length>1?('['+(i2+1)+'] '):'')+String(c)+'\n';
+          if(_bc&&_bc.desc){
+            t+='    '+_bc.desc.replace(/\n/g,'\n    ')+'\n';
+            t+='    '+ln('U da base',String(_bc.u||'—')+' W/(m².°C)').trim()+'\n';
+            if(/desvão/i.test(String(c)))
+              t+='    ⚠ Com desvão NÃO habitado a envolvente é a esteira por baixo,\n'+
+                 '      com b_tr da Tabela 22 — não esta cobertura.\n';
+            t+='    Área: '+((cobs.length===1&&_areaUtilTotal>0&&_coberturaCobreTudo())
+              ? _areaUtilTotal.toFixed(2).replace('.',',')+' m²   (= área útil)'
+              : '______ m²   (por medir)')+'\n\n';
+            return;
+          }
+          const r=textoCoberturaPorDefeito(c,D.coberturaIsolCm,D.coberturaIsolMat);
           if(r){
             t+='    '+r.texto.replace(/\n/g,'\n    ')+'\n';
             t+='    '+ln('U sugerido',r.u.toFixed(2).replace('.',',')+' W/(m².°C)').trim()+'\n';
           } else {
             t+='    Tipo não reconhecido — determina o U pelo ITE50 (Quadros 11.13 a 11.22).\n';
           }
-          t+='    Área: ______ m²   (por medir)\n\n';
+          /* ÁREA DA COBERTURA
+             Num apartamento de último piso com UMA cobertura, a área é a área
+             útil do fogo — o tecto dá todo para fora e não há nada a medir.
+             Deixar "por medir" obrigava a escrever à mão um número que a app
+             já sabe.
+             Só se preenche quando: há uma cobertura só, é um apartamento de
+             último piso ou uma moradia de um piso, e a área útil está medida.
+             Com várias coberturas ou pisos, cada uma cobre parte do fogo — e
+             aí a repartição é do técnico, não da app. */
+          let _areaCob='______ m²   (por medir)';
+          if(cobs.length===1&&_areaUtilTotal>0&&_coberturaCobreTudo()){
+            _areaCob=_areaUtilTotal.toFixed(2).replace('.',',')+' m²'+
+              '   (= área útil; o tecto dá todo para o exterior)';
+          }
+          t+='    Área: '+_areaCob+'\n\n';
         });
-        t+='⚠ SUGESTÃO. A área de cada cobertura tem de ser medida — a app não a calcula\n'+
-           'quando há mais do que uma. Um desvão não habitado NÃO é cobertura exterior:\n'+
-           'a envolvente é a esteira por baixo dele, com b_tr da Tabela 22.\n';
+        if(_moradiaSemResposta)
+          t+='⚠ Não indicaste o tipo de cobertura. Numa moradia a cobertura existe\n'+
+             'sempre, por isso assumiu-se horizontal — confirma se é terraço,\n'+
+             'inclinada com desvão ou sem desvão, porque a solução muda.\n\n';
+        t+=(cobs.length===1&&_coberturaCobreTudo()&&_areaUtilTotal>0)
+          ? '⚠ SUGESTÃO. A área saiu da área útil por ser o último piso com uma só\n'+
+            'cobertura — confirma se há alguma zona coberta por outro fogo. Um desvão\n'+
+            'não habitado NÃO é cobertura exterior: a envolvente é a esteira por baixo\n'+
+            'dele, com b_tr da Tabela 22.\n'
+          : '⚠ SUGESTÃO. A área de cada cobertura tem de ser medida — a app não a calcula\n'+
+            'quando há mais do que uma ou quando o fogo tem vários pisos. Um desvão não\n'+
+            'habitado NÃO é cobertura exterior: a envolvente é a esteira por baixo dele,\n'+
+            'com b_tr da Tabela 22.\n';
       }
     }
 
@@ -8347,12 +8869,24 @@ function buildTxt(){
       // Nota 1 da Tabela 33/34: no pavimento de nível intermédio o Ψ já é
       // METADE da perda, por isso cada fração conta a metade que lhe pertence.
       const _pl=D.pisoLocal||'';
+      /* O '4' desta escala antiga queria dizer "piso térreo"; com o pisoLocal a
+         guardar a ordem do piso no prédio passou a ser o 3.º andar, e o caso
+         por omissão dava térreo a qualquer fogo sem pisoLocal. Confirma-se
+         sempre se o fogo pode mesmo tocar o solo. */
+      const _rBL=String(D.pavPorBaixo||'').toLowerCase();
+      const _terreoOkL=_rBL?/terreno|solo/.test(_rBL):podeTocarOSolo();
+      const _baixo=L=>_terreoOkL
+        ? ['pavimento térreo',L]
+        : (/garagem|arrecada|loja|com[ée]rcio|cave/.test(_rBL)
+            ? ['pavimento sobre ENU',L]
+            : ['pavimento intermédio (chão — metade)',L]);
       const _ligacoesPorPiso=L=>{
         if(_pl==='1') return [['pavimento sobre ENU (cave)',L],['pavimento intermédio (teto — metade)',L]];
         if(_pl==='2') return [['pavimento intermédio (chão e teto — 2 × metade)',L*2]];
         if(_pl==='3') return [['cobertura',L],['pavimento intermédio (chão — metade)',L]];
-        if(_pl==='4') return [['pavimento térreo',L],['pavimento intermédio (teto — metade)',L]];
-        return [['pavimento térreo',L],['cobertura',L]];   // moradia: tudo lhe pertence
+        if(_pl==='4') return [_baixo(L),['pavimento intermédio (teto — metade)',L]];
+        // moradia ou sem informação: o de baixo confirma-se, a cobertura é dela
+        return [_baixo(L),['cobertura',L]];
       };
       let _ptlPav=0, _ptlCaix=0;
       _envIntPTLKeys.forEach(tipo=>{
@@ -8629,10 +9163,76 @@ function buildTxt(){
      Só existe quando o piso assenta no terreno. Um piso intermédio ou sobre
      espaço não útil tem pavimento interior, não térreo, e a secção não aparece. */
   {
-    const plT=String(D.pisoLocal||'');
-    const apartT=(D.edificioTipo==='Apartamento');
+    /* A condição era pisoLocal==='4' — um valor de OUTRA escala, de quando o
+       campo era uma lista fixa ('4' terá sido "R/C" nessa lista). Com pisoLocal
+       a guardar a ordem do piso no prédio, '4' passou a ser o 3.º andar, e um
+       4.º andar saía com pavimento em contacto com o solo.
+       Agora decide-se pelo que há por baixo, respondido no levantamento; sem
+       resposta, pelo piso — e só R/C, cave ou moradia podem tocar o terreno. */
     const temCaveENU=!!((D.enuTipos||{})['Cave']);
-    const temTerreo=!temCaveENU&&(apartT?(plT==='4'):true);
+    const _resp=String(D.pavPorBaixo||'').toLowerCase();
+    const _parcialAqui=/só parte|so parte/i.test(D.pavAbrangencia||'');
+    const temTerreo=!_parcialAqui&&!temCaveENU&&(_resp
+      ? /terreno|solo/.test(_resp)
+      : podeTocarOSolo());
+    /* COM CAVE, O PAVIMENTO NÃO DESAPARECE.
+       O !temCaveENU tirava a secção do térreo — e certo, porque o pavimento dá
+       para a cave e não para o solo — mas não punha nada no lugar. Numa moradia
+       de dois pisos com cave declarada como ENU, a envolvente ficava SEM
+       pavimento nenhum: nem térreo, nem interior. */
+    /* PARCIAL: as duas envolventes, com as áreas por repartir.
+       Uma cave ou garagem que ocupe só parte do piso deixa o resto em contacto
+       com o solo. Antes saía uma só — a do espaço não útil — e perdia-se metade
+       da envolvente de baixo. A repartição das áreas é do técnico: a app não
+       sabe que parte do piso está sobre o quê. */
+    const _parcial=/só parte|so parte/i.test(D.pavAbrangencia||'');
+    if(_parcial){
+      const _alvoP=/arrecada/.test(_resp)?'arrecadação'
+        :(/loja|com[ée]rcio/.test(_resp)?'comércio':'garagem');
+      const _piP=descPavInterior2025({porBaixo:_alvoP,temIsol:isSimTxt(D.temIsolamento)});
+      const _ptP=descPavTerreo2025();
+      t+=sep('PAVIMENTO — DUAS SOLUÇÕES (parte sobre espaço não útil, parte no solo)');
+      t+='[1] Pavimento interior — sobre '+(temCaveENU&&!_resp?'cave':_alvoP)+'\n';
+      if(_piP&&_piP.desc) t+='    '+_piP.desc.replace(/\n/g,'\n    ')+'\n';
+      if(_piP&&_piP.u) t+='    U da base: '+_piP.u+' W/(m².°C)\n';
+      t+='    Área: ______ m²   (por repartir)\n\n';
+      t+='[2] Pavimento em contacto com o terreno\n';
+      if(_ptP&&_ptP.desc) t+='    '+_ptP.desc.replace(/\n/g,'\n    ')+'\n';
+      t+='    Área: ______ m²   (por repartir)\n\n';
+      const _auP=(D.divisoes||[]).reduce((s2,dv)=>{
+        const a=parseFloat(String(resolverAreaDivisaoGlobal(dv)||'').replace(',','.'));
+        return s2+(isFinite(a)?a:0);
+      },0);
+      t+='⚠ As duas áreas somam a área do piso de baixo'+
+         (_auP>0?' (área útil total do fogo: '+_auP.toFixed(2).replace('.',',')+' m²)':'')+
+         '.\n'+
+         'A repartição mede-se na planta — a app não sabe que parte do piso está\n'+
+         'sobre o quê. As pontes térmicas seguem a mesma divisão.\n\n';
+    } else if(temCaveENU&&!/garagem|arrecada|loja|com[ée]rcio|cave/.test(_resp)){
+      const _pc=descPavInterior2025({porBaixo:'garagem',
+        temIsol:isSimTxt(D.temIsolamento)});
+      t+=sep('PAVIMENTO INTERIOR — SOBRE CAVE');
+      t+=(_pc&&_pc.desc?_pc.desc:'Pavimento em contacto com cave não útil.')+'\n\n';
+      if(_pc&&_pc.u) t+=ln('U da base',String(_pc.u)+' W/(m².°C)');
+      const _areaBaixoCave=(()=>{
+        const ORD=['Cave','R/C','1º andar','2º andar','3º andar'];
+        const pisos=[...new Set((D.divisoes||[])
+          .map(dv=>String((D.divisoesDados[dv]||{}).piso||'').trim()).filter(Boolean))]
+          .sort((a,b)=>ORD.indexOf(a)-ORD.indexOf(b));
+        const baixo=pisos.find(p=>p!=='Cave')||pisos[0]||'';
+        return (D.divisoes||[]).reduce((s2,dv)=>{
+          const dd=D.divisoesDados[dv]||{};
+          if(baixo&&String(dd.piso||'').trim()!==baixo) return s2;
+          const a=parseFloat(String(resolverAreaDivisaoGlobal(dv)||'').replace(',','.'));
+          return s2+(isFinite(a)?a:0);
+        },0);
+      })();
+      t+=ln('Área',(_areaBaixoCave>0
+        ? _areaBaixoCave.toFixed(2).replace('.',',')+' m²   (= área do piso de baixo)'
+        : '______ m²   (por medir)'));
+      t+='Declaraste cave como espaço não útil: o pavimento dá para ela, não\n'+
+         'para o solo. Entra pelo b_tr da Tabela 22.\n\n';
+    }
     if(temTerreo){
       const ORDEM_T=['Cave','R/C','1º andar','2º andar','3º andar','4º andar'];
       const pisosT=[...new Set((D.divisoes||[])
@@ -8651,7 +9251,20 @@ function buildTxt(){
         const v=parseFloat(String(resolverAreaDivisaoGlobal(d)||'').replace(',','.'));
         if(isFinite(v)) areaT+=v;
       });
-      if(areaT>0){
+      /* Esta secção assumia que o piso mais baixo do fogo está SEMPRE em
+         contacto com o solo — e num apartamento de 4.º andar não está. Agora
+         que se pergunta o que há por baixo, é a resposta que manda; sem
+         resposta, mantém-se o comportamento antigo para não partir os
+         levantamentos já feitos. */
+      /* SEM RESPOSTA, DECIDE O PISO — nunca "sim" por omissão.
+         Um 4.º andar saía com "pavimento em contacto com o solo" por o
+         comportamento antigo ser deixar passar. Só um R/C, uma cave ou uma
+         moradia podem tocar o terreno; num andar acima disso é impossível. */
+      const _pbT=String(D.pavPorBaixo||'').toLowerCase();
+      const _terreoOk=_pbT
+        ? /terreno|solo/.test(_pbT)
+        : podeTocarOSolo();
+      if(areaT>0&&_terreoOk){
         t+=sep('PAVIMENTO EM CONTACTO COM O SOLO');
         t+='Pavimento térreo com espessura desconhecida, não sendo possível identificar com mais exatidão, sendo que é possível determinar que é composta por laje em betão pesado, com revestimento em pavimento cerâmico.\n\n';
         t+=ln('Área de pavimento térreo',areaT.toFixed(2).replace('.',',')+' m²');
@@ -8698,6 +9311,7 @@ function buildTxt(){
   // (ex: modo "não medir paredes", só fotos + vãos).
   const pl=D.pisoLocal||'';
   let _ptlSemComprimentos=false, _ptlPisoUnico=null, _pdParaAngulos=2.60;
+  let _ptlNotaCaveENU=false;
   if(compTotalGlobal>0){
     // Nota (1) da Tabela 34: para pavimento de nível intermédio (e varanda), o
     // Ψ=0,70 diz respeito a METADE da perda da ligação — cada fração conta a
@@ -8710,16 +9324,103 @@ function buildTxt(){
     //  '2' Piso intermédio:    pav. intermédio ×2 (metade em cima + metade em baixo)
     //  '3' Último piso:        cobertura (inteira) + pav. intermédio no chão
     //                          (metade) — ANTES faltava a laje de baixo
-    if(pl==='1'){
-      ptlRows.push({tipo:'Fachada c/ pavimento sobre ENU (cave)',L:compTotalGlobal,psi:PSI.pavTerreo});
-      ptlRows.push({tipo:'Fachada c/ pavimento intermédio (teto — metade)',L:compTotalGlobal,psi:PSI.pavIntermed});
-    } else if(pl==='2'){
-      ptlRows.push({tipo:'Fachada c/ pavimento intermédio (×2 — chão e teto)',L:compTotalGlobal*2,psi:PSI.pavIntermed});
-    } else if(pl==='3'){
+    /* ══════════ LIGAÇÕES DE BAIXO E DE CIMA, PELA POSIÇÃO REAL ══════════
+       Isto decidia-se por uma escala ANTIGA do pisoLocal: '1' sobre cave, '2'
+       intermédio, '3' último, '4' térreo. O campo passou a guardar a ORDEM do
+       piso no prédio (1 = R/C, 2 = 1.º andar) e a correspondência partiu-se:
+       um R/C saía com «pavimento sobre ENU (cave)», um 2.º andar com
+       «fachada c/ cobertura», e o último piso ficava SEM cobertura nenhuma.
+       O Ψ da cobertura e o do térreo são diferentes do de nível intermédio, e
+       entram no cálculo.
+
+       Agora decide-se pelo que o fogo TEM: o que está por baixo (respondido no
+       levantamento, ou deduzido do piso) e se é ou não o último piso.
+
+       Nota 1 da Tabela 34: no pavimento de nível intermédio o Ψ já é METADE da
+       perda — cada fração conta a metade que lhe pertence. */
+    const _rB=String(D.pavPorBaixo||'').toLowerCase();
+    const _caveSob=!!((D.enuTipos||{})['Cave']);
+    const _semCobResp=/não tem|nao tem|não aplic|nao aplic/i.test(D.coberturaTipoEsc||'');
+    const _ultimo=_semCobResp?false:ehUltimoPiso();
+
+    /* Numa moradia estas duas linhas são substituídas pelo detalhe por piso,
+       que sabe o perímetro de cada laje. Escrevê-las aqui duplicava. */
+    const _moradiaAqui=/moradia/i.test(D.edificioTipo||'');
+    // ── ligação de baixo ──
+    if(_moradiaAqui){
+      // o bloco de detalhe trata destas ligações
+    } else if(/outro fogo|não aplic|nao aplic/.test(_rB)){
+      ptlRows.push({tipo:'Fachada c/ pavimento intermédio (chão — metade)',
+        L:compTotalGlobal,psi:PSI.pavIntermed,
+        _nota:'por baixo há outro fogo — não é envolvente'});
+    } else if(/garagem|arrecada|loja|com[ée]rcio|cave/.test(_rB)&&
+              /só parte|so parte/i.test(D.pavAbrangencia||'')){
+      // ocupa parte: metade para cada, com a repartição por medir
+      ptlRows.push({tipo:'Fachada c/ pavimento sobre ENU (parte)',
+        L:compTotalGlobal/2,psi:PSI.pavTerreo,
+        _nota:'o espaço não útil ocupa parte do piso — repartição por medir na planta'});
+      ptlRows.push({tipo:'Fachada c/ pavimento térreo (parte)',
+        L:compTotalGlobal/2,psi:PSI.pavTerreo,
+        _nota:'o resto assenta no solo'});
+    } else if(/garagem|arrecada|loja|com[ée]rcio|cave/.test(_rB)){
+      ptlRows.push({tipo:'Fachada c/ pavimento sobre ENU',
+        L:compTotalGlobal,psi:PSI.pavTerreo,
+        _nota:'espaço não útil por baixo — mesma linha 0,70 da Tabela 34'});
+    } else if(_caveSob){
+      ptlRows.push({tipo:'Fachada c/ pavimento sobre ENU (cave)',
+        L:compTotalGlobal,psi:PSI.pavTerreo});
+    } else if(_rB?/terreno|solo/.test(_rB):podeTocarOSolo()){
+      ptlRows.push({tipo:'Fachada c/ pavimento térreo',
+        L:compTotalGlobal,psi:PSI.pavTerreo});
+    } else {
+      ptlRows.push({tipo:'Fachada c/ pavimento intermédio (chão — metade)',
+        L:compTotalGlobal,psi:PSI.pavIntermed});
+    }
+
+    // ── ligação de cima ──
+    if(_moradiaAqui){
+      // idem
+    } else if(_ultimo){
       ptlRows.push({tipo:'Fachada c/ cobertura',L:compTotalGlobal,psi:PSI.cobertura});
-      ptlRows.push({tipo:'Fachada c/ pavimento intermédio (chão — metade)',L:compTotalGlobal,psi:PSI.pavIntermed});
+    } else {
+      ptlRows.push({tipo:'Fachada c/ pavimento intermédio (teto — metade)',
+        L:compTotalGlobal,psi:PSI.pavIntermed});
+    }
+
+    /* ── DETALHE POR PISO, quando há comprimentos medidos piso a piso ──
+       O bloco a seguir refina as ligações acima: numa moradia de dois pisos a
+       laje intermédia tem o seu perímetro próprio, e a cobertura pode ter mais
+       do que um tipo. Quando ele produz linhas, as duas de cima são
+       substituídas — senão contavam-se a dobrar, que foi o que aconteceu ao
+       reescrever a decisão por posição.
+       A cadeia por escala de pisoLocal ('1' sobre cave, '2' intermédio…) fica
+       desligada: o campo passou a guardar a ordem do piso e a correspondência
+       partiu-se. */
+    /* ── O DETALHE POR PISO É PARA MORADIAS ──
+       Nele, o piso mais alto DO FOGO leva cobertura e o mais baixo leva
+       pavimento térreo. Numa moradia está certo: a fração é o edifício inteiro.
+       Num apartamento não: o piso mais alto do fogo não é o do prédio, e por
+       isso saía «fachada c/ cobertura» num R/C e num 1.º andar.
+       Para apartamentos ficam as duas ligações decididas acima, pela posição
+       real — que é onde está a informação certa. */
+    const _ehMoradia=/moradia/i.test(D.edificioTipo||'');
+    if(!_ehMoradia){
+      // já está decidido; nada a fazer
     } else if(pl==='4'){
+      /* pl é uma escala ANTIGA: '1' = sobre cave, '2' = intermédio, '3' =
+         último, '4' = térreo. Mas pisoLocal passou a guardar a ORDEM do piso no
+         prédio (1 = R/C, 2 = 1.º andar), e o '4' virou o 3.º andar — que saía
+         com PTL de pavimento térreo e o Ψ do térreo, diferente do de nível
+         intermédio e a entrar no cálculo.
+         Confirma-se agora se o fogo pode mesmo tocar o solo. */
       const caveSob=!!((D.enuTipos||{})['Cave']);
+      const _rB4=String(D.pavPorBaixo||'').toLowerCase();
+      const _podeTerreo=_rB4?/terreno|solo/.test(_rB4):podeTocarOSolo();
+      if(!caveSob&&!_podeTerreo){
+        ptlRows.push({tipo:'Fachada c/ pavimento intermédio (chão — metade)',
+          L:compTotalGlobal,psi:PSI.pavIntermed,
+          _nota:'por baixo há outro fogo — não é pavimento térreo'});
+      } else
       ptlRows.push({tipo:caveSob?'Fachada c/ pavimento sobre ENU (cave)':'Fachada c/ pavimento térreo',
         L:compTotalGlobal,psi:caveSob?PSI.enu:PSI.pavTerreo,
         _nota:caveSob?'declaraste cave como ENU — o pavimento dá para ela, não para o solo':''});
@@ -8791,17 +9492,69 @@ function buildTxt(){
         for(let i=0;i<pisosComComp.length-1;i++){
           const pA=pisosComComp[i],pB=pisosComComp[i+1];
           const mediaPerim=(somaPiso(pA)+somaPiso(pB))/2;
-          ptlRows.push({tipo:`Fachada c/ pavimento intermédio (${pA}↔${pB}, ×2)`,L:mediaPerim*2,psi:PSI.pavIntermed});
+          /* UMA LAJE SOBRE ESPAÇO NÃO ÚTIL NÃO É INTERMÉDIA.
+             O «intermédio ×2» é a laje entre dois pisos ÚTEIS: cada um conta a
+             sua metade (Nota 1). Se o piso de baixo é a cave declarada como
+             ENU, a laje é a FRONTEIRA do fogo — a perda é inteira, não metade,
+             e o Ψ e o b_tr são os de pavimento sobre ENU.
+             Numa moradia com cave não útil saía «intermédio (Cave↔R/C, ×2)»,
+             com o dobro do comprimento e metade da perda — errado nos dois
+             sentidos. */
+          const _caveENU=!!((D.enuTipos||{})['Cave']);
+          const _parcialPTL=/só parte|so parte/i.test(D.pavAbrangencia||'');
+          if(_caveENU&&pA==='Cave'&&_parcialPTL){
+            /* A cave ocupa parte: a fachada do piso de cima tem um troço sobre
+               a cave e outro em contacto com o solo. Sem saber a repartição,
+               divide-se em partes iguais e assinala-se — como já se faz nas
+               coberturas com mais do que um tipo. */
+            ptlRows.push({tipo:'Fachada c/ pavimento sobre ENU (cave — parte)',
+              L:mediaPerim/2,psi:PSI.pavTerreo,_piso:pB,
+              _nota:'a cave ocupa parte do piso — repartição por medir na planta'});
+            ptlRows.push({tipo:'Fachada c/ pavimento térreo (parte)',
+              L:mediaPerim/2,psi:PSI.pavTerreo,_piso:pB,
+              _nota:'o resto do piso assenta no solo — repartição por medir'});
+          } else if(_caveENU&&pA==='Cave'){
+            ptlRows.push({tipo:'Fachada c/ pavimento sobre ENU (cave)',
+              L:mediaPerim,psi:PSI.pavTerreo,_piso:pB,
+              _nota:'a cave é espaço não útil — a laje é fronteira do fogo, '+
+                    'com a perda inteira e b_tr da Tabela 22'});
+          } else {
+            ptlRows.push({tipo:`Fachada c/ pavimento intermédio (${pA}↔${pB}, ×2)`,
+              L:mediaPerim*2,psi:PSI.pavIntermed});
+          }
         }
         if(_pisoBaixoSobreCave&&pisoBaixo!=='Cave'){
           ptlRows.push({tipo:'Fachada c/ pavimento sobre ENU (cave)',L:somaPiso(pisoBaixo),
             psi:PSI.enu,_piso:pisoBaixo,_nota:'cave por baixo — NÃO é pavimento térreo'});
-        } else if(pisoBaixo==='Cave'){
+        } else if(pisoBaixo==='Cave'&&!temCaveENU){
+          // cave ÚTIL: o pavimento dela é mesmo a envolvente de baixo do fogo
           ptlRows.push({tipo:'Fachada c/ pavimento térreo (cave)',L:somaPiso(pisoBaixo),
             psi:PSI.pavTerreo,_piso:pisoBaixo,
             _nota:'confirmar se a cave é enterrada — paredes em contacto com o solo NÃO contam (Tabela 33)'});
+        } else if(pisoBaixo==='Cave'){
+          /* Cave NÃO ÚTIL: o pavimento dela fica fora da envolvente do fogo — a
+             fronteira é a laje por cima, já contada acima. Saía aqui uma linha
+             de «pavimento térreo (cave)» que não pertence ao fogo. */
+          _ptlNotaCaveENU=true;
         } else {
-          ptlRows.push({tipo:'Fachada c/ pavimento térreo',L:somaPiso(pisoBaixo),psi:PSI.pavTerreo,_piso:pisoBaixo});
+          /* O piso mais baixo DO FOGO não é o piso mais baixo do prédio: num
+             4.º andar, o pavimento dá para o vizinho, não para o terreno.
+             Sem isto saía "Fachada c/ pavimento térreo" em qualquer andar — e
+             o Ψ do térreo é diferente do de pavimento intermédio. */
+          const _resp=String(D.pavPorBaixo||'').toLowerCase();
+          const _terreo=_resp?/terreno|solo/.test(_resp):podeTocarOSolo();
+          if(_terreo){
+            ptlRows.push({tipo:'Fachada c/ pavimento térreo',L:somaPiso(pisoBaixo),
+              psi:PSI.pavTerreo,_piso:pisoBaixo});
+          } else if(/garagem|arrecada|loja|com[ée]rcio|cave/.test(_resp)){
+            ptlRows.push({tipo:'Fachada c/ pavimento sobre ENU',L:somaPiso(pisoBaixo),
+              psi:PSI.enu,_piso:pisoBaixo,
+              _nota:'por baixo há espaço não útil — não é pavimento térreo'});
+          } else {
+            ptlRows.push({tipo:'Fachada c/ pavimento de nível intermédio',
+              L:somaPiso(pisoBaixo),psi:PSI.pavIntermed,_piso:pisoBaixo,
+              _nota:'por baixo há outro fogo — não é envolvente'});
+          }
         }
       } else {
         // fallback: sem informação de piso nenhures, usa o total global como antes
@@ -8909,6 +9662,10 @@ function buildTxt(){
 
   t+='Nota: as varandas em consola têm Ψ = 0,70 e o comprimento do bordo — mede-as\n'+
      'na planta e acrescenta à mão; a app não sabe onde estão.\n';
+  if(_ptlNotaCaveENU)
+    t+='\nNota: a cave está declarada como espaço não útil, por isso o pavimento\n'+
+       'dela NÃO é envolvente do fogo — a fronteira de baixo é a laje sobre a\n'+
+       'cave, contada acima com a perda inteira.\n';
   if(_ptlPisoUnico){
     t+='\n⚠️ ATENÇÃO — PERÍMETROS SOBRESTIMADOS\n';
     t+='Esta moradia tem '+_ptlPisoUnico.nPisos+' pisos, mas TODAS as divisões estão marcadas em "'+
@@ -9970,6 +10727,36 @@ async function buildPacoteZipBlob(show){
 
   // 3. Todas as fotos — alçados, etiquetas, unidades exteriores, e por divisão
   const fotosFolder=raiz.folder('fotos');
+  /* ══════════ FOTOS PEQUENAS ══════════
+     Uma cópia reduzida das fotos que vão para o certificado — alçados,
+     climatização e AQS — com um tecto de 150 KB. As originais ficam intactas em
+     fotos/: estas são para anexar, aquelas para arquivo.
+     Reduz-se pela LARGURA antes de mexer na qualidade: baixar só a qualidade
+     deixa a imagem suja; menos píxeis com qualidade alta lê-se melhor. */
+  const fotosPqFolder=fotosFolder.folder('Fotos Pq');
+  const LIMITE_PQ=150*1024;
+  async function reduzirFoto(blob){
+    const bmp=await createImageBitmap(blob);
+    const cv=document.createElement('canvas');
+    const ctx=cv.getContext('2d');
+    // larguras a tentar, da maior para a menor
+    const larguras=[1600,1280,1024,800,640].filter(l=>l<=bmp.width).concat(
+      bmp.width<640?[bmp.width]:[]);
+    for(const larg of larguras){
+      const esc=larg/bmp.width;
+      cv.width=Math.round(bmp.width*esc);
+      cv.height=Math.round(bmp.height*esc);
+      ctx.drawImage(bmp,0,0,cv.width,cv.height);
+      for(const q of [0.82,0.72,0.62]){
+        const b=await new Promise(r=>cv.toBlob(r,'image/jpeg',q));
+        if(b&&b.size<=LIMITE_PQ){ bmp.close&&bmp.close(); return b; }
+      }
+    }
+    // não coube: fica a menor que se conseguiu, e diz-se
+    const b=await new Promise(r=>cv.toBlob(r,'image/jpeg',0.55));
+    bmp.close&&bmp.close();
+    return b;
+  }
   let nFotos=0,nFalhas=0;
 
   // Constrói a lista completa (síncrono, define os nomes de ficheiro já na ordem
@@ -9977,14 +10764,15 @@ async function buildPacoteZipBlob(show){
   // em paralelo — muito mais rápido do que ler uma foto de cada vez do IndexedDB.
   const listaFotos=[];
   let contador=0;
-  (D.fotosAlcado||[]).forEach(f=>{contador++;listaFotos.push({f,nomeFicheiro:`alcado_${contador}.jpg`});});
+  (D.fotosAlcado||[]).forEach(f=>{contador++;
+    listaFotos.push({f,nomeFicheiro:`alcado_${contador}.jpg`,pq:true});});
 
   // Etiquetas de equipamento — nome descritivo com TIPO + MARCA + MODELO, para
   // que ao anexar as fotos no ficheiro do ITeCons se saiba a que equipamento
   // pertence cada imagem sem ter de a abrir. Antes saía só "etiqueta_3_AQS.jpg".
   (D.fotoEtiquetas||[]).forEach(f=>{
     contador++;
-    listaFotos.push({f,nomeFicheiro:`${contador}_${nomeFicheiroEquipamento(f)}.jpg`});
+    listaFotos.push({f,nomeFicheiro:`${contador}_${nomeFicheiroEquipamento(f)}.jpg`,pq:true});
   });
 
   // Unidades exteriores — idem, com marca/modelo lidos da chapa pelo OCR
@@ -9994,7 +10782,7 @@ async function buildPacoteZipBlob(show){
     const marca=limparNomeFicheiro(d.marca||'');
     const modelo=limparNomeFicheiro(d.modelo||'');
     const sufixo=[marca,modelo].filter(Boolean).join('_');
-    listaFotos.push({f,nomeFicheiro:`${contador}_unidade_exterior_UE${i+1}${sufixo?'_'+sufixo:''}.jpg`});
+    listaFotos.push({f,nomeFicheiro:`${contador}_unidade_exterior_UE${i+1}${sufixo?'_'+sufixo:''}.jpg`,pq:true});
   });
 
   const divsComFotos=[...(D.divisoes||[])];
@@ -10007,16 +10795,26 @@ async function buildPacoteZipBlob(show){
   const NOMES_FOTO_CAMPO={vidros:'espessura_vidros',parede:'espessura_parede',peDireito:'pe_direito'};
   for(const [campo,info] of Object.entries(D.fotosCampos||{})){
     const lista=fotosDoCampo(info);
+    /* A lareira é um sistema de climatização como os outros — a foto vai para o
+       certificado e portanto também para a pasta reduzida. Está em fotosCampos
+       (chave "lareira-<divisão>") por não ter marca comercial, não por ser
+       menos importante.
+       O nome fica "lareira_Sala.jpg" em vez de "lareira-Sala.jpg": no ITeCons
+       procura-se por nome e o traço confunde-se com o resto. */
+    const ehLareira=/^lareira[-_]/i.test(campo);
+    const base=NOMES_FOTO_CAMPO[campo]||
+      (ehLareira?campo.replace(/^lareira[-_]/i,'lareira_'):campo);
     lista.forEach((f,i)=>{
       contador++;
-      const base=NOMES_FOTO_CAMPO[campo]||campo;
-      listaFotos.push({f,nomeFicheiro:`${base}${lista.length>1?'_'+(i+1):''}.jpg`});
+      listaFotos.push({f,nomeFicheiro:`${base}${lista.length>1?'_'+(i+1):''}.jpg`,
+        pq:ehLareira});
     });
   }
   if(D.obsAudioKey) listaFotos.push({f:{idbKey:D.obsAudioKey},nomeFicheiro:'observacoes_audio',audio:true});
 
   const faltas=[];
-  async function tentarAdicionarFoto(f,nomeFicheiro,ehAudio){
+  let nPq=0;
+  async function tentarAdicionarFoto(f,nomeFicheiro,ehAudio,ehPq){
     try{
       const url=await resolverFotoURL(f);
       if(!url) throw new Error('não há imagem guardada com esta chave');
@@ -10025,6 +10823,13 @@ async function buildPacoteZipBlob(show){
       if(ehAudio){ const ext=(blob.type.split('/')[1]||'webm').split(';')[0]; nome=nomeFicheiro+'.'+ext; }
       fotosFolder.file(nome,blob);
       nFotos++;
+      // e a cópia reduzida, para as que vão para o certificado
+      if(!ehAudio&&ehPq){
+        try{
+          const pq=await reduzirFoto(blob);
+          if(pq){ fotosPqFolder.file(nome,pq); nPq++; }
+        }catch(e){ console.error('não consegui reduzir',nome,e); }
+      }
     }catch(e){
       nFalhas++;
       faltas.push(nomeFicheiro+' ('+(e.message||e.name)+')');
@@ -10036,7 +10841,8 @@ async function buildPacoteZipBlob(show){
   for(let i=0;i<listaFotos.length;i+=LOTE){
     const lote=listaFotos.slice(i,i+LOTE);
     show(`A ler fotos (${Math.min(i+LOTE,listaFotos.length)}/${listaFotos.length})…`);
-    await Promise.all(lote.map(({f,nomeFicheiro,audio})=>tentarAdicionarFoto(f,nomeFicheiro,audio)));
+    await Promise.all(lote.map(({f,nomeFicheiro,audio,pq})=>
+      tentarAdicionarFoto(f,nomeFicheiro,audio,pq)));
   }
 
   const chavesNaRecolha=new Set();
@@ -10096,10 +10902,11 @@ async function buildPacoteZipBlob(show){
   }
 
   const avisoFalhas=(nFalhas||nDocsFalhas)?` — ⚠️ ${nFalhas+nDocsFalhas} ficheiro(s) não puderam ser lidos e foram ignorados`:'';
-  show(`A gerar ZIP (${nFotos} foto${nFotos!==1?'s':''}${docsList.length?' + '+(docsList.length-nDocsFalhas)+' doc.':''})…${avisoFalhas}`);
+  show(`A gerar ZIP (${nFotos} foto${nFotos!==1?'s':''}${nPq?' + '+nPq+' reduzida'+(nPq!==1?'s':''):''}${docsList.length?' + '+(docsList.length-nDocsFalhas)+' doc.':''})…${avisoFalhas}`);
   const zipBlob=await zip.generateAsync({type:'blob'});
   const zipNome=nome+'_completo.zip';
-  return {zipBlob,zipNome,nome,nFotos,docsCount:docsList.length-nDocsFalhas,nFalhas:nFalhas+nDocsFalhas};
+  return {zipBlob,zipNome,nome,nFotos,nPq,
+    docsCount:docsList.length-nDocsFalhas,nFalhas:nFalhas+nDocsFalhas};
 }
 
 // ── NOME DO PACOTE DE EXPORTAÇÃO: a rua ──
@@ -12841,6 +13648,8 @@ function anexarFotoCampo(campo,wrap){
       D.fotosCampos[campo]={idbKey,ts:new Date().toLocaleString('pt-PT')};
       autoSave();
       renderFotoCampoThumb(campo,wrap);
+      // a foto da lareira vai ser lida, para se saber o que lá está
+      if(/^lareira[-_]/i.test(campo)) analisarFotoLareira(campo,dataURL,wrap);
     }catch(e){alert('Erro ao guardar foto: '+e.message);}
   };
   input.click();
@@ -12938,6 +13747,86 @@ function renderMultiFotoThumb(campo,wrap,minFotos){
     av.style.cssText='font-size:11px;color:var(--ac);margin-top:3px;width:100%';
     av.textContent=`${fotos.length} de ${minFotos} recomendadas — adiciona mais para garantir legibilidade`;
     thumbBox.appendChild(av);
+  }
+}
+
+/* ══════════ RECONHECER A LAREIRA ══════════
+   Uma lareira não tem chapa de características na maior parte dos casos — o que
+   se vê é a construção: aberta, com recuperador de portas de vidro, salamandra
+   a lenha ou a pellets. E isso muda o texto do certificado e o rendimento por
+   defeito, porque uma lareira aberta e um recuperador fechado não são a mesma
+   coisa (Tabela 76).
+   A leitura é uma SUGESTÃO — escreve-se ao lado da foto e o utilizador
+   confirma. Nunca substitui o que ele escolheu. */
+async function analisarFotoLareira(campo,dataURL,wrap){
+  const div=campo.replace(/^lareira[-_]/i,'');
+  const st=document.createElement('div');
+  st.style.cssText='font-size:12.5px;color:var(--tx2);margin-top:5px';
+  st.textContent='A ler a foto…';
+  wrap.appendChild(st);
+  try{
+    const b64=String(dataURL).split(',')[1];
+    const r=await fetch('https://api.anthropic.com/v1/messages',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:400,messages:[{
+        role:'user',content:[
+          {type:'image',source:{type:'base64',media_type:'image/jpeg',data:b64}},
+          {type:'text',text:'Esta é a foto de um equipamento de aquecimento a '+
+           'biomassa numa habitação. Identifica o que está na imagem e responde '+
+           'SÓ com JSON, sem texto à volta nem marcas de código:\n'+
+           '{"equipamento":"lareira aberta"|"lareira com recuperador"|'+
+           '"salamandra a lenha"|"salamandra a pellets"|"recuperador de calor"|'+
+           '"fogão de sala"|"não identificado",'+
+           '"tem_porta_vidro":true|false|null,'+
+           '"marca":"..."|null,"modelo":"..."|null,'+
+           '"confianca":"alta"|"media"|"baixa",'+
+           '"nota":"o que se vê, numa frase curta"}\n'+
+           'Se a imagem não mostrar um equipamento de aquecimento, devolve '+
+           '"não identificado" com confiança baixa.'}
+        ]}]})});
+    const j=await r.json();
+    const txt=(j.content||[]).filter(x=>x.type==='text').map(x=>x.text).join('');
+    const d=JSON.parse(txt.replace(/```json|```/g,'').trim());
+    if(!D.lareiraFotoDados) D.lareiraFotoDados={};
+    D.lareiraFotoDados[div]=d;
+    autoSave();
+    if(!d.equipamento||/não identificado/i.test(d.equipamento)){
+      st.textContent='Não consegui identificar o equipamento nesta foto.';
+      return;
+    }
+    st.innerHTML='';
+    const cx=document.createElement('div');
+    cx.style.cssText='background:var(--bg2);border:1px solid var(--br);'+
+      'border-radius:9px;padding:9px 11px;margin-top:6px;font-size:13px';
+    const conf=d.confianca==='alta'?'':' <span style="color:var(--am)">('+
+      'confiança '+(d.confianca||'baixa')+' — confirma)</span>';
+    cx.innerHTML='<b>Parece: '+esc(d.equipamento)+'</b>'+conf+
+      (d.marca?'<br><span style="color:var(--tx2)">marca: '+esc(d.marca)+
+        (d.modelo?' '+esc(d.modelo):'')+'</span>':'')+
+      (d.nota?'<br><span style="color:var(--tx2)">'+esc(d.nota)+'</span>':'');
+    const bt=document.createElement('button');
+    bt.type='button';
+    bt.style.cssText='margin-top:8px;width:100%;padding:8px;background:var(--ac);'+
+      'color:#04140c;border:none;border-radius:8px;font-size:13px;font-weight:700;'+
+      'cursor:pointer';
+    bt.textContent='✓ Usar «'+d.equipamento+'» na descrição';
+    bt.onclick=()=>{
+      D.lareiraTipo=D.lareiraTipo||{};
+      D.lareiraTipo[div]=d.equipamento;
+      if(d.marca){
+        const c=D.climaDivisoes[div]||(D.climaDivisoes[div]={tipos:[],marcasPorTipo:{}});
+        c.marcasPorTipo=c.marcasPorTipo||{};
+        c.marcasPorTipo['Lareira/recuperador']=[[d.marca,d.modelo].filter(Boolean).join(' ')];
+      }
+      autoSave();
+      bt.textContent='✓ Guardado';
+      bt.disabled=true; bt.style.opacity='.6';
+    };
+    cx.appendChild(bt);
+    wrap.appendChild(cx);
+  }catch(e){
+    st.textContent='Não consegui ler a foto ('+(e.message||e)+'). '+
+      'A foto ficou guardada na mesma.';
   }
 }
 
@@ -14789,7 +15678,12 @@ function carregarScriptMsal(){
     const s=document.createElement('script');
     s.src='msal-browser.min.js';
     s.onload=()=>resolve();
-    s.onerror=()=>{_msalScriptPromise=null;reject(new Error('Falha ao carregar msal-browser.min.js — verifica a ligação à internet.'));};
+    s.onerror=()=>{_msalScriptPromise=null;reject(new Error((location.protocol!=='http:'&&location.protocol!=='https:')
+      ? 'O OneDrive não funciona com a app aberta a partir do disco.\n\n'+
+        'Abre pelo site — renatovrochato-cell.github.io/CE-voz — e o botão passa '+
+        'a funcionar.\n\n(A ligação à conta Microsoft exige um endereço https.)'
+      : 'Falha ao carregar msal-browser.min.js.\n\nO ficheiro tem de estar na '+
+        'mesma pasta que o index.html no site. Verifica também a ligação à internet.'));};
     document.head.appendChild(s);
   });
   return _msalScriptPromise;
