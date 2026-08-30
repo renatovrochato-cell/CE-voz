@@ -405,7 +405,10 @@ Vista CE</button>
       <button id="btZona" title="Marcar uma parte do pavimento ou da cobertura com outra condição fronteira" hidden>▦
 Zona</button>
       <button id="btPincel" title="Pintar paredes com a condição fronteira escolhida (Ctrl+clique escolhe a cor)" hidden>🖌
-Pincel</button>
+Pincel</button><button id="btTroco" title="Pintar só um pedaço da parede: um clique no início, outro no fim  (T)" hidden>✂
+Troço</button><button id="btRegua" title="Medir na planta: um clique no início, outro no fim  (M)">📏
+Régua</button><button id="btAdj" title="Desenhar um espaço vizinho: outra fracção, circulação, garagem  (V)">▧
+Vizinho</button>
       <button id="btCotas" class="on">⇥
 Cotas</button>
       <button id="btOrient" class="on">🧭
@@ -570,7 +573,7 @@ Ver tudo</button>
   window.addEventListener('online',aviso);
 })();
 "use strict";
-const PLANTA_VERSAO='v1.30.0 (2026-08-09)';
+const PLANTA_VERSAO='v1.46.0 (2026-08-30)';
 /* ══════════════════════════════════════════════════════════════════
    CE Voz · motor de planta interativa
    Fonte de verdade: o levantamento (D). A planta é uma camada de
@@ -630,6 +633,14 @@ let guias=[];                  // linhas de encaixe visíveis durante o arrasto
 let moverFundo=false, calib=null, desenhando=false, verFundoLinhas=false;
 let modoCE=false;
 let pincelCF=null;   // condição fronteira activa para pintar paredes
+let pincelParcial=false;  // pintar só um troço da parede, entre dois cliques
+let legendaForaDoDesenho=false;  // no PDF a legenda vai por baixo, não por cima
+let _legendaCE=[];               // o que a legenda diria, para o PDF a montar
+let _trocoEmCurso=null;   // {bloco,lado,a} enquanto se espera o segundo clique
+/* RÉGUA — medir distâncias na planta.
+   Sem isto, para saber quanto media um vão ou um recuo era preciso contar
+   quadrículas. Dois cliques dão a distância em metros, na escala da planta. */
+let regua=null;           // {a:{x,y}, b:{x,y}} em metros
 let modoForma=null; // '+' juntar, '-' cortar, 'poli' contorno
 let poli=null;      // {div, pts:[], arco:{}} enquanto se desenha
 let modoArco=false; // o próximo troço é um arco de 3 pontos
@@ -640,6 +651,9 @@ let poliPrev=null;  // ponto seguinte em pré-visualização   // calib = {p1} e
 function calibrarFundo(p1,p2,real){
   const d=Math.hypot(p2.x-p1.x,p2.y-p1.y);
   if(!(L.fundo&&real>0&&d>1e-3)) return false;
+  /* Fica registado que este fundo foi calibrado: a régua precisa de saber,
+     porque medir sobre um PDF por calibrar dá um número plausível e errado. */
+  L.fundo.calibrado=true;
   const k=real/d, f=L.fundo;
   // escalar em torno do CENTRO e depois deslocar para o 1º ponto ficar quieto:
   // dá o mesmo resultado que escalar em torno do ponto e continua exacto quando
@@ -666,9 +680,24 @@ const abrevEnv=t=>ABREV_ENV[t]||(t.length>14?t.slice(0,13)+'.':t);
 /* ══════════ construção do layout a partir do levantamento ══════════ */
 function dadosDiv(nome){return (proj.D.divisoesDados||{})[nome]||{};}
 function divisoes(){
+  /* SÓ AS DIVISÕES DO LEVANTAMENTO.
+     O divisoesDados acumula também os nomes lidos da planta (OCR) — "abrigo de
+     carro", "hall", "sala comum" — que são compartimentos do desenho, não
+     divisões medidas. Ao apanhá-los todos, a planta desenhava 18 blocos para 10
+     divisões: um levantamento real dos Lombos saiu com o dobro dos quadrados e
+     com os exteriores misturados.
+     Só se acrescenta uma chave de fora se ela tiver mesmo trabalho de campo —
+     medidas ou vãos — que é o sinal de que foi levantada e não só lida. */
   const dd=proj.D.divisoesDados||{};
   const lista=(proj.D.divisoes||[]).filter(n=>n);
-  Object.keys(dd).forEach(n=>{if(!lista.includes(n))lista.push(n);});
+  Object.keys(dd).forEach(n=>{
+    if(lista.includes(n)) return;
+    const d=dd[n]||{};
+    const temMedidas=Object.values(d.trocos||{})
+      .some(v=>v&&String((Array.isArray(v)?v[0]:v)||'').trim());
+    const temVaos=(d.vaos||[]).length>0;
+    if(temMedidas||temVaos) lista.push(n);
+  });
   return lista;
 }
 function orientsMedidas(nome){
@@ -832,7 +861,7 @@ function autoLayout(){
   // cobertura e as cores são trabalho à parte e ficam
   L={rot,blocos,vaos:[],env:{},fundo:(L&&L.fundo)||null,
      fundos:(L&&L.fundos)||[],fundoAtivo:(L&&L.fundoAtivo)||0,
-     ce:(L&&L.ce)||{},zonas:(L&&L.zonas)||[],ceCores:(L&&L.ceCores)||{},cotas:(L&&L.cotas)||[]};
+     ce:(L&&L.ce)||{},zonas:(L&&L.zonas)||[],adj:(L&&L.adj)||[],envTrocos:(L&&L.envTrocos)||{},ceCores:(L&&L.ceCores)||{},cotas:(L&&L.cotas)||[]};
   sincronizarFundo();
   encostarTudo(.30);
   separarPorPiso(3.0);          // cada piso na sua planta, lado a lado
@@ -856,14 +885,21 @@ function areaShoelace(pts){
 }
 function areaBloco(b){
   if(b.pts&&b.pts.length>=3) return Math.abs(areaShoelace(b.pts));
-  return b.w*b.h;
+  /* O polígono já vinha com Math.abs; o rectângulo não. Uma largura negativa —
+     que aparece a meio de um arrasto para a esquerda, ou num ficheiro
+     estragado — dava área NEGATIVA, e essa entrava na soma da área útil sem
+     dar erro nenhum. */
+  return Math.abs(b.w*b.h);
 }
 function caixa(b){
   if(b.pts&&b.pts.length>=3){
     const xs=b.pts.map(q=>q.x), ys=b.pts.map(q=>q.y);
     return {x0:Math.min(...xs),y0:Math.min(...ys),x1:Math.max(...xs),y1:Math.max(...ys)};
   }
-  return {x0:b.x,y0:b.y,x1:b.x+b.w,y1:b.y+b.h};
+  /* Com w ou h negativos, x0 ficava maior que x1 e todo o cálculo de
+     sobreposição — encostos, paredes tapadas, vizinhos — dava o contrário. */
+  return {x0:Math.min(b.x,b.x+b.w), y0:Math.min(b.y,b.y+b.h),
+          x1:Math.max(b.x,b.x+b.w), y1:Math.max(b.y,b.y+b.h)};
 }
 function dentroBloco(b,x,y){
   if(!(b.pts&&b.pts.length>=3)) return b.x<x&&x<b.x+b.w&&b.y<y&&y<b.y+b.h;
@@ -965,10 +1001,17 @@ function normalParede(par){
 // Um contorno em L é guardado como vários rectângulos. As arestas onde esses
 // rectângulos se tocam NÃO são paredes — são a costura da decomposição. Antes
 // apareciam desenhadas a cinzento e pareciam divisórias dentro do compartimento.
-function trocosTapadosDaDivisao(par){
+/* Bocados desta parede encostados a OUTRO BLOCO DO MESMO FOGO — seja da mesma
+   divisão ou de outra.
+   Antes só contavam os blocos da mesma divisão, e por isso a parede entre o
+   Quarto 1 e a kitchenette não era vista como interior: ficava disponível para
+   ser marcada como «outra fracção», que é o oposto. Duas divisões do mesmo
+   fogo têm entre si uma divisória, não uma fronteira. */
+const FOLGA_PAREDE=0.35;   // espessura típica de uma parede entre divisões
+function trocosTapadosDaDivisao(par,soMesmaDivisao){
   const b=L.blocos.find(x=>x.id===par.bloco);
   if(!b) return null;
-  const irmaos=L.blocos.filter(x=>x.div===b.div&&x.id!==b.id);
+  const irmaos=L.blocos.filter(x=>x.id!==b.id&&(!soMesmaDivisao||x.div===b.div));
   if(!irmaos.length) return null;
   const dx=(par.p2.x-par.p1.x)/par.comp, dy=(par.p2.y-par.p1.y)/par.comp;
   const tap=[];
@@ -976,7 +1019,13 @@ function trocosTapadosDaDivisao(par){
     const qx=(q.p2.x-q.p1.x)/q.comp, qy=(q.p2.y-q.p1.y)/q.comp;
     if(Math.abs(qx*dy-qy*dx)>.035) return;
     const v={x:q.p1.x-par.p1.x,y:q.p1.y-par.p1.y};
-    if(Math.abs(v.x*dy-v.y*dx)>.02) return;          // tem de ser a MESMA linha
+    /* FOLGA ENTRE BLOCOS
+       As medidas do levantamento são INTERIORES: entre duas divisões fica
+       sempre a espessura da parede, 10 a 30 cm. Com a tolerância antiga de
+       2 cm, duas divisões separadas por uma parede de tijolo não eram vistas
+       como encostadas — foi o que aconteceu na Bemposta, com 11 cm de folga,
+       e a parede entre elas continuava marcável como «outra fracção». */
+    if(Math.abs(v.x*dy-v.y*dx)>FOLGA_PAREDE) return;   // paredes paralelas próximas
     let t0=v.x*dx+v.y*dy, t1=(q.p2.x-par.p1.x)*dx+(q.p2.y-par.p1.y)*dy;
     if(t0>t1){const t=t0;t0=t1;t1=t;}
     const a=Math.max(0,t0), z=Math.min(par.comp,t1);
@@ -1001,14 +1050,28 @@ function trocosTapadosDaDivisao(par){
    Agora responde-se em três estados: totalmente tapada (não se desenha),
    totalmente livre (desenha-se toda), ou parcial — e aí desenham-se só os
    BOCADOS livres. */
+/* A parede está toda encostada a outro bloco DO MESMO FOGO? Então é divisória
+   interna e não pode ter condição de fronteira. */
+function paredeInternaDoFogo(par){
+  const t=trocosTapadosDaDivisao(par,false);
+  if(!t||!t.length) return false;
+  return t.length===1&&t[0][0]<=.02&&t[0][1]>=par.comp-.02;
+}
+/* PARA DESENHAR: a parede só se esconde quando está tapada por outro bloco DA
+   MESMA DIVISÃO — numa forma em L ou T, o troço encoberto não é parede nenhuma.
+   Entre divisões diferentes há sempre parede, e ela tem de aparecer.
+   Ao chamar sem argumento, a versão nova passava a considerar todos os blocos
+   do fogo, e onze paredes interiores desapareceram do desenho. */
 function paredeInternaDaDivisao(par){
-  const t=trocosTapadosDaDivisao(par);
+  const t=trocosTapadosDaDivisao(par,true);
   if(!t||!t.length) return false;
   return t.length===1&&t[0][0]<=.02&&t[0][1]>=par.comp-.02;
 }
 // Bocados da parede que NÃO estão encostados a outro bloco da mesma divisão.
 function trocosLivresDaParede(par){
-  const t=trocosTapadosDaDivisao(par);
+  /* Para DESENHAR, só interessam os blocos da mesma divisão: dois quartos
+     encostados continuam a ter parede entre eles, e ela tem de aparecer. */
+  const t=trocosTapadosDaDivisao(par,true);
   if(!t||!t.length) return [[0,par.comp]];
   const livres=[]; let c=0;
   t.forEach(([a,z])=>{ if(a-c>.02) livres.push([c,a]); c=Math.max(c,z); });
@@ -1889,6 +1952,37 @@ function desenhar(dimForcada){
     });
   }
 
+  /* ESPAÇOS ADJACENTES — por baixo das paredes, para não as tapar.
+     Tracejado, porque não fazem parte do fogo: vê-se logo que é contexto e não
+     área útil. */
+  adjacentes().forEach(a=>{
+    const cor=adjCor(a);
+    p.push('<rect data-adj="'+a.id+'" x="'+sx(a.x)+'" y="'+sy(a.y)+
+      '" width="'+(a.w*view.ppm)+'" height="'+(a.h*view.ppm)+
+      '" fill="'+cor+'" fill-opacity=".13" stroke="'+cor+'" stroke-width="2" '+
+      'stroke-dasharray="8 5" style="cursor:move"/>');
+    /* PEGAS PARA REDIMENSIONAR — uma por lado.
+       Criar a caixa e não a poder ajustar não servia de nada: um vizinho tem de
+       encostar à parede toda, e o tamanho por omissão nunca é o certo. */
+    if(sel&&sel.t==='adj'&&sel.id===a.id){
+      const pg=[['N',a.x+a.w/2,a.y],['S',a.x+a.w/2,a.y+a.h],
+                ['O',a.x,a.y+a.h/2],['E',a.x+a.w,a.y+a.h/2]];
+      pg.forEach(([lado,mx,my])=>{
+        p.push('<rect data-adjpega="'+a.id+'|'+lado+'" x="'+(sx(mx)-7)+'" y="'+(sy(my)-7)+
+          '" width="14" height="14" rx="3" fill="'+cor+'" stroke="#fff" '+
+          'stroke-width="2" style="cursor:'+((lado==='N'||lado==='S')?'ns':'ew')+
+          '-resize"/>');
+      });
+    }
+    const cxp=sx(a.x+a.w/2), cyp=sy(a.y+a.h/2);
+    p.push('<text data-adj="'+a.id+'" x="'+cxp+'" y="'+(cyp-3)+'" text-anchor="middle" '+
+      'font-size="12" font-weight="700" fill="'+cor+'" style="cursor:move">'+
+      esc(adjNome(a.tipo))+'</text>');
+    p.push('<text data-adj="'+a.id+'" x="'+cxp+'" y="'+(cyp+13)+'" text-anchor="middle" '+
+      'font-size="11" fill="'+cor+'" opacity=".85" style="cursor:move">b_tr '+
+      fmt(adjBtr(a.tipo,a.semReq),2)+(a.semReq?' · sem requisito':'')+'</text>');
+  });
+
   // paredes (por cima de todos os blocos, para as partilhadas ficarem certas)
   L.blocos.forEach(b=>{
     paredes(b).forEach(par=>{
@@ -1904,9 +1998,14 @@ function desenhar(dimForcada){
       if(!interna){
         trocosLivresDaParede(par).forEach((tr,iT)=>{
           const A=pontoParede(par,tr[0]), B=pontoParede(par,tr[1]);
+          /* Com o modo de espessura ligado, TAMBÉM estas. Ficavam a 2 px fixos
+             enquanto as exteriores engrossavam com o zoom — daí a impressão de
+             que as exteriores eram exageradas e as interiores não mudavam. */
+          const espI=espessura?Math.max(1.5,espDaParede(par)*view.ppm):2;
           p.push('<line data-par="'+b.id+'|'+par.lado+'" x1="'+sx(A.x)+'" y1="'+sy(A.y)+
             '" x2="'+sx(B.x)+'" y2="'+sy(B.y)+
-            '" stroke="#8FA0AC" stroke-width="2" stroke-linecap="square" style="cursor:pointer"/>');
+            '" stroke="#8FA0AC" stroke-width="'+espI.toFixed(1)+
+            '" stroke-linecap="butt" style="cursor:pointer"/>');
         });
       }
       const eo=envObj(b.id,par.lado), es=envSeg(par);
@@ -1916,7 +2015,12 @@ function desenhar(dimForcada){
         p.push('<line data-par="'+b.id+'|'+par.lado+'" x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+
           '" stroke="'+(modoCE?(eo.tipo===DIVISORIA?'#B9C6CE':cfCor(cfDoTipo(eo.tipo,eo.btr)))
             :(eo.tipo===DIVISORIA?'#9AA9B4':'#46586A'))+'" stroke-opacity="'+(modoCE?1:(eo.auto?.55:1))+
-          '" stroke-width="'+(eo.tipo===DIVISORIA?3:(modoCE?7:5))+'" stroke-dasharray="'+
+          /* Com o modo de espessura ligado, esta linha segue a espessura real
+             da parede: senão desenhava-se 7 px por cima de uma divisória de
+             15 cm e todas ficavam iguais no ecrã. */
+          '" stroke-width="'+(espessura
+            ? Math.max(1.5,espDaParede(par)*view.ppm).toFixed(1)
+            : (eo.tipo===DIVISORIA?3:(modoCE?7:5)))+'" stroke-dasharray="'+
           (eo.tipo===DIVISORIA?'2 3':(modoCE?'':'7 3.5'))+'" stroke-linecap="butt" style="cursor:pointer"/>');
         if(verCotas&&view.ppm>24&&eo.tipo!==DIVISORIA){
           const nrm=normalParede(par);
@@ -1938,6 +2042,34 @@ function desenhar(dimForcada){
       if(sel.t==='parede'&&sel.bloco===b.id&&sel.lado===par.lado)
         p.push('<line x1="'+sx(par.p1.x)+'" y1="'+sy(par.p1.y)+'" x2="'+sx(par.p2.x)+'" y2="'+sy(par.p2.y)+
           '" stroke="var(--sel)" stroke-width="9" stroke-opacity=".35" stroke-linecap="butt" pointer-events="none"/>');
+      /* TROÇOS PINTADOS À MÃO — POR CIMA DE TUDO.
+         Tinham de ser os últimos: a linha da envolvente da parede inteira é
+         desenhada depois e TAPAVA-OS. O troço ficava guardado, a cor certa era
+         calculada, e no ecrã via-se a parede toda da mesma cor — parecia que a
+         funcionalidade não existia. */
+      trocosDe(b.id,par.lado).forEach(tr=>{
+        const A=pontoParede(par,tr.a*par.comp), B=pontoParede(par,tr.z*par.comp);
+        p.push('<line data-par="'+b.id+'|'+par.lado+'" x1="'+sx(A.x)+'" y1="'+sy(A.y)+
+          '" x2="'+sx(B.x)+'" y2="'+sy(B.y)+
+          '" stroke="'+cfCor(tr.cf)+'" stroke-width="'+
+          (espessura?Math.max(2,espDaParede(par)*view.ppm).toFixed(1):8)+
+          '" stroke-linecap="butt" style="cursor:pointer"/>');
+        if(verCotas&&view.ppm>24){
+          const nrm=normalParede(par);
+          const mxx=(sx(A.x)+sx(B.x))/2+nrm.x*18, myy=(sy(A.y)+sy(B.y))/2+nrm.y*14;
+          const txt=fmt((tr.z-tr.a)*par.comp,2)+' m';
+          p.push('<text x="'+mxx+'" y="'+(myy+4)+'" text-anchor="middle" '+
+            'font-family="var(--mono)" font-size="10" font-weight="700" fill="'+
+            cfCor(tr.cf)+'" pointer-events="none">'+txt+'</text>');
+        }
+      });
+      /* O troço a meio de ser marcado. */
+      if(_trocoEmCurso&&_trocoEmCurso.bloco===b.id&&_trocoEmCurso.lado===par.lado){
+        const M=pontoParede(par,_trocoEmCurso.a*par.comp);
+        p.push('<circle cx="'+sx(M.x)+'" cy="'+sy(M.y)+'" r="6" fill="'+
+          cfCor(pincelCF)+'" stroke="#fff" stroke-width="2"/>');
+      }
+
     });
   });
 
@@ -2291,6 +2423,12 @@ function desenhar(dimForcada){
     CF.forEach(([k])=>{if(pavs.has(k))junta(k,'Pavimento — '+CF_NOME[k],'pav');});
     CF.forEach(([k])=>{if(tetos.has(k))junta(k,'Cobertura/teto — '+CF_NOME[k],'tet');});
     const lw=282, lh=26+usados.length*19;
+    /* NO PDF A LEGENDA VAI À PARTE.
+       Desenhada por cima, tapava a planta — e num desenho técnico o que fica
+       escondido é o que se precisa de ver. No ecrã continua no canto, que é
+       cómodo; ao exportar, sai daqui e vai para baixo do desenho. */
+    if(legendaForaDoDesenho){ p.push('<!--legenda à parte-->'); }
+    else {
     const lx=12, ly=H-lh-46;
     p.push('<rect x="'+lx+'" y="'+ly+'" width="'+lw+'" height="'+lh+'" rx="7" fill="#FBFCFD" fill-opacity=".95" stroke="#B9C6CE"/>');
     p.push('<text x="'+(lx+11)+'" y="'+(ly+17)+'" font-size="11" font-weight="700" fill="#16202A" letter-spacing="1.2">'+
@@ -2302,7 +2440,71 @@ function desenhar(dimForcada){
         (u.forma==='pav'?'pavL_':'tetL_')+u.k+')" stroke="#B9C6CE"/>');
       p.push('<text x="'+(lx+38)+'" y="'+(y+1)+'" font-size="11.5" fill="#16202A">'+esc(u.txt)+'</text>');
     });
+    }
+    /* Guarda-se o que a legenda diria, para o PDF a poder montar em HTML por
+       baixo do desenho, em vez de a sobrepor. */
+    _legendaCE=usados.slice();
   }
+
+  /* ══════════ CARIMBO DA PEÇA DESENHADA ══════════
+     Uma planta que sai da app vai para dentro de um processo. Sem morada,
+     data e área não se sabe a que fogo pertence — e quem a recebe tem de
+     perguntar. Só na exportação: no ecrã ocupava espaço por nada. */
+  if(legendaForaDoDesenho){
+    const D2=(proj&&proj.D)||{};
+    const areaT=L.blocos.reduce((s2,b)=>s2+areaBloco(b),0);
+    const linhas=[
+      (D2.nome||'Planta'),
+      (D2.morada||''),
+      'Área útil desenhada: '+fmt(areaT,2)+' m²'+
+        (D2.tipologia?'   ·   '+D2.tipologia:''),
+      new Date().toLocaleDateString('pt-PT')+
+        (modoCE?'   ·   envolvente (Tabela 17 do Manual SCE)':''),
+    ].filter(Boolean);
+    const cw=Math.max(230,Math.min(430,
+      Math.max(...linhas.map(t2=>t2.length))*6.1+22));
+    const ch=13+linhas.length*15;
+    const cx2=W-cw-14, cy2=H-ch-14;
+    p.push('<rect x="'+cx2+'" y="'+cy2+'" width="'+cw+'" height="'+ch+
+      '" rx="5" fill="#FFFFFF" fill-opacity=".92" stroke="#B9C6CE" '+
+      'stroke-width="1" pointer-events="none"/>');
+    linhas.forEach((t2,i)=>{
+      p.push('<text x="'+(cx2+11)+'" y="'+(cy2+18+i*15)+'" font-size="'+
+        (i===0?12:10.5)+'" font-weight="'+(i===0?700:400)+
+        '" fill="'+(i===0?'#16202A':'#46586A')+
+        '" pointer-events="none">'+esc(t2)+'</text>');
+    });
+  }
+
+  /* ══════════ ESCALA GRÁFICA ══════════
+     Uma planta impressa sem escala não se pode conferir com a régua. A barra
+     escolhe um passo redondo — 1, 2, 5, 10 m — que caiba em cerca de 130 px, e
+     escreve a escala numérica ao lado. Ao ampliar, o passo muda sozinho. */
+  (function(){
+    const alvo=130/view.ppm;                       // metros que dariam ~130 px
+    const passos=[0.5,1,2,5,10,20,50];
+    const m=passos.find(x=>x>=alvo)||passos[passos.length-1];
+    const larg=m*view.ppm;
+    const ex=16, ey=H-24;
+    p.push('<rect x="'+(ex-6)+'" y="'+(ey-20)+'" width="'+(larg+70)+
+      '" height="30" rx="5" fill="#EDF1F3" fill-opacity=".85" pointer-events="none"/>');
+    // barra aos quartos, preto e branco alternados, como nas peças desenhadas
+    for(let i=0;i<4;i++){
+      p.push('<rect x="'+(ex+i*larg/4)+'" y="'+(ey-9)+'" width="'+(larg/4)+
+        '" height="6" fill="'+(i%2?'#EDF1F3':'#16202A')+
+        '" stroke="#16202A" stroke-width=".7" pointer-events="none"/>');
+    }
+    p.push('<text x="'+ex+'" y="'+(ey-13)+'" font-size="9.5" font-family="var(--mono)" '+
+      'fill="#46586A" pointer-events="none">0</text>');
+    p.push('<text x="'+(ex+larg)+'" y="'+(ey-13)+'" text-anchor="middle" font-size="9.5" '+
+      'font-family="var(--mono)" fill="#46586A" pointer-events="none">'+fmt(m,m<1?1:0)+' m</text>');
+    /* A escala numérica só é verdadeira no papel; no ecrã depende do monitor.
+       Escreve-se a que sairá impressa a 96 dpi, que é o que o browser usa. */
+    const den=Math.round(1/(view.ppm/ (96/0.0254) ));
+    p.push('<text x="'+(ex+larg+10)+'" y="'+(ey-4)+'" font-size="10" '+
+      'font-family="var(--mono)" fill="#46586A" pointer-events="none">1:'+
+      (den>=1000?Math.round(den/50)*50:Math.round(den/10)*10)+'</text>');
+  })();
 
   // rosa dos ventos na tela
   const rx=W-64, ry=64, R=30;
@@ -2318,6 +2520,47 @@ function desenhar(dimForcada){
     p.push('<circle cx="'+(rx+Math.sin(sa)*R*1.35)+'" cy="'+(ry-Math.cos(sa)*R*1.35)+'" r="6" fill="#E0A82E" stroke="#16202A" stroke-width=".8"/>');
   }
 
+  /* A RÉGUA, por cima de tudo — a linha, os dois topos e a medida.
+     O valor sai da mesma escala que desenha as paredes, por isso é a mesma
+     medida que a planta usa nos cálculos. */
+  if(regua&&regua.a&&regua.b){
+    const A=regua.a, B=regua.b;
+    const d=Math.hypot(B.x-A.x,B.y-A.y);
+    const x1=sx(A.x),y1=sy(A.y),x2=sx(B.x),y2=sy(B.y);
+    const _corLinha=(L.fundo&&!L.fundo.calibrado)?'#8FA3B0':'#FFC53D';
+    p.push('<line x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+
+      '" stroke="'+_corLinha+'" stroke-width="2.5" stroke-dasharray="7 4" pointer-events="none"/>');
+    [[x1,y1],[x2,y2]].forEach(([cx,cy])=>p.push('<circle cx="'+cx+'" cy="'+cy+
+      '" r="5" fill="'+_corLinha+'" stroke="#0E1418" stroke-width="1.5" pointer-events="none"/>'));
+    const mx=(x1+x2)/2, my=(y1+y2)/2;
+    /* MEDIDA FIÁVEL OU NÃO?
+       As paredes vêm do levantamento e estão em metros reais, por isso medir
+       entre elas está sempre certo. Medir sobre um PDF de fundo POR CALIBRAR
+       dá um número plausível e errado — e é o pior tipo de erro, porque
+       ninguém o reconfere. Nesse caso a medida sai em cinzento e com aviso. */
+    const fundoPorCalibrar=!!(L.fundo&&!L.fundo.calibrado);
+    const corR=fundoPorCalibrar?'#8FA3B0':'#FFC53D';
+    const txt=fmt(d,2)+' m';
+    const larg=fundoPorCalibrar?150:60;
+    p.push('<rect x="'+(mx-larg/2)+'" y="'+(my-24)+'" width="'+larg+'" height="20" rx="5" '+
+      'fill="#0E1418" opacity=".9" pointer-events="none"/>');
+    p.push('<text x="'+mx+'" y="'+(my-10)+'" text-anchor="middle" font-size="13" '+
+      'font-weight="700" fill="'+corR+'" pointer-events="none">'+txt+
+      (fundoPorCalibrar?'  ⚠ fundo por calibrar':'')+'</text>');
+    /* Os catetos, quando a medida é na diagonal: dá logo as duas dimensões de
+       um vão ou de um recuo sem ter de medir duas vezes. */
+    const dx=Math.abs(B.x-A.x), dy=Math.abs(B.y-A.y);
+    if(dx>.05&&dy>.05){
+      p.push('<line x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y1+
+        '" stroke="#FFC53D" stroke-width="1" stroke-dasharray="3 3" opacity=".5" pointer-events="none"/>');
+      p.push('<line x1="'+x2+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+
+        '" stroke="#FFC53D" stroke-width="1" stroke-dasharray="3 3" opacity=".5" pointer-events="none"/>');
+      p.push('<text x="'+((x1+x2)/2)+'" y="'+(y1-5)+'" text-anchor="middle" font-size="11" '+
+        'fill="#FFC53D" opacity=".85" pointer-events="none">'+fmt(dx,2)+'</text>');
+      p.push('<text x="'+(x2+6)+'" y="'+((y1+y2)/2)+'" font-size="11" '+
+        'fill="#FFC53D" opacity=".85" pointer-events="none">'+fmt(dy,2)+'</text>');
+    }
+  }
   svg.innerHTML=p.join('');
   const passoTxt=passo>=1?passo+' m':fmt(passo,1)+' m';
   document.getElementById('escalaTxt').textContent=passoTxt;
@@ -2722,7 +2965,7 @@ function pintarInspetor(){
    (115 ms com 128 blocos). Os painéis laterais são reconstruções de HTML curtas
    e há código que os lê logo a seguir, por isso ficam síncronos: agrupá-los
    também dava um ganho marginal e partia esse contrato em silêncio. */
-function repintarTudo(){_numCache=null;try{pintarEstadoCheio();}catch(e){}limparEnvOrfas();pintarListaFundos();if(modoCE)pintarZonas();pintar();pintarLista();pintarBalanco();pintarInspetor();}
+function repintarTudo(){_numCache=null;try{pintarEstadoCheio();}catch(e){}limparEnvOrfas();try{limparEnvolventesInternas();}catch(e){}pintarListaFundos();if(modoCE)pintarZonas();pintar();pintarLista();pintarBalanco();pintarInspetor();}
 
 /* ══════════ polígonos ══════════ */
 // O motor todo (paredes, envolvente, vãos, balanço) assenta em rectângulos.
@@ -3193,8 +3436,21 @@ function espExterior(){
   const cm=parseFloat(String((proj&&proj.D&&proj.D.espParede)||'').replace(',','.'));
   return (cm>0&&cm<200)?cm/100:0.30;
 }
+/* ESPESSURA DA PAREDE — três casos, não dois.
+   Antes era só «tem vão livre para fora? 30 : 15», e uma parede de MEAÇÃO —
+   contra outra fracção ou o edifício do lado — levava 15 cm como se fosse uma
+   divisória de tijolo simples. Na realidade é tão espessa como uma fachada.
+
+   · fachada, para o exterior ......... a do levantamento (por defeito 0,30)
+   · meação, para outra fracção ou ENU  a mesma: é parede estrutural
+   · divisória, entre divisões do fogo  0,15 */
+const ESP_MEACAO=null;   // = a da fachada; nomeado para se ver a intenção
 function espDaParede(par){
-  return (vaosLivres(par).exterior>.05)?espExterior():ESP_INTERIOR;
+  if(vaosLivres(par).exterior>.05) return espExterior();
+  const eo=envObj(par.bloco,par.lado);
+  if(eo&&eo.tipo!==DIVISORIA) return espExterior();   // meação
+  if(trocosDe(par.bloco,par.lado).length) return espExterior();
+  return ESP_INTERIOR;
 }
 let espessura=0;      // 0 = traço fino; >0 = paredes com espessura real
 let medida=null;      // {p1,p2} da ferramenta de medir
@@ -3298,6 +3554,134 @@ function ceCorParede(par){ const k=cfParede(par); return k?cfCor(k):null; }
    condição fronteira do pavimento e do teto deixa de ser um valor por divisão e
    passa a ser: um valor de fundo mais as zonas desenhadas por cima. */
 function zonas(){ L.zonas=L.zonas||[]; return L.zonas; }
+
+/* ══════════ ESPAÇOS ADJACENTES DESENHADOS ══════════
+   Uma caixa ao lado do fogo — outra fracção, circulação comum, garagem — que se
+   desenha como um bloco mas NÃO conta para a área útil. Serve para dois fins:
+   ver o que está do outro lado de cada parede, e marcar de uma vez a condição
+   de fronteira das paredes que lhe encostam.
+   Pedido em 29/08: «desenhar quadrados adjacentes como fracção adjacente, com
+   requisito ou não» — o «com requisito» é o b_tr: 0,6 quando há requisito
+   térmico do outro lado, 1,0 quando não há (trata-se como exterior). */
+function adjacentes(){ L.adj=L.adj||[]; return L.adj; }
+/* Os nomes têm de ser os que a app já classifica em cfDoTipo/eSemTrocas — se
+   divergirem, o vizinho pinta de uma cor e a parede de outra, que foi o que
+   aconteceu: «Outra fracção» saía azul quando a app a trata como SEM trocas.
+
+   Outra fracção do mesmo prédio é aquecida como esta: não há trocas, b_tr = 0,
+   verde. O b_tr 0,6 é do EDIFÍCIO adjacente, que pode não ser aquecido. */
+const ADJ_TIPOS=[
+  {k:'fraccao', n:'Fracção do mesmo prédio', btr:0},    // sem trocas — verde
+  {k:'edificio',n:'Edifício adjacente',      btr:0.6},  // azul
+  {k:'circula', n:'Circulação comum',        btr:0.6},
+  {k:'garagem', n:'Garagem',                 btr:0.8},  // amarelo
+  {k:'comercio',n:'Espaço comercial',        btr:0.6},
+  {k:'semreq',  n:'Espaço SEM requisito',    btr:1.0},  // como exterior
+];
+const adjNome=k=>(ADJ_TIPOS.find(x=>x.k===k)||{}).n||k;
+/* `|| 0.6` transformava o ZERO em 0,6 — e a fracção do mesmo prédio tem b_tr
+   zero, por não haver trocas. Usa-se ?? para distinguir «zero» de «não
+   definido». */
+const adjBtr=(k,semReq)=>{
+  if(semReq) return 1.0;
+  const t=ADJ_TIPOS.find(x=>x.k===k);
+  return (t&&t.btr!=null)?t.btr:0.6;
+};
+/* A cor e a condição saem da MESMA função que classifica as paredes — assim a
+   caixa e a parede que ela marca ficam sempre da mesma cor. Ter duas contas
+   para a mesma coisa foi o que fez a «Outra fracção» sair azul na caixa e
+   verde na parede. */
+const adjCor=a=>cfCor(adjCF(a));
+
+/* Cria a caixa encostada ao lado direito do que já está desenhado, para não
+   cair por cima do fogo. Depois arrasta-se para o sítio. */
+function criarAdjacente(){
+  guardarHist();
+  let x=2,y=2,h=4;
+  if(L.blocos.length){
+    const cs=L.blocos.map(caixa);
+    /* Encostado, não afastado: 60 cm de folga era mais do que a tolerância de
+       36 cm e o vizinho nascia sem marcar nada, obrigando a arrastá-lo sempre.
+       Nasce encostado à direita — o sítio certo na maioria dos casos. */
+    x=Math.max(...cs.map(c=>c.x1));
+    y=Math.min(...cs.map(c=>c.y0));
+    h=Math.max(2,Math.min(6,Math.max(...cs.map(c=>c.y1))-y));
+  }
+  novoAdjacente(x,y,3,h,'fraccao',false);
+  const a=adjacentes()[adjacentes().length-1];
+  sel={t:'adj',id:a.id};
+  /* Aplica logo: nasce encostado, por isso as paredes desse lado ficam
+     marcadas sem ter de ir ao menu. */
+  const n=aplicarAdjacenteAsParedes(a);
+  document.getElementById('dica').textContent=n
+    ? 'Vizinho criado — '+n+' parede(s) marcadas. Arrasta-o para outro lado ou '+
+      'muda o tipo no botão direito.'
+    : 'Vizinho criado. Arrasta-o até encostar às paredes — as que lhe tocarem '+
+      'ficam marcadas sozinhas.';
+  repintarTudo();
+}
+function novoAdjacente(x,y,w,h,tipo,semReq){
+  adjacentes().push({id:'a'+Date.now().toString(36),
+    x,y,w:w||3,h:h||3,tipo:tipo||'fraccao',semReq:!!semReq});
+}
+function apagarAdjacente(id){
+  L.adj=adjacentes().filter(a=>a.id!==id);
+}
+/* Aplica a condição às paredes do fogo que encostam a esta caixa. É o ganho
+   real: em vez de pintar parede a parede, desenha-se o vizinho uma vez. */
+/* Marca as paredes que encostam a este vizinho — mas SÓ O TROÇO EM CONTACTO.
+   Uma parede de 3,69 m com 2,56 m encostados à fracção do lado tem 1,13 m que
+   dá para fora: marcar a parede inteira punha a envolvente errada nesse bocado,
+   e não havia como o separar. Era o que se via na Bemposta.
+   Corre sozinho ao criar e ao largar o vizinho — pedido em 29/08: «ao colocar o
+   edifício adjacente ele fica automaticamente com a linha na zona em contacto». */
+function aplicarAdjacenteAsParedes(a){
+  let n=0;
+  const cf=adjCF(a);
+  const f=0.36;                       // folga da espessura da parede
+  L.blocos.forEach(b=>paredes(b).forEach(par=>{
+    if(paredeInternaDoFogo(par)) return;
+    const dx=(par.p2.x-par.p1.x)/par.comp, dy=(par.p2.y-par.p1.y)/par.comp;
+    /* A parede é paralela a um lado da caixa e está encostada a ele? */
+    const vert=Math.abs(dx)<0.05;     // parede vertical → encosta a O ou E
+    const linha=vert?par.p1.x:par.p1.y;
+    const lados=vert?[a.x,a.x+a.w]:[a.y,a.y+a.h];
+    if(!lados.some(v=>Math.abs(linha-v)<=f)) return;
+    /* Sobreposição no comprimento: é o troço em contacto. */
+    const p0=vert?par.p1.y:par.p1.x, p1=vert?par.p2.y:par.p2.x;
+    const q0=vert?a.y:a.x, q1=vert?a.y+a.h:a.x+a.w;
+    const de=Math.max(Math.min(p0,p1),q0), ate=Math.min(Math.max(p0,p1),q1);
+    if(ate-de<0.05) return;
+    const t0=(de-Math.min(p0,p1))/par.comp, t1=(ate-Math.min(p0,p1))/par.comp;
+    if(t0<=0.02&&t1>=0.98){
+      // encosta de ponta a ponta: a parede inteira, sem troços a mais
+      L.env=L.env||{};
+      if(cf==='ext'){
+        /* Sem requisito do outro lado é EXTERIOR — e na app o exterior é a
+           AUSÊNCIA de marcação. Guardar b_tr 1,0 fazia a parede ser lida como
+           espaço não útil e sair amarela, enquanto a caixa saía vermelha. */
+        delete L.env[b.id+'|'+par.lado];
+      } else {
+        L.env[b.id+'|'+par.lado]={tipo:adjNome(a.tipo),
+          btr:adjBtr(a.tipo,a.semReq)||null,comp:null,de:'i',auto:true};
+      }
+      limparTrocos(b.id,par.lado);
+    } else {
+      // só um pedaço: troço, e o resto da parede fica como estava
+      aplicarCFTroco(b.id,par.lado,t0,t1,cf);
+    }
+    n++;
+  }));
+  return n;
+}
+/* A condição de fronteira que corresponde ao vizinho, para o troço sair na cor
+   certa: acima de 0,7 perde quase como exterior. */
+function adjCF(a){
+  /* Sem requisito térmico do outro lado — pelo tipo escolhido ou pela caixa
+     assinalada — o espaço trata-se como exterior: b_tr = 1. */
+  if(a.semReq||a.tipo==='semreq') return 'ext';
+  return cfDoTipo(adjNome(a.tipo),adjBtr(a.tipo,false));
+}
 function areaInterseccao(z,b){
   const c=caixa(b);
   const ox=Math.min(z.x+z.w,c.x1)-Math.max(z.x,c.x0);
@@ -3334,6 +3718,84 @@ function zonasDaDivisao(div){
 }
 // Pintar uma parede com uma condição fronteira da Tabela 17. O tipo de espaço
 // é preservado sempre que já for compatível; só se inventa um quando não há.
+/* Onde, ao longo da parede, caiu o clique. Devolve 0 no início e 1 no fim,
+   medido no sentido em que a parede é desenhada. */
+function posNaParede(b,lado,p){
+  const c=caixa(b);
+  if(lado==='N'||lado==='S'){
+    const t=(p.x-c.x0)/Math.max(.001,c.x1-c.x0);
+    return Math.max(0,Math.min(1,t));
+  }
+  const t=(p.y-c.y0)/Math.max(.001,c.y1-c.y0);
+  return Math.max(0,Math.min(1,t));
+}
+/* Um troço é uma marcação com início e fim, guardada à parte da parede inteira.
+   Fica em L.envTrocos, para não mexer no formato de L.env que já está gravado
+   em plantas antigas. */
+function aplicarCFTroco(blocoId,lado,a,z,cf){
+  L.envTrocos=L.envTrocos||{};
+  /* Um troço de comprimento nulo — dois cliques no mesmo ponto — não é uma
+     marcação: fica guardado, não se vê, e aparece no ficheiro a sujar o
+     registo. Recusa-se em silêncio, que é o que o utilizador espera. */
+  if(!(z>a+.005)) return false;
+  const k=blocoId+'|'+lado;
+  const lista=(L.envTrocos[k]||[]).filter(t=>t.z<=a+.001||t.a>=z-.001);
+  lista.push({a,z,cf});
+  lista.sort((x,y)=>x.a-y.a);
+  L.envTrocos[k]=lista;
+  return true;
+}
+function trocosDe(blocoId,lado){
+  return ((L.envTrocos||{})[blocoId+'|'+lado])||[];
+}
+/* LIMPEZA DAS MARCAÇÕES INVÁLIDAS
+   Plantas feitas antes desta correcção podem ter paredes internas marcadas como
+   «outra fracção» — como aconteceu na Bemposta, entre o Quarto 1 e a
+   kitchenette. Corre-se ao carregar e diz-se quantas saíram. */
+function limparEnvolventesInternas(){
+  let n=0;
+  L.blocos.forEach(b=>paredes(b).forEach(par=>{
+    const k=b.id+'|'+par.lado;
+    if(paredeInternaDoFogo(par)){
+      if(L.env&&L.env[k]){ delete L.env[k]; n++; }
+      if(L.envTrocos&&L.envTrocos[k]){ delete L.envTrocos[k]; n++; }
+      return;
+    }
+    /* PARCIALMENTE TAPADA.
+       Uma parede pode ter parte encostada a outra divisão do fogo e parte a dar
+       para fora — foi o caso do Quarto 1 da Bemposta, com a kitchenette a tapar
+       só o topo. A marcação de parede INTEIRA passa então a ser errada: cobre
+       também o pedaço interior. Converte-se nos troços livres, que é o que ela
+       queria dizer. */
+    const tap=trocosTapadosDaDivisao(par,false);
+    if(!tap||!tap.length) return;
+    const e=L.env&&L.env[k];
+    if(!e||e.tipo===DIVISORIA) return;
+    const livres=trocosLivresDoFogo(par);
+    if(!livres.length){ delete L.env[k]; n++; return; }
+    const tipo=e.tipo, btr=e.btr;
+    delete L.env[k];
+    L.envTrocos=L.envTrocos||{};
+    const cf=cfDoTipo(tipo,btr);
+    L.envTrocos[k]=livres.map(([a,z])=>({a:a/par.comp,z:z/par.comp,cf:cf||'ext'}));
+    n++;
+  }));
+  return n;
+}
+/* Bocados da parede que NÃO estão encostados a nenhum bloco do fogo — os únicos
+   que podem ser envolvente. */
+function trocosLivresDoFogo(par){
+  const t=trocosTapadosDaDivisao(par,false);
+  if(!t||!t.length) return [[0,par.comp]];
+  const livres=[]; let c=0;
+  t.forEach(([a,z])=>{ if(a-c>.02) livres.push([c,a]); c=Math.max(c,z); });
+  if(par.comp-c>.02) livres.push([c,par.comp]);
+  return livres;
+}
+function limparTrocos(blocoId,lado){
+  if(L.envTrocos) delete L.envTrocos[blocoId+'|'+lado];
+}
+
 function aplicarCF(blocoId,lado,cf){
   L.env=L.env||{};
   const k=blocoId+'|'+lado, atual=envObj(blocoId,lado);
@@ -3551,18 +4013,107 @@ function gravarEnvNoLevantamento(div){
 // sem ter de ir à barra e sem ter de saber as teclas.
 const menuEl=document.getElementById('menu');
 function fecharMenu(){ menuEl.hidden=true; menuEl.innerHTML=''; }
+/* Onde na parede caiu o botão direito, de 0 a 1. O menu usa-o para oferecer
+   «só até aqui» — a parede fica dividida nesse ponto. */
+let _tParaMenu=1;
+let _adjParaMenu=null;   // id do espaço vizinho sob o botão direito
+let _soAdj=false;        // o menu é só do vizinho — salta as opções de parede
+function guardarPosNaParede(ev,parede){
+  _tParaMenu=1;
+  if(!parede) return;
+  try{
+    const [id,lado]=parede.split('|');
+    const b=L.blocos.find(x=>x.id===id);
+    if(!b) return;
+    const r=tela.getBoundingClientRect();
+    const p={x:mX(ev.clientX-r.left),y:mY(ev.clientY-r.top)};
+    _tParaMenu=posNaParede(b,lado,p);
+  }catch(e){}
+}
 function abrirMenu(px,py,blocoId,parede){
   const b=blocoId?L.blocos.find(x=>x.id===blocoId):null;
   const itens=[];
+  /* MENU DO ESPAÇO VIZINHO — tipo, requisito, aplicar às paredes, apagar. */
+  if(_adjParaMenu){
+    const a=adjacentes().find(x=>x.id===_adjParaMenu);
+    if(a){
+      itens.push({t:'cab',txt:'Espaço vizinho · b_tr '+fmt(adjBtr(a.tipo,a.semReq),2)});
+      ADJ_TIPOS.forEach(tp=>{
+        if(tp.k==='semreq') return;
+        itens.push({t:'b',txt:(a.tipo===tp.k?'● ':'○ ')+tp.n,
+          fn:()=>{guardarHist();a.tipo=tp.k;repintarTudo();}});
+      });
+      itens.push({t:'hr'});
+      itens.push({t:'b',txt:(a.semReq?'● ':'○ ')+'Sem requisito térmico (b_tr 1,0)',
+        fn:()=>{guardarHist();a.semReq=!a.semReq;repintarTudo();}});
+      itens.push({t:'hr'});
+      itens.push({t:'b',txt:'✓ aplicar às paredes que lhe tocam',cor:cfCor('int_baixo'),
+        fn:()=>{guardarHist();
+          const n=aplicarAdjacenteAsParedes(a);
+          document.getElementById('dica').textContent=n
+            ? n+' parede(s) marcadas como '+adjNome(a.tipo)+'.'
+            : 'Nenhuma parede encosta a este vizinho — arrasta-o até tocar.';
+          repintarTudo();}});
+      itens.push({t:'b',txt:'✕ apagar o vizinho',
+        fn:()=>{guardarHist();apagarAdjacente(a.id);sel=null;repintarTudo();}});
+      _adjParaMenu=null;
+      montarMenu(px,py,itens);   // só as opções do vizinho
+      return;
+    }
+    _adjParaMenu=null;
+  }
   if(b&&parede){
     const [pid,plado]=parede.split('|');
     const par=paredeDe(pid,plado);
     itens.push({t:'cab',txt:'Parede '+(par?par.orient:'')+' · '+b.div});
-    CF.forEach(([k,n])=>{
-      if(k==='solo') return;                       // o solo é do pavimento, não da parede
-      itens.push({t:'b',txt:CF_NOME[k],cor:cfCor(k),
-        fn:()=>{guardarHist();aplicarCF(pid,plado,k);porPincel(k);sel={t:'parede',bloco:pid,lado:plado};}});
-    });
+    const _interna=par&&paredeInternaDoFogo(par);
+    if(_interna){
+      itens.push({t:'cab',txt:'⚠ divisória entre divisões do fogo — sem fronteira'});
+    } else {
+      CF.forEach(([k,n])=>{
+        if(k==='solo') return;                     // o solo é do pavimento, não da parede
+        itens.push({t:'b',txt:CF_NOME[k],cor:cfCor(k),
+          fn:()=>{guardarHist();aplicarCF(pid,plado,k);porPincel(k);sel={t:'parede',bloco:pid,lado:plado};}});
+      });
+      /* TROÇO PARCIAL PELO BOTÃO DIREITO
+         Pedido em 29/08. A parede fica dividida onde se carregou: o pedaço até
+         ao ponto leva a condição escolhida, o resto fica como está. É mais
+         directo do que ligar um modo e dar dois cliques. */
+      /* APAGAR A MARCAÇÃO — faltava, e era o mais preciso.
+         Uma parede marcada por engano não tinha como voltar a ficar sem
+         condição: todas as opções punham OUTRA condição por cima. */
+      if(envObj(pid,plado)||trocosDe(pid,plado).length){
+        itens.push({t:'hr'});
+        itens.push({t:'b',txt:'✕ apagar a condição desta parede',
+          fn:()=>{guardarHist();
+            if(L.env) delete L.env[pid+'|'+plado];
+            limparTrocos(pid,plado);
+            document.getElementById('dica').textContent='Parede sem condição de fronteira.';
+            repintarTudo();}});
+      }
+      itens.push({t:'hr'});
+      itens.push({t:'cab',txt:'Só até aqui ('+fmt(_tParaMenu*(par?par.comp:0),2)+' m)'});
+      CF.forEach(([k])=>{
+        if(k==='solo') return;
+        itens.push({t:'b',txt:'↔ '+CF_NOME[k],cor:cfCor(k),
+          fn:()=>{guardarHist();
+            aplicarCFTroco(pid,plado,0,_tParaMenu,k);
+            sel={t:'parede',bloco:pid,lado:plado};repintarTudo();}});
+      });
+      itens.push({t:'hr'});
+      /* APAGAR A MARCAÇÃO — faltava, e não havia outra forma senão pintar por
+         cima com uma condição que também não se queria. */
+      itens.push({t:'b',txt:'✕ sem fronteira (apagar marcação)',
+        fn:()=>{guardarHist();
+          if(L.env) delete L.env[pid+'|'+plado];
+          limparTrocos(pid,plado);
+          document.getElementById('dica').textContent='Marcação apagada.';
+          repintarTudo();}});
+      if(trocosDe(pid,plado).length){
+        itens.push({t:'b',txt:'✕ limpar só os troços',
+          fn:()=>{guardarHist();limparTrocos(pid,plado);repintarTudo();}});
+      }
+    }
     itens.push({t:'hr'});
     itens.push({t:'b',txt:'Pavimento e teto desta divisão',fn:()=>{
       sel={t:'div',div:b.div};
@@ -3647,6 +4198,11 @@ function abrirMenu(px,py,blocoId,parede){
     itens.push({t:'b',txt:'⤢ Ver tudo',fn:()=>{enquadrar();}});
     itens.push({t:'b',txt:'↶ Desfazer',k:'Ctrl+Z',fn:()=>desfazer()});
   }
+  montarMenu(px,py,itens);
+}
+/* A montagem do menu, separada — havia dois caminhos a precisar dela e duplicar
+   o código levava a que um deles ficasse para trás na próxima alteração. */
+function montarMenu(px,py,itens){
   menuEl.innerHTML=itens.map((it,i)=>
     it.t==='cab'?'<div class="cab">'+esc(it.txt)+'</div>'
     :it.t==='hr'?'<hr>'
@@ -3689,6 +4245,12 @@ function abrirMenuCopiar(divOrigem){
       ?(d+': forma copiada de '+divOrigem+' ('+n+' bloco'+(n>1?'s':'')+') — arrasta para o sítio.')
       :'Não consegui copiar.';
   }}));
+  montarMenu(px,py,itens);
+}
+/* A montagem do menu, separada — havia dois caminhos a precisar dela e duplicar
+   o código levava a que um deles ficasse para trás na próxima alteração. */
+function montarMenuSimples(px,py,itens){
+  const r=tela.getBoundingClientRect();
   menuEl.innerHTML=itens.map((it,i)=>
     it.t==='cab'?'<div class="cab">'+esc(it.txt)+'</div>'
     :'<button data-mi="'+i+'">'+esc(it.txt)+'</button>').join('');
@@ -3709,6 +4271,8 @@ function blocoDoAlvo(t){
 svg.addEventListener('contextmenu',ev=>{
   ev.preventDefault();
   const r=tela.getBoundingClientRect();
+  guardarPosNaParede(ev,paredeDoAlvo(ev.target));
+  _adjParaMenu=(ev.target.getAttribute&&ev.target.getAttribute('data-adj'))||null;
   abrirMenu(ev.clientX-r.left,ev.clientY-r.top,blocoDoAlvo(ev.target),paredeDoAlvo(ev.target));
 });
 
@@ -3826,7 +4390,7 @@ function instantaneo(){
   let d=null;
   if(proj&&proj.D){ d={...proj.D}; delete d.plantaLayout; }
   return JSON.stringify({rot:L.rot,blocos:L.blocos,vaos:L.vaos,env:L.env,
-    ce:L.ce,zonas:L.zonas,ceCores:L.ceCores,cotas:L.cotas,D:d});
+    ce:L.ce,zonas:L.zonas,adj:L.adj,envTrocos:L.envTrocos,ceCores:L.ceCores,cotas:L.cotas,D:d});
 }
 function guardarHist(){
   marcarAlterado();
@@ -3840,7 +4404,7 @@ function guardarHist(){
 }
 function aplicarHist(j){
   const o=JSON.parse(j);
-  L.rot=o.rot; L.blocos=o.blocos; L.vaos=o.vaos; L.env=o.env; L.ce=o.ce||{}; L.zonas=o.zonas||[]; L.ceCores=o.ceCores||{}; L.cotas=o.cotas||[];
+  L.rot=o.rot; L.blocos=o.blocos; L.vaos=o.vaos; L.env=o.env; L.ce=o.ce||{}; L.zonas=o.zonas||[]; L.adj=o.adj||[]; L.envTrocos=o.envTrocos||{}; L.ceCores=o.ceCores||{}; L.cotas=o.cotas||[];
   if(o.D&&proj&&proj.D){
     const guardaLayout=proj.D.plantaLayout;
     Object.keys(o.D).forEach(k=>{proj.D[k]=o.D[k];});
@@ -3882,6 +4446,8 @@ svg.addEventListener('pointerdown',ev=>{
   if((ev.ctrlKey||ev.metaKey)&&ev.button===0){
     ev.preventDefault();
     const r=tela.getBoundingClientRect();
+    guardarPosNaParede(ev,paredeDoAlvo(ev.target));
+    _adjParaMenu=(ev.target.getAttribute&&ev.target.getAttribute('data-adj'))||null;
     abrirMenu(ev.clientX-r.left,ev.clientY-r.top,blocoDoAlvo(ev.target),paredeDoAlvo(ev.target));
     return;
   }
@@ -4045,6 +4611,27 @@ svg.addEventListener('pointerdown',ev=>{
   const par=t.getAttribute&&t.getAttribute('data-par');
   const bl=t.getAttribute&&t.getAttribute('data-bloco');
 
+  const adjPega=t.getAttribute&&t.getAttribute('data-adjpega');
+  if(adjPega&&!regua&&!pincelCF){
+    const [aid,lado]=adjPega.split('|');
+    const a=adjacentes().find(x=>x.id===aid);
+    if(a){ guardarHist(); sel={t:'adj',id:aid};
+      arr={tipo:'adjRedim',a,lado,p0:p,a0:{...a}};
+      return; }
+  }
+  const adjAlvo=t.getAttribute&&t.getAttribute('data-adj');
+  if(adjAlvo&&!regua&&!pincelCF){
+    const a=adjacentes().find(x=>x.id===adjAlvo);
+    if(a){ guardarHist(); sel={t:'adj',id:a.id}; arr={tipo:'adj',a,p0:p,a0:{...a}};
+      pintarInspetor(); repintarTudo(); return; }
+  }
+  if(regua){
+    // primeiro clique fixa o início; o segundo fecha a medição
+    if(!regua.a){ regua.a={...p}; regua.b={...p}; }
+    else if(!regua.fechada){ regua.b={...p}; regua.fechada=true; }
+    else { regua={a:{...p},b:{...p}}; }
+    repintarTudo(); return;
+  }
   if(pega){
     const [id,lado]=pega.split('|'); const b=L.blocos.find(x=>x.id===id);
     guardarHist(); arr={tipo:'redim',b,lado,p0:p,b0:{...b}};
@@ -4053,7 +4640,49 @@ svg.addEventListener('pointerdown',ev=>{
     guardarHist(); sel={t:'vao',div,i:+i}; arr=v?{tipo:'vao',v}:null; pintarInspetor(); pintarLista();
   } else if(par&&pincelCF){
     const [id,lado]=par.split('|');
+    /* UMA PAREDE ENTRE DUAS DIVISÕES DO MESMO FOGO NÃO É FRONTEIRA.
+       Marcá-la como «outra fracção» ou «exterior» é declarar uma envolvente
+       que não existe — e ela entra no cálculo. Recusa-se com explicação, em vez
+       de aceitar em silêncio. */
+    const _parO=(L.blocos.find(x=>x.id===id)?paredes(L.blocos.find(x=>x.id===id))
+      .find(q=>q.lado===lado):null);
+    if(_parO&&paredeInternaDoFogo(_parO)){
+      document.getElementById('dica').textContent=
+        '⚠ Esta parede separa duas divisões do mesmo fogo — é divisória, '+
+        'não envolvente. Não leva condição de fronteira.';
+      return;
+    }
     guardarHist();
+    /* PINTAR SÓ UM TROÇO
+       Uma parede raramente é toda igual: o lado direito de uma kitchenette pode
+       ter 3,20 m de fachada e o resto a dar para outra fracção. Com o pincel
+       parcial ligado, o clique marca o INÍCIO e o segundo clique o fim — e só
+       esse pedaço muda de condição.
+       Sem isso era preciso partir a divisão em duas caixas, que estraga a
+       planta e as áreas. */
+    if(pincelParcial){
+      const b0=L.blocos.find(x=>x.id===id);
+      if(b0){
+        const t=posNaParede(b0,lado,p);   // 0..1 ao longo da parede
+        if(!_trocoEmCurso){
+          _trocoEmCurso={bloco:id,lado,a:t};
+          document.getElementById('dica').textContent=
+            'Início marcado. Clica no fim do troço.';
+          repintarTudo(); return;
+        }
+        if(_trocoEmCurso.bloco===id&&_trocoEmCurso.lado===lado){
+          const a=Math.min(_trocoEmCurso.a,t), z=Math.max(_trocoEmCurso.a,t);
+          if(z-a>0.02) aplicarCFTroco(id,lado,a,z,pincelCF);
+          _trocoEmCurso=null;
+          document.getElementById('dica').textContent=
+            'Troço marcado. Clica noutra parede ou desliga o pincel.';
+          repintarTudo(); return;
+        }
+        // clicou noutra parede: recomeça ali
+        _trocoEmCurso={bloco:id,lado,a:t};
+        repintarTudo(); return;
+      }
+    }
     aplicarCF(id,lado,pincelCF);
     sel={t:'parede',bloco:id,lado};
     repintarTudo(); return;
@@ -4231,6 +4860,27 @@ svg.addEventListener('pointermove',ev=>{
     if(arr.lado==='N'){const ny=Math.min(snap(p.y),o.y+o.h-MIN); b.h=o.y+o.h-ny; b.y=ny;}
     pintar(); return;
   }
+  /* O `snap` é local ao bloco de redimensionar blocos — aqui não existe, e
+     usá-lo fazia o movimento rebentar em silêncio: o arrasto montava-se, o
+     ponteiro mexia-se e o vizinho ficava quieto, como se estivesse trancado.
+     Declara-se aqui o próprio. */
+  const snapA=v=>Math.round(v*20)/20;
+  if(arr.tipo==='adjRedim'){
+    const a=arr.a, o=arr.a0, MINA=0.4;
+    if(arr.lado==='E') a.w=Math.max(MINA,snapA(p.x-o.x));
+    if(arr.lado==='S') a.h=Math.max(MINA,snapA(p.y-o.y));
+    if(arr.lado==='O'){ const nx=Math.min(snapA(p.x),o.x+o.w-MINA);
+      a.w=o.x+o.w-nx; a.x=nx; }
+    if(arr.lado==='N'){ const ny=Math.min(snapA(p.y),o.y+o.h-MINA);
+      a.h=o.y+o.h-ny; a.y=ny; }
+    pintar(); return;
+  }
+  if(arr.tipo==='adj'){
+    const a=arr.a, o=arr.a0;
+    a.x=snapA(o.x+(p.x-arr.p0.x));
+    a.y=snapA(o.y+(p.y-arr.p0.y));
+    pintar(); return;
+  }
   if(arr.tipo==='vao'){
     const v=arr.v, par=paredeDe(v.bloco,v.lado); if(!par)return;
     const dx=(par.p2.x-par.p1.x)/par.comp, dy=(par.p2.y-par.p1.y)/par.comp;
@@ -4286,6 +4936,18 @@ function encostarDivisaoLargada(div){
   return null;
 }
 function largar(){
+  /* AO LARGAR O VIZINHO, APLICA SOZINHO.
+     Pedido em 29/08: mover a caixa para junto da parede tem de bastar — ir ao
+     menu a seguir era um passo que se esquece, e a planta ficava com o vizinho
+     desenhado e as paredes por marcar. */
+  if(arr&&(arr.tipo==='adj'||arr.tipo==='adjRedim')){
+    const a=arr.a;
+    arr=null; svg.classList.remove('arrastar');
+    const n=a?aplicarAdjacenteAsParedes(a):0;
+    if(n) document.getElementById('dica').textContent=
+      n+' parede(s) marcadas como '+adjNome(a.tipo)+'.';
+    repintarTudo(); return;
+  }
   if(arr&&arr.tipo==='recorte'){
     const x=Math.min(arr.p0.x,arr.p1.x), y=Math.min(arr.p0.y,arr.p1.y);
     const w2=Math.abs(arr.p1.x-arr.p0.x), h2=Math.abs(arr.p1.y-arr.p0.y);
@@ -4563,6 +5225,31 @@ document.addEventListener('keydown',ev=>{
     if(!prox) porModo(null);
     repintarTudo(); return;
   }
+  /* ATALHOS DAS FERRAMENTAS DE ENVOLVENTE
+     Marcar a envolvente de um fogo são dezenas de idas à barra de botões. Uma
+     tecla poupa o percurso todo, e as letras seguem a inicial do que fazem. */
+  const _atalho={m:'btRegua',v:'btAdj',t:'btTroco',e:'btEspessura',
+                 c:'btCE',q:'btCotas',n:'btOrient',f:'btEnquadrar'};
+  const _k=(ev.key||'').toLowerCase();
+  if(_atalho[_k]&&!ev.ctrlKey&&!ev.metaKey&&!ev.altKey){
+    const b=document.getElementById(_atalho[_k]);
+    if(b&&!b.hidden){ ev.preventDefault(); b.click(); return; }
+  }
+  /* 1 a 4 escolhem a cor do pincel: as quatro condições da Tabela 17 pela
+     ordem em que aparecem no menu. */
+  if(/^[1-4]$/.test(ev.key)&&!ev.ctrlKey&&!ev.metaKey){
+    const ks=CF.map(([k])=>k).filter(k=>k!=='solo');
+    const k=ks[+ev.key-1];
+    if(k){ ev.preventDefault(); porPincel(pincelCF===k?null:k); return; }
+  }
+  if(ev.key==='?'){
+    ev.preventDefault();
+    document.getElementById('dica').textContent=
+      'Teclas: M régua · V vizinho · T troço · E espessura · C envolvente · '+
+      'Q cotas · N orientações · F enquadrar · O orto · R rodar · '+
+      '1-4 cor do pincel · Esc desliga · Ctrl+Z desfaz';
+    return;
+  }
   if(ev.key==='o'||ev.key==='O'){ev.preventDefault();document.getElementById('btOrto').click();return;}
   if(ev.key==='r'||ev.key==='R'){ev.preventDefault();rodarSelecao(!ev.shiftKey);}
   if(desenhando&&poli){
@@ -4639,7 +5326,9 @@ function cancelarTudo(){
   poli=null; poliPrev=null; modoArco=false; arcoMeio=null; medida=null; cotaTmp=null; cotaPrev=null;
   filaColocar=null;
   calib=null; moverFundo=false; desenhando=false; modoForma=null;
-  pincelCF=null;
+  pincelCF=null; pincelParcial=false; _trocoEmCurso=null;
+  if(regua){ regua=null;
+    const br=document.getElementById('btRegua'); if(br) br.classList.remove('on'); }
   svg.classList.remove('arrastar');
   fecharMenu();
   const md=document.getElementById('modalAreas'); if(md) md.hidden=true;
@@ -4765,17 +5454,48 @@ alt('btEnv',()=>{
 });
 function porPincel(cf){
   pincelCF=cf;
+  _trocoEmCurso=null;
   const b=document.getElementById('btPincel');
   b.hidden=!cf;
   if(cf){
     b.innerHTML='🖌 <span style="display:inline-block;width:11px;height:11px;border-radius:2px;'+
-      'background:'+cfCor(cf)+';border:1px solid rgba(0,0,0,.3);vertical-align:-1px"></span> '+CF_NOME[cf];
+      'background:'+cfCor(cf)+';border:1px solid rgba(0,0,0,.3);vertical-align:-1px"></span> '+
+      CF_NOME[cf]+(pincelParcial?' · troço':'');
     b.classList.add('on');
-    document.getElementById('dica').textContent='Pincel ligado: clica nas paredes para as pôr a '+
-      CF_NOME[cf].toLowerCase()+'. Esc ou o botão desligam.';
-  } else { b.classList.remove('on'); }
+    document.getElementById('dica').textContent=pincelParcial
+      ? 'Pincel por troço: clica no INÍCIO e depois no FIM do pedaço a pôr a '+
+        CF_NOME[cf].toLowerCase()+'.'
+      : 'Pincel ligado: clica nas paredes para as pôr a '+CF_NOME[cf].toLowerCase()+
+        '. Esc ou o botão desligam.';
+  } else { b.classList.remove('on'); pincelParcial=false; }
+  const bp=document.getElementById('btTroco');
+  if(bp){ bp.hidden=!cf; bp.classList.toggle('on',pincelParcial); }
+}
+/* PINTAR A PAREDE INTEIRA OU SÓ UM PEDAÇO.
+   Uma parede raramente é toda igual — daí o modo por troço. Fica desligado por
+   omissão porque o caso corrente continua a ser a parede toda. */
+function alternarRegua(){
+  regua=regua?null:{a:null,b:null};
+  const b=document.getElementById('btRegua');
+  if(b) b.classList.toggle('on',!!regua);
+  document.getElementById('dica').textContent=regua
+    ? ('Régua ligada: clica no início e no fim. Outro clique recomeça. Esc desliga.'+
+       ((L.fundo&&!L.fundo.calibrado)
+         ? '  ⚠ O fundo não está calibrado — medir sobre ele dá valores errados.'
+         : ''))
+    : '';
+  repintarTudo();
+}
+function alternarTroco(){
+  pincelParcial=!pincelParcial;
+  _trocoEmCurso=null;
+  porPincel(pincelCF);
+  repintarTudo();
 }
 alt('btPincel',()=>porPincel(null));
+alt('btTroco',()=>alternarTroco());
+alt('btRegua',()=>alternarRegua());
+alt('btAdj',()=>criarAdjacente());
 function pintarListaFundos(){
   const cx=document.getElementById('listaFundosCx'), el=document.getElementById('listaFundos');
   if(!cx||!el) return;
@@ -6530,7 +7250,9 @@ function comprimirParaOrcamento(src,maxBytes){
 }
 async function pdfEnvolvente(){
   const guardaCE=modoCE, guardaSel=sel, guardaAtivo=L.fundoAtivo;
+  const guardaLeg=legendaForaDoDesenho;
   modoCE=true; sel={t:null};
+  legendaForaDoDesenho=true;   // no PDF vai por baixo, não por cima da planta
   const paginas=[];
   const fs2=(L.fundos&&L.fundos.length)?L.fundos:[null];
   fs2.forEach((f,i)=>{
@@ -6557,7 +7279,16 @@ async function pdfEnvolvente(){
     const resumo=alvo=>Object.entries(tot[alvo]).map(([k,v])=>
       '<span class="pill"><span class="q" style="background:'+cfCor(k)+'"></span>'+
       esc(CF_NOME[k])+' <b>'+fmt(v)+' m²</b></span>').join(' ');
+    /* A legenda em HTML, por baixo do desenho. No SVG ficava por cima e tapava
+       a planta — e num desenho técnico o que fica escondido é o que se precisa
+       de ver. */
+    const legHTML=_legendaCE.length
+      ? '<div class="leg"><b>ENVOLVENTE — Tabela 17 do Manual SCE</b><div class="legl">'+
+        _legendaCE.map(u=>'<span class="legi"><span class="q" style="background:'+
+          cfCor(u.k)+'"></span>'+esc(u.txt)+'</span>').join('')+'</div></div>'
+      : '';
     paginas.push({
+      legenda:legHTML,
       titulo:(f&&f.nome)||'Planta',
       svg:'<svg xmlns="http://www.w3.org/2000/svg" width="'+plano.W+'" height="'+plano.H+
         '" viewBox="0 0 '+plano.W+' '+plano.H+'">'+
@@ -6570,7 +7301,9 @@ async function pdfEnvolvente(){
     L.blocos=guardaBlocos;
   });
   L.fundoAtivo=guardaAtivo; sincronizarFundo();
-  modoCE=guardaCE; sel=guardaSel; repintarTudo();
+  modoCE=guardaCE; sel=guardaSel;
+  legendaForaDoDesenho=guardaLeg;   // no ecrã volta ao canto, que é cómodo
+  repintarTudo();
   if(!paginas.length){ document.getElementById('dica').textContent='Nada para exportar.'; return; }
 
   // repartir o orçamento pelas páginas, deixando margem para o desenho vetorial
@@ -6603,25 +7336,54 @@ async function pdfEnvolvente(){
     'vertical-align:-1px;border:1px solid #99A7B0}'+
     '.pill{display:inline-block;background:#F2F5F7;border:1px solid #DDE4E8;border-radius:11px;'+
     'padding:2px 9px;margin:0 4px 4px 0;font-size:11px}'+
-    '.rod{margin-top:6px;font-size:9.5px;color:#7C8E9A}';
+    '.rod{margin-top:6px;font-size:9.5px;color:#7C8E9A}'+
+    '.leg{margin:8px 0 4px;padding:8px 11px;border:1px solid #C9D4DB;border-radius:7px;'+
+      'background:#F7F9FA;font-size:11px}'+
+    '.legl{display:flex;flex-wrap:wrap;gap:5px 16px;margin-top:5px}'+
+    '.legi{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}';
   const html='<!DOCTYPE html><html lang="pt-PT"><head><meta charset="utf-8">'+
     '<title>Envolvente CE — '+esc(morada)+'</title><style>'+css+'</style></head><body>'+
     paginas.map(p2=>'<div class="pg"><h1>Envolvente para o CE — '+esc(p2.titulo)+'</h1>'+
       '<p class="sub">'+esc(morada)+' · cores da Tabela 17 do Manual SCE · '+
       new Date().toLocaleDateString('pt-PT')+' · Planta interativa '+PLANTA_VERSAO+'</p>'+
       resolverVars(p2.svg)+
+      (p2.legenda||'')+
       '<h2>Pavimentos</h2>'+p2.pav+'<h2>Coberturas</h2>'+p2.teto+
       '<h2>Por compartimento</h2><table><tr><th>Compartimento</th><th class="n">Área (m²)</th>'+
       '<th>Pavimento</th><th>Cobertura</th></tr>'+p2.linhas+'</table>'+
       '<p class="rod">Esboço para apoio ao levantamento. As áreas são as desenhadas; '+
       'confirmar contra o levantamento antes de usar no certificado.</p></div>').join('')+
     '</body></html>';
-  const jan=window.open('','_blank');
-  if(!jan){ document.getElementById('dica').textContent=
-    'O navegador bloqueou a janela — permite janelas para este site e tenta outra vez.'; return; }
-  jan.document.write(html); jan.document.close();
-  jan.onload=()=>setTimeout(()=>jan.print(),350);
-  setTimeout(()=>{try{jan.print();}catch(e){}},900);
+  /* GUARDAR O PDF SEM ABRIR A IMPRESSORA.
+     O browser não deixa uma página gerar um PDF por si: `print()` é o único
+     caminho para PDF vetorial, e abre sempre o diálogo. O que se pode evitar é
+     a janela nova a piscar e o utilizador ter de escolher o destino — usa-se um
+     iframe escondido e deixa-se o ficheiro pronto a guardar.
+     O HTML fica também descarregado, para quem quiser guardar sem passar pela
+     impressora: abre-se no browser e imprime-se depois, ou anexa-se como está. */
+  const nomePDF=(morada||'planta').replace(/[^a-zA-Z0-9À-ú ]/g,'_')+'_envolvente';
+  try{
+    const b=new Blob([html],{type:'text/html;charset=utf-8'});
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(b); a.download=nomePDF+'.html'; a.click();
+    setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+  }catch(e){}
+  const ifr=document.createElement('iframe');
+  ifr.style.cssText='position:fixed;right:0;bottom:0;width:0;height:0;border:0;opacity:0';
+  document.body.appendChild(ifr);
+  ifr.srcdoc=html;
+  ifr.onload=()=>{
+    setTimeout(()=>{
+      try{ ifr.contentWindow.focus(); ifr.contentWindow.print(); }
+      catch(e){
+        // sem acesso ao iframe, cai-se na janela de sempre
+        const jan=window.open('','_blank');
+        if(jan){ jan.document.write(html); jan.document.close();
+          setTimeout(()=>{try{jan.print();}catch(e2){}},600); }
+      }
+      setTimeout(()=>{try{ifr.remove();}catch(e){}},60000);
+    },400);
+  };
   document.getElementById('dica').textContent=
     'PDF da envolvente: '+paginas.length+' página(s), ≈'+prevKB+' kB'+
     (reduzidas?(' ('+reduzidas+' imagem(ns) reduzida(s) para caber no limite de '+
@@ -6629,7 +7391,13 @@ async function pdfEnvolvente(){
     '. Na janela de impressão escolhe "Guardar como PDF".';
 }
 function exportarPNG(){
+  /* A legenda fica FORA do PNG: sobreposta ao desenho, tapava a planta — e uma
+     imagem que se anexa ao processo tem de mostrar o desenho inteiro. Quem
+     precisa da legenda tem-na no PDF, por baixo. */
+  const guardaLeg=legendaForaDoDesenho;
+  legendaForaDoDesenho=true;
   const plano=planoParaExportar(70);
+  legendaForaDoDesenho=guardaLeg;
   const {W,H,corpo,pos}=plano;
   planoParaExportar._lista=plano.posLista||[];
   const esc2=Math.min(2,Math.max(1,2400/Math.max(W,H)));
@@ -6695,7 +7463,12 @@ function carregar(j,doUtilizador){
     const envN={};
     Object.entries(D.plantaLayout.env||{}).forEach(([k,v])=>
       envN[k]=typeof v==='string'?{tipo:v,comp:null,de:'i',auto:false}:v);
+    /* Ao reconstruir o L a partir do ficheiro, TODOS os campos têm de vir — os que
+       faltarem aqui perdem-se ao reabrir, mesmo estando guardados. Foi o que
+       aconteceu aos espaços vizinhos e aos troços de parede: gravavam bem e
+       desapareciam na abertura seguinte. */
     L={rot:D.plantaLayout.rot??0,blocos:D.plantaLayout.blocos,vaos:D.plantaLayout.vaos||[],env:envN,ce:D.plantaLayout.ce||{},zonas:D.plantaLayout.zonas||[],cotas:D.plantaLayout.cotas||[],
+      adj:D.plantaLayout.adj||[],envTrocos:D.plantaLayout.envTrocos||{},
       fundos:D.plantaLayout.fundos||(D.plantaLayout.fundo?[D.plantaLayout.fundo]:[]),
       fundoAtivo:D.plantaLayout.fundoAtivo||0,ceCores:D.plantaLayout.ceCores||{},fundo:null};
     sincronizarFundo();
