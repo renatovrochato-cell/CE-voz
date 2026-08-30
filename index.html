@@ -111,6 +111,12 @@ body.com-planta #visDivisoria.a-arrastar::after{color:#04140c}
 .prog-bar{height:3px;background:var(--bg3);flex-shrink:0}
 .prog-fill{height:100%;background:var(--ac);transition:width .4s}
 .main{flex:1;display:flex;flex-direction:column;padding:14px 14px 8px;gap:11px;overflow-y:auto;-webkit-overflow-scrolling:touch}
+/* ESPAÇO NO FIM DA LISTA.
+   Em ecrã inteiro não há barra do browser a criar folga, e o último botão da
+   exportação ficava colado ao fundo — ou tapado pela barra de medição, que é
+   fixa. Parecia que tinha desaparecido. O espaço extra é sempre visível e não
+   estorva: 96 px são pouco mais do que um botão. */
+.screen>.main:last-child{padding-bottom:calc(96px + env(safe-area-inset-bottom))}
 .q-card{background:var(--bg2);border:1px solid var(--br);border-radius:16px;padding:15px;display:flex;flex-direction:column;gap:7px}
 .q-ctx{font-size:11px;font-weight:700;color:var(--ac);text-transform:uppercase;letter-spacing:.08em}
 .q-text{font-size:17px;font-weight:500;color:var(--tx);line-height:1.4}
@@ -541,7 +547,7 @@ const DIVS_BASE=[
 // VERSÃO — fonte única (selo no ecrã inicial + cabeçalho do TXT exportado).
 // Subir aqui a cada alteração ao ficheiro.
 // ═══════════════════════════════════════
-const APP_VERSION='v2026.08.26-FIX216';
+const APP_VERSION='v2026.08.29-FIX218';
 
 // ═══════════════════════════════════════
 // ESTADO
@@ -6966,6 +6972,11 @@ function renderIsolInline(wrap){
         D.isolParedeEsp=''; D.isolParedeTijolos=''; D.isolParedeMat=''; D.isolCobEsp='';
       }
       autoSave(); renderIsolInline(wrap);
+      /* Com «Não» ou «Não sei» não há mais nada a preencher aqui — avança
+         sozinho, como as outras perguntas de chip. Ficar parado à espera de um
+         toque em «seguinte» era um passo a mais por nada.
+         Com «Sim» NÃO avança: os pormenores acabaram de abrir por baixo. */
+      if(o!=='Sim') setTimeout(()=>{ try{ next(); }catch(e){} },260);
     };
     r0.appendChild(c);
   });
@@ -7013,7 +7024,9 @@ function renderDVInline(wrap){
   // ── data ──
   sec('Dia da visita');
   const rD=linha();
-  [['Amanhã',dt.amanha],['Depois de amanhã',dt.depois]].forEach(([lbl,val])=>{
+  /* HOJE é caso corrente: o levantamento faz-se no local e a declaração é
+     assinada ali mesmo. Faltava, e obrigava a escrever a data à mão. */
+  [['Hoje',dt.hoje],['Amanhã',dt.amanha],['Depois de amanhã',dt.depois]].forEach(([lbl,val])=>{
     const c=document.createElement('div');
     c.className='chip'+(D.dvData===val?' on':'');
     c.innerHTML=lbl+'<br><span style="font-size:11px;opacity:.75">'+val+'</span>';
@@ -7122,8 +7135,9 @@ function _dvHoraFim(inicio){
 function _dvDatasSugeridas(){
   const f=d=>String(d.getDate()).padStart(2,'0')+'/'+
     String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();
-  /* A visita é sempre agendada para depois do levantamento — por isso as
-     opções são amanhã e depois de amanhã, não hoje. */
+  /* Hoje, amanhã e depois de amanhã. O «hoje» faltava nas opções — e é o caso
+     corrente, porque a declaração costuma ser assinada no local, no próprio dia
+     do levantamento. Obrigava a escrever a data à mão. */
   return {hoje:f(new Date()),
     amanha:f(new Date(Date.now()+864e5)),
     depois:f(new Date(Date.now()+2*864e5))};
@@ -7311,6 +7325,11 @@ function faltasDV(){
   return f;
 }
 
+/* ERRO DE 29/08: havia um `await` a meio desta função sem ela ser `async`.
+   O browser recusa a função inteira ao carregar a página, e o botão do extrato
+   deixava de existir — sem mensagem nenhuma, como se não tivesse sido criado.
+   Passa a async, e o clipboard fica em try próprio: falhar a cópia não pode
+   impedir o download do ficheiro. */
 async function exportarDV(){
   const faltam=faltasDV();
   if(faltam.length&&!confirm('Falta preencher:\n\n  · '+faltam.join('\n  · ')+
