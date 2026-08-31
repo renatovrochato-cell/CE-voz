@@ -495,7 +495,15 @@ Ver tudo</button>
       <div class="campo" style="margin-top:9px"><label>Transparência</label>
         <input type="range" id="fundoOp" min="10" max="100" step="5" value="55" style="width:100%;accent-color:var(--sel)">
       </div>
-      <div class="campo" style="margin-top:8px"><label>Rodar o fundo (scans tortos)</label>
+      <div class="campo" style="margin-top:8px"><label>Virar a planta</label>
+        <div style="display:flex;gap:6px">
+          <button id="btRodar90" style="flex:1">⟲ Rodar 90°</button>
+          <button id="btRodarM90" style="flex:1">⟳ Rodar −90°</button>
+        </div>
+        <p class="nota" style="margin:5px 0 0">Uma planta digitalizada ao alto passa a deitada — a largura
+          e a altura trocam, para não ficar espremida.</p>
+      </div>
+      <div class="campo" style="margin-top:8px"><label>Endireitar (scans tortos)</label>
         <input type="range" id="fundoRot" min="-180" max="180" step="0.5" value="0" style="width:100%;accent-color:var(--sel)">
         <div style="display:flex;justify-content:space-between;font-family:var(--mono);font-size:11px;color:var(--texto-2)">
           <span>-180°</span><span id="fundoRotTxt">0,0°</span><span>180°</span></div>
@@ -573,7 +581,7 @@ Ver tudo</button>
   window.addEventListener('online',aviso);
 })();
 "use strict";
-const PLANTA_VERSAO='v1.47.0 (2026-08-31)';
+const PLANTA_VERSAO='v1.49.0 (2026-08-31)';
 /* ══════════════════════════════════════════════════════════════════
    CE Voz · motor de planta interativa
    Fonte de verdade: o levantamento (D). A planta é uma camada de
@@ -666,7 +674,11 @@ function calibrarFundo(p1,p2,real){
 }
 const DIVISORIA='Divisória interior';   // parede entre compartimentos do próprio fogo
 const FRACCAO='Fracção do mesmo prédio';
-const TIPOS_ENV_BASE=[DIVISORIA,FRACCAO,'Edifício adjacente','Circulação comum','Garagem','Marquise','Espaço comercial','Outro ENU'];
+/* A mesma lista que a caixa do vizinho (ADJ_TIPOS). Faltavam aqui a caixa de
+   escadas e os arrumos comuns: marcava-se a parede como «Outro ENU» e no TXT
+   saía sem nome. */
+const TIPOS_ENV_BASE=[DIVISORIA,FRACCAO,'Edifício adjacente','Circulação comum',
+  'Caixa de escadas','Marquise','Garagem','Arrumos comuns','Espaço comercial','Outro ENU'];
 // A lista cresce com o que estiver no levantamento e com o que o utilizador escrever.
 function tiposEnv(){
   const l=[...TIPOS_ENV_BASE];
@@ -1997,7 +2009,7 @@ function desenhar(dimForcada){
       esc(adjNome(a.tipo))+'</text>');
     p.push('<text data-adj="'+a.id+'" x="'+cxp+'" y="'+(cyp+13)+'" text-anchor="middle" '+
       'font-size="11" fill="'+cor+'" opacity=".85" style="cursor:move">b_tr '+
-      fmt(adjBtr(a.tipo,a.semReq),2)+(a.semReq?' · sem requisito':'')+'</text>');
+      fmt(adjBtr(a.tipo,a.semReq,a.btrBaixo),2)+(a.semReq?' · sem requisito':'')+'</text>');
   });
 
   // paredes (por cima de todos os blocos, para as partilhadas ficarem certas)
@@ -3590,22 +3602,53 @@ function adjacentes(){ L.adj=L.adj||[]; return L.adj; }
 
    Outra fracção do mesmo prédio é aquecida como esta: não há trocas, b_tr = 0,
    verde. O b_tr 0,6 é do EDIFÍCIO adjacente, que pode não ser aquecido. */
+/* AS CORES SAÍAM ERRADAS: SÓ O EDIFÍCIO ADJACENTE É AZUL.
+   A circulação comum e o espaço comercial estavam com b_tr 0,6 e pintavam de
+   AZUL. Estão do lado errado da Tabela 15 do Manual SCE (pág. 41), que só fixa
+   uma condição:
+
+     Interior com b_ztu ≤ 0,7 ... «De edifícios adjacentes»
+
+   Todos os outros — espaços interiores não úteis, zonas de circulação comum,
+   frações vizinhas de comércio — aparecem NAS DUAS linhas da tabela: a
+   condição depende do b_ztu calculado (EN ISO 13789, pela relação entre a área
+   do ENU e a área útil e pela ventilação do espaço), não do tipo de espaço.
+   Em edifícios existentes os ENU correntes dão b_ztu > 0,7 — amarelo. É o que
+   o próprio TXT da app já dizia; era a planta que o contrariava.
+
+   Faltava também a MARQUISE, que é dos ENU mais frequentes.
+
+   Quando o cálculo do b_ztu der ≤ 0,7 num destes espaços, muda-se no menu do
+   vizinho («b_tr ≤ 0,7») e ele passa a azul. O edifício adjacente é o único
+   que não se muda: é sempre azul. */
 const ADJ_TIPOS=[
   {k:'fraccao', n:'Fracção do mesmo prédio', btr:0},    // sem trocas — verde
-  {k:'edificio',n:'Edifício adjacente',      btr:0.6},  // azul
-  {k:'circula', n:'Circulação comum',        btr:0.6},
+  {k:'edificio',n:'Edifício adjacente',      btr:0.6,fixo:true}, // azul, sempre
+  {k:'circula', n:'Circulação comum',        btr:0.8},  // amarelo
+  {k:'escadas', n:'Caixa de escadas',        btr:0.8},  // amarelo
+  {k:'marquise',n:'Marquise',                btr:0.8},  // amarelo
   {k:'garagem', n:'Garagem',                 btr:0.8},  // amarelo
-  {k:'comercio',n:'Espaço comercial',        btr:0.6},
+  {k:'arrumos', n:'Arrumos comuns',          btr:0.8},  // amarelo
+  {k:'comercio',n:'Espaço comercial',        btr:0.8},  // amarelo
   {k:'semreq',  n:'Espaço SEM requisito',    btr:1.0},  // como exterior
 ];
+/* Tipos em que o b_tr depende do cálculo e por isso se pode baixar a ≤ 0,7.
+   O «espaço SEM requisito» fica de fora: é b_tr 1,0 por definição — trata-se
+   como exterior — e não faz sentido oferecer baixá-lo a 0,6. */
+const adjBtrEditavel=k=>{
+  const t=ADJ_TIPOS.find(x=>x.k===k);
+  return !!t&&!t.fixo&&k!=='semreq'&&t.btr>0.7&&t.btr<1;
+};
 const adjNome=k=>(ADJ_TIPOS.find(x=>x.k===k)||{}).n||k;
 /* `|| 0.6` transformava o ZERO em 0,6 — e a fracção do mesmo prédio tem b_tr
    zero, por não haver trocas. Usa-se ?? para distinguir «zero» de «não
    definido». */
-const adjBtr=(k,semReq)=>{
+const adjBtr=(k,semReq,btrBaixo)=>{
   if(semReq) return 1.0;
+  // o utilizador calculou o b_ztu e deu ≤ 0,7 neste espaço
+  if(btrBaixo&&adjBtrEditavel(k)) return 0.6;
   const t=ADJ_TIPOS.find(x=>x.k===k);
-  return (t&&t.btr!=null)?t.btr:0.6;
+  return (t&&t.btr!=null)?t.btr:0.8;
 };
 /* A cor e a condição saem da MESMA função que classifica as paredes — assim a
    caixa e a parede que ela marca ficam sempre da mesma cor. Ter duas contas
@@ -3683,7 +3726,7 @@ function aplicarAdjacenteAsParedes(a){
         delete L.env[b.id+'|'+par.lado];
       } else {
         L.env[b.id+'|'+par.lado]={tipo:adjNome(a.tipo),
-          btr:adjBtr(a.tipo,a.semReq)||null,comp:null,de:'i',auto:true};
+          btr:adjBtr(a.tipo,a.semReq,a.btrBaixo)||null,comp:null,de:'i',auto:true};
       }
       limparTrocos(b.id,par.lado);
     } else {
@@ -3700,7 +3743,7 @@ function adjCF(a){
   /* Sem requisito térmico do outro lado — pelo tipo escolhido ou pela caixa
      assinalada — o espaço trata-se como exterior: b_tr = 1. */
   if(a.semReq||a.tipo==='semreq') return 'ext';
-  return cfDoTipo(adjNome(a.tipo),adjBtr(a.tipo,false));
+  return cfDoTipo(adjNome(a.tipo),adjBtr(a.tipo,false,a.btrBaixo));
 }
 function areaInterseccao(z,b){
   const c=caixa(b);
@@ -4057,13 +4100,22 @@ function abrirMenu(px,py,blocoId,parede){
   if(_adjParaMenu){
     const a=adjacentes().find(x=>x.id===_adjParaMenu);
     if(a){
-      itens.push({t:'cab',txt:'Espaço vizinho · b_tr '+fmt(adjBtr(a.tipo,a.semReq),2)});
+      itens.push({t:'cab',txt:'Espaço vizinho · b_tr '+fmt(adjBtr(a.tipo,a.semReq,a.btrBaixo),2)});
       ADJ_TIPOS.forEach(tp=>{
         if(tp.k==='semreq') return;
         itens.push({t:'b',txt:(a.tipo===tp.k?'● ':'○ ')+tp.n,
           fn:()=>{guardarHist();a.tipo=tp.k;repintarTudo();}});
       });
       itens.push({t:'hr'});
+      /* A Tabela 15 põe estes espaços nas duas linhas: o que decide é o b_ztu
+         calculado, não o tipo. Por defeito ficam em > 0,7 (amarelo), que é o
+         corrente em existentes; quem calcular e obtiver ≤ 0,7 muda aqui. */
+      if(adjBtrEditavel(a.tipo))
+        itens.push({t:'b',txt:(a.btrBaixo?'● ':'○ ')+'b_tr ≤ 0,7 (calculado) — passa a azul',
+          cor:cfCor('int_baixo'),
+          fn:()=>{guardarHist();a.btrBaixo=!a.btrBaixo;repintarTudo();}});
+      if(a.tipo==='edificio')
+        itens.push({t:'cab',txt:'Edifício adjacente: b_tr 0,6 fixo (Tabela 15)'});
       itens.push({t:'b',txt:(a.semReq?'● ':'○ ')+'Sem requisito térmico (b_tr 1,0)',
         fn:()=>{guardarHist();a.semReq=!a.semReq;repintarTudo();}});
       itens.push({t:'hr'});
@@ -6618,6 +6670,34 @@ document.getElementById('fundoRot').addEventListener('input',e=>{
   document.getElementById('fundoRotTxt').textContent=fmt(L.fundo.rot,1)+'°';
   pintar();
 });
+/* RODAR UM QUARTO DE VOLTA — AO ALTO PARA DEITADO.
+   O cursor rodava a imagem à volta do centro, mas a caixa continuava com a
+   largura e a altura de origem. Uma planta digitalizada ao alto ficava
+   atravessada e espremida, e não havia maneira de a pôr deitada. Aqui trocam-se
+   as dimensões e mantém-se o centro no sítio: a planta vira mesmo. */
+function rodarFundoQuarto(sentido){
+  if(!L.fundo){
+    document.getElementById('dica').textContent='Carrega primeiro a planta.';
+    return;
+  }
+  guardarHist();
+  const f=L.fundo;
+  const cx=f.x+f.w/2, cy=f.y+f.h/2;
+  const w=f.w; f.w=f.h; f.h=w;          // ao alto ↔ deitado
+  f.x=cx-f.w/2; f.y=cy-f.h/2;           // o centro fica onde estava
+  f.rot=(((f.rot||0)+90*sentido)%360+360)%360;
+  if(f.rot>180) f.rot-=360;             // o cursor vai de -180 a 180
+  /* As linhas lidas do desenho e o recorte pertencem à imagem na posição
+     anterior: depois de a virar deixam de encaixar. Voltam a ler-se. */
+  delete f.linhas; mascaraFundo=null;
+  const cur=document.getElementById('fundoRot');
+  if(cur){ cur.value=f.rot; document.getElementById('fundoRotTxt').textContent=fmt(f.rot,1)+'°'; }
+  repintarTudo();
+  document.getElementById('dica').textContent=
+    'Planta rodada 90°. Se já estava calibrada, confirma a escala — a medida mantém-se, mas vale a pena verificar.';
+}
+alt('btRodar90',()=>rodarFundoQuarto(-1));
+alt('btRodarM90',()=>rodarFundoQuarto(1));
 alt('btColocar',()=>{
   if(modoForma==='colocar'){ porModo(null); return; }
   if(!L.fundo){document.getElementById('dica').textContent='Carrega primeiro a planta de fundo.';return;}
@@ -6747,8 +6827,26 @@ alt('btRecortar',()=>{
 });
 alt('btVerLinhas',()=>{verFundoLinhas=!verFundoLinhas;
   document.getElementById('btVerLinhas').classList.toggle('on',verFundoLinhas);pintar();});
-alt('btFundoFora',()=>{delete L.fundo;moverFundo=false;
-  document.getElementById('btMoverFundo').classList.remove('on');repintarTudo();});
+/* O «Remover» apagava só o atalho L.fundo e deixava a imagem na lista
+   L.fundos — que é de onde o desenho a vai buscar. Resultado: carregava-se em
+   Remover e a planta continuava lá, sem forma de a tirar. Existia
+   removerFundoAtivo() a fazer a coisa certa; o botão é que não a chamava. */
+alt('btFundoFora',()=>{
+  const fs=fundos();
+  if(!fs.length&&!L.fundo){
+    document.getElementById('dica').textContent='Não há planta de fundo para remover.';
+    return;
+  }
+  const nome=(L.fundo&&L.fundo.nome)||'esta planta';
+  const quantas=fs.length||1;
+  if(!confirm('Remover '+nome+'?'+(quantas>1?'\n\nFicam '+(quantas-1)+' planta(s).':''))) return;
+  guardarHist();
+  if(fs.length) removerFundoAtivo(); else { L.fundo=null; }
+  if(!fundos().length){ L.fundo=null; L.fundoAtivo=0; mascaraFundo=null; }
+  moverFundo=false;
+  document.getElementById('btMoverFundo').classList.remove('on');
+  repintarTudo();
+});
 document.getElementById('fundoOp').addEventListener('input',e=>{
   if(L.fundo){L.fundo.opac=(+e.target.value)/100;pintar();}});
 document.getElementById('solH').addEventListener('input',e=>{

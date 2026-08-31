@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="pt-PT">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>CE Voz · Resgate de fotos</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+:root{--bg:#0f171d;--bg2:#16202a;--bg3:#1e2b36;--br:#2b3a47;
+  --tx:#e6edf3;--tx2:#9fb0be;--tx3:#6b7d8c;--ac:#3ddc84;--am:#e8a33d;--er:#ef5350}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:var(--bg);color:var(--tx);
+  font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  padding:0 0 90px;overscroll-behavior-y:none}
+header{position:sticky;top:0;z-index:10;background:var(--bg2);
+  border-bottom:1px solid var(--br);padding:12px 14px}
+h1{margin:0;font-size:16px;letter-spacing:.4px}
+h1 span{color:var(--ac)}
+.sub{color:var(--tx3);font-size:12px;margin-top:3px}
+main{padding:14px;max-width:900px;margin:0 auto}
+button{background:var(--bg3);color:var(--tx);border:1px solid var(--br);
+  border-radius:10px;padding:12px 14px;font-size:14px;cursor:pointer;
+  min-height:46px;font-family:inherit}
+button.p{background:var(--ac);color:#04140c;border-color:var(--ac);font-weight:700}
+button:disabled{opacity:.45;cursor:default}
+.linha{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.cx{background:var(--bg2);border:1px solid var(--br);border-radius:12px;
+  padding:12px 13px;margin-bottom:12px}
+.cx h2{margin:0 0 6px;font-size:14px;color:var(--ac)}
+.grelha{display:grid;grid-template-columns:repeat(auto-fill,minmax(104px,1fr));gap:8px}
+.mini{position:relative;background:var(--bg3);border:1px solid var(--br);
+  border-radius:9px;overflow:hidden;aspect-ratio:1}
+.mini img{width:100%;height:100%;object-fit:cover;display:block}
+.mini .rot{position:absolute;left:0;right:0;bottom:0;background:rgba(0,0,0,.72);
+  font-size:10px;padding:3px 4px;color:var(--tx2);line-height:1.25;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mini.sel{outline:2px solid var(--ac);outline-offset:-2px}
+.aviso{background:rgba(232,163,61,.12);border:1px solid var(--am);
+  border-radius:10px;padding:11px 12px;font-size:13px;line-height:1.45;
+  color:var(--am);margin-bottom:12px}
+.erro{background:rgba(239,83,80,.12);border-color:var(--er);color:var(--er)}
+.nota{color:var(--tx3);font-size:12px;line-height:1.45}
+#estado{font-size:13px;color:var(--tx2);margin-bottom:10px;min-height:20px}
+.barra{position:fixed;left:0;right:0;bottom:0;background:var(--bg2);
+  border-top:1px solid var(--br);padding:10px 12px;display:flex;gap:8px;
+  align-items:center;z-index:20}
+.barra .n{font-size:13px;color:var(--tx2);flex:1}
+</style>
+</head>
+<body>
+<header>
+  <h1>CE Voz <span>·</span> Resgate de fotos</h1>
+  <div class="sub" id="versao">v1.0.0 — lê as imagens guardadas neste navegador</div>
+</header>
+
+<main>
+  <div class="aviso" id="onde">
+    <b>Tem de ser no mesmo telemóvel e no mesmo navegador</b> onde fizeste o
+    levantamento. As imagens ficam guardadas dentro do navegador, não na nuvem
+    nem no cartão — abrir esta página noutro aparelho não encontra nada.
+  </div>
+
+  <div class="linha">
+    <button class="p" id="btLer">Procurar fotos</button>
+    <button id="btTodas" disabled>Marcar todas</button>
+    <button id="btNenhuma" disabled>Desmarcar</button>
+  </div>
+
+  <div id="estado"></div>
+  <div id="lista"></div>
+</main>
+
+<div class="barra" id="barra" hidden>
+  <div class="n" id="conta">0 marcadas</div>
+  <button class="p" id="btZip" disabled>Descarregar ZIP</button>
+</div>
+
+<script>
+"use strict";
+const RESGATE_VERSAO='v1.0.0 (2026-08-31)';
+document.getElementById('versao').textContent=
+  RESGATE_VERSAO+' — lê as imagens guardadas neste navegador';
+
+/* A app grava cada imagem em ce_fotos_db → fotos, com {key,dataURL}. A chave é
+   `prefixo:timestamp:aleatório` — por exemplo `div:1756633481234:k3f9a2`. O
+   prefixo diz o que a foto é e o timestamp diz quando foi tirada, e é isso que
+   permite reencontrá-las mesmo quando o levantamento já não lhes faz
+   referência. Foi o que aconteceu à Elena: as imagens ficaram, o processo é que
+   deixou de saber delas. */
+const FOTOS_DB_NAME='ce_fotos_db', FOTOS_STORE='fotos';
+/* Os prefixos são os que a app usa em novaFotoKey. Vale a pena confirmá-los no
+   ficheiro em vez de os adivinhar: a etiqueta de equipamento é 'etq', não
+   'etiqueta', e uma foto com prefixo desconhecido aparecia sem nome de tipo. */
+const PREFIXOS={div:'Compartimento',alcado:'Alçado',campo:'Medição de campo',
+  ue:'Unidade exterior',etq:'Etiqueta de equipamento',obs:'Áudio de observações'};
+
+let fotos=[], marcadas=new Set();
+const $=id=>document.getElementById(id);
+const estado=t=>{ $('estado').textContent=t; };
+
+function abrirDB(){
+  return new Promise((res,rej)=>{
+    if(!window.indexedDB) return rej(new Error('Este navegador não guarda imagens localmente.'));
+    /* Sem versão: abre a base como ela está. Pedir a versão 1 numa base que já
+       foi actualizada dava erro e a pessoa concluía que não havia nada. */
+    const req=indexedDB.open(FOTOS_DB_NAME);
+    req.onsuccess=()=>res(req.result);
+    req.onerror=()=>rej(req.error||new Error('não consegui abrir a base de dados'));
+    req.onblocked=()=>rej(new Error('há outra página do CE Voz aberta — fecha-a e tenta de novo'));
+  });
+}
+function lerTudo(db){
+  return new Promise((res,rej)=>{
+    /* Base sem a gaveta das fotos é o mesmo que base vazia — a app ainda não
+       gravou nenhuma imagem aqui. Tratar isto como avaria dava uma mensagem de
+       erro assustadora quando não há erro nenhum. */
+    if(!db.objectStoreNames.contains(FOTOS_STORE)) return res([]);
+    const tx=db.transaction(FOTOS_STORE,'readonly');
+    const req=tx.objectStore(FOTOS_STORE).getAll();
+    req.onsuccess=()=>res(req.result||[]);
+    req.onerror=()=>rej(req.error);
+  });
+}
+// `div:1756633481234:k3f9a2` → tipo, data e hora
+function lerChave(k){
+  const p=String(k||'').split(':');
+  const bruto=p[0]||'';
+  const tipo=PREFIXOS[bruto]||PREFIXOS[bruto.replace(/_.*$/,'')]||bruto||'Sem tipo';
+  const ts=parseInt(p[1]);
+  const d=(isFinite(ts)&&ts>1500000000000)?new Date(ts):null;
+  return {tipo,data:d,chave:k};
+}
+const dia=d=>d?d.toLocaleDateString('pt-PT',{weekday:'long',day:'2-digit',
+  month:'long',year:'numeric'}):'sem data';
+const hora=d=>d?d.toLocaleTimeString('pt-PT',{hour:'2-digit',minute:'2-digit'}):'--:--';
+const kb=n=>n>1048576?(n/1048576).toFixed(1)+' MB':Math.round(n/1024)+' KB';
+
+async function procurar(){
+  $('btLer').disabled=true;
+  estado('A procurar…');
+  try{
+    const db=await abrirDB();
+    const linhas=await lerTudo(db);
+    fotos=linhas.filter(r=>r&&r.dataURL).map(r=>
+      Object.assign(lerChave(r.key),{dataURL:r.dataURL,bytes:r.dataURL.length}));
+    // mais recentes primeiro: o que se perdeu hoje aparece logo em cima
+    fotos.sort((a,b)=>(b.data?b.data.getTime():0)-(a.data?a.data.getTime():0));
+    marcadas=new Set();
+    desenhar();
+  }catch(e){
+    $('lista').innerHTML='';
+    estado('');
+    const cx=document.createElement('div');
+    cx.className='aviso erro';
+    cx.innerHTML='<b>Não consegui ler as imagens.</b><br>'+
+      String(e.message||e).replace(/</g,'&lt;')+
+      '<br><br>Se abriste esta página a partir do ficheiro no disco, '+
+      'coloca-a no mesmo endereço da app — as imagens só são visíveis '+
+      'a páginas do mesmo sítio.';
+    $('lista').appendChild(cx);
+  }
+  $('btLer').disabled=false;
+}
+
+function desenhar(){
+  const l=$('lista'); l.innerHTML='';
+  if(!fotos.length){
+    estado('');
+    const cx=document.createElement('div');
+    cx.className='aviso';
+    cx.innerHTML='<b>Não há imagens guardadas neste navegador.</b><br>'+
+      'Ou já foram apagadas, ou o levantamento foi feito noutro aparelho ou '+
+      'noutro navegador (o Chrome e o Samsung Internet não partilham nada).';
+    l.appendChild(cx);
+    $('barra').hidden=true;
+    return;
+  }
+  const total=fotos.reduce((a,f)=>a+f.bytes,0);
+  estado(fotos.length+' imagem(ns) encontrada(s) · '+kb(total)+' no total');
+  $('btTodas').disabled=false; $('btNenhuma').disabled=false;
+  $('barra').hidden=false;
+
+  // agrupadas por dia: o levantamento perdido está todo no mesmo dia
+  const dias=[];
+  fotos.forEach(f=>{
+    const k=f.data?f.data.toDateString():'sem-data';
+    let g=dias.find(x=>x.k===k);
+    if(!g){ g={k,titulo:dia(f.data),itens:[]}; dias.push(g); }
+    g.itens.push(f);
+  });
+  dias.forEach(g=>{
+    const cx=document.createElement('div'); cx.className='cx';
+    const h=document.createElement('h2');
+    h.textContent=g.titulo+' — '+g.itens.length+' foto(s)';
+    cx.appendChild(h);
+
+    const bt=document.createElement('button');
+    bt.style.cssText='margin-bottom:10px;padding:8px 11px;min-height:38px;font-size:13px';
+    bt.textContent='Marcar este dia';
+    bt.onclick=()=>{ g.itens.forEach(f=>marcadas.add(f.chave)); desenhar(); };
+    cx.appendChild(bt);
+
+    const gr=document.createElement('div'); gr.className='grelha';
+    g.itens.forEach(f=>{
+      const d=document.createElement('div');
+      d.className='mini'+(marcadas.has(f.chave)?' sel':'');
+      const img=document.createElement('img');
+      img.loading='lazy'; img.src=f.dataURL; img.alt='';
+      d.appendChild(img);
+      const r=document.createElement('div'); r.className='rot';
+      r.textContent=hora(f.data)+' · '+f.tipo;
+      d.appendChild(r);
+      d.onclick=()=>{
+        if(marcadas.has(f.chave)) marcadas.delete(f.chave); else marcadas.add(f.chave);
+        // (marcadas é um Set em memória; a base fica intacta)
+        d.classList.toggle('sel'); contar();
+      };
+      gr.appendChild(d);
+    });
+    cx.appendChild(gr);
+    l.appendChild(cx);
+  });
+
+  const nota=document.createElement('div');
+  nota.className='nota';
+  nota.textContent='Toca numa foto para a marcar. As imagens ficam aqui até '+
+    'serem apagadas — não limpes os dados do navegador antes de as descarregares.';
+  l.appendChild(nota);
+  contar();
+}
+function contar(){
+  $('conta').textContent=marcadas.size+' marcada(s)';
+  $('btZip').disabled=!marcadas.size;
+}
+$('btLer').onclick=procurar;
+$('btTodas').onclick=()=>{ fotos.forEach(f=>marcadas.add(f.chave)); desenhar(); };
+$('btNenhuma').onclick=()=>{ marcadas.clear(); desenhar(); };
+
+$('btZip').onclick=async()=>{
+  const sel=fotos.filter(f=>marcadas.has(f.chave));
+  if(!sel.length) return;
+  $('btZip').disabled=true; $('btZip').textContent='A preparar…';
+  try{
+    const zip=new JSZip();
+    const usados={};
+    sel.forEach(f=>{
+      /* Nome legível: hora, tipo e um número. A chave interna não diz nada a
+         quem depois abre a pasta no computador. */
+      const h=f.data?f.data.toISOString().slice(0,19).replace(/[T:]/g,'-'):'sem-data';
+      let base=h+'_'+f.tipo.replace(/[^\wÀ-ú]+/g,'_');
+      usados[base]=(usados[base]||0)+1;
+      if(usados[base]>1) base+='_'+usados[base];
+      const m=/^data:([^;]+);base64,(.*)$/.exec(f.dataURL);
+      if(!m) return;
+      const ext=(m[1].split('/')[1]||'jpg').split('+')[0];
+      zip.file(base+'.'+ext,m[2],{base64:true});
+    });
+    // a lista das chaves vai junta: serve para voltar a ligar as fotos ao processo
+    zip.file('chaves.txt',sel.map(f=>
+      (f.data?f.data.toLocaleString('pt-PT'):'sem data')+'  '+f.tipo+'  '+f.chave
+    ).join('\n')+'\n');
+    const blob=await zip.generateAsync({type:'blob'},p=>{
+      $('btZip').textContent='A comprimir '+Math.round(p.percent)+'%';
+    });
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download='fotos_resgatadas_'+new Date().toISOString().slice(0,10)+'.zip';
+    document.body.appendChild(a); a.click();
+    setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},4000);
+    // nota: esta página NUNCA escreve nem apaga na base — só lê
+    $('btZip').textContent='Descarregar ZIP';
+  }catch(e){
+    alert('Não consegui montar o ZIP.\n\n'+(e.message||e)+
+      '\n\nSe forem muitas fotos, marca-as por dia e descarrega em partes.');
+    $('btZip').textContent='Descarregar ZIP';
+  }
+  $('btZip').disabled=!marcadas.size;
+};
+</script>
+</body>
+</html>

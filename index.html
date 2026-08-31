@@ -547,7 +547,7 @@ const DIVS_BASE=[
 // VERSÃO — fonte única (selo no ecrã inicial + cabeçalho do TXT exportado).
 // Subir aqui a cada alteração ao ficheiro.
 // ═══════════════════════════════════════
-const APP_VERSION='v2026.08.31-FIX220';
+const APP_VERSION='v2026.08.31-FIX226';
 
 // ═══════════════════════════════════════
 // ESTADO
@@ -677,12 +677,18 @@ function buildQs(){
     grpAreas:['sala','sala de estar','sala de jantar','cozinha','kitchenette','hall','escritório','lavandaria','despensa','arrumos','garagem','arrecadação'],
     key:'divisoes'});
 
-  // ORDEM DAS DIVISÕES — só para Moradia (percursos variam muito casa a casa)
+  /* ORDEM DAS DIVISÕES — em qualquer edifício.
+     Estava limitada a Moradia, com o argumento de que num apartamento o
+     percurso é sempre o mesmo. Não é: num T3 entra-se pelo hall, e há quem
+     comece pela cozinha ou pela varanda conforme onde está a chave da luz. Num
+     apartamento a app propunha uma ordem por tipo de compartimento e não havia
+     por onde a mudar — o levantamento seguia uma ordem que ninguém pediu.
+     A pergunta passa a aparecer sempre; a sugestão automática continua a ser o
+     ponto de partida quando não se toca em nada. */
   qs.push({id:'ordem-divisoes',ctx:'Projeto — Ordem do levantamento',
     text:'Por que ordem vais percorrer as divisões?',
     hint:'Toca nas divisões pela ordem que vais visitar em obra. As perguntas seguintes seguem essa ordem.',
     isOrdemDivisoesInline:true,
-    cond:()=>D.edificioTipo==='Moradia',
     key:'ordemDivisoes'});
 
   // PREPARAÇÃO DAS ORIENTAÇÕES — tabela única com todas as divisões.
@@ -714,7 +720,12 @@ function buildQs(){
     key:'divExtraNome',
     cond:()=>isSim('div-extra-yn')});
   // marcador que expande paredes+vãos para o(s) compartimento(s) extra
+  /* O marcador leva consigo os ids das perguntas que lhe correspondem.
+     Sem isto, os marcadores dos ciclos seguintes liam sempre a PRIMEIRA
+     pergunta do nome — e portanto expandiam-se outra vez com o mesmo nome, a
+     cada passagem, até a app ficar sem memória. */
   qs.push({id:'__div_extra__',isDivExtraMarker:true,
+    ynId:'div-extra-yn',nomeId:'div-extra-nome',
     cond:()=>isSim('div-extra-yn')});
 
   // PÉ DIREITO por piso (vem DEPOIS das divisões)
@@ -1417,7 +1428,7 @@ function renderClimaDiv(div){
       // repor a foto já guardada para este sistema (a mais recente correspondente)
       const fotoGuardada=[...(D.fotoEtiquetas||[])].reverse().find(f=>f.div===div&&f.tipo===tipo);
       if(fotoGuardada){
-        resolverFotoURL(fotoGuardada).then(url=>{if(url){thumbEl.src=url;thumbEl.style.display='block';}});
+        resolverFotoURL(fotoGuardada).then(url=>{if(url){thumbEl.src=url;thumbEl.style.display='block';}}).catch(()=>{});
       }
     }
     form.appendChild(mg);
@@ -2525,6 +2536,19 @@ function renderPePiso(q){
     wrap.appendChild(mLbl); wrap.appendChild(mInp); wrap.appendChild(mNota);
   }
 
+  /* FOTO DA MEDIÇÃO DO PÉ-DIREITO.
+     A pergunta antiga (a de todos os pisos de uma vez) tinha botão de foto; a
+     nova, piso a piso, ficou sem ele — e o pé-direito é dos valores que mais se
+     contesta num CE, por isso a fotografia da fita ou do laser contra o tecto é
+     a prova que interessa guardar. Uma foto por piso. */
+  {
+    const fotoSec=document.createElement('div');
+    fotoSec.style.cssText='margin-top:14px';
+    fotoSec.appendChild(botaoFotoCampo('peDireito-'+piso,
+      '📷 Foto da medição do pé-direito ('+piso+')'));
+    wrap.appendChild(fotoSec);
+  }
+
   // ── balanço do piso ──
   const b=balancoDoPiso(piso);
   const box=document.createElement('div');
@@ -2624,7 +2648,7 @@ function renderCompInputs(q){
       const box=document.createElement('div');box.style.cssText='position:relative';
       const img=document.createElement('img');
       img.style.cssText='width:60px;height:60px;object-fit:cover;border-radius:8px;border:1px solid var(--br);background:var(--bg3)';
-      resolverFotoURL(f).then(url=>{if(url)img.src=url;});
+      resolverFotoURL(f).then(url=>{if(url)img.src=url;}).catch(()=>{});
       const del=document.createElement('button');del.textContent='✕';
       del.style.cssText='position:absolute;top:-6px;right:-6px;border:none;background:var(--red);color:#fff;border-radius:50%;width:20px;height:20px;font-size:11px;cursor:pointer;line-height:1';
       del.onclick=()=>{if(f.idbKey)fotoDbDelete(f.idbKey).catch(()=>{});dd.fotos.splice(idx,1);renderCompInputs(q);};
@@ -3964,10 +3988,19 @@ function renderQ(){
       continue;
     }
     if(q.isDivExtraMarker){
-      const nomeExtra=(getAns('div-extra-nome')||'').trim();
-      if(nomeExtra&&isSim('div-extra-yn')){
+      const _ynId=q.ynId||'div-extra-yn';
+      const _nomeId=q.nomeId||'div-extra-nome';
+      const nomeExtra=(getAns(_nomeId)||'').trim();
+      if(nomeExtra&&isSim(_ynId)){
         const cap=s=>s?s.charAt(0).toUpperCase()+s.slice(1):s;
-        const divExtra=cap(nomeExtra);
+        let divExtra=cap(nomeExtra);
+        /* Um nome repetido criava duas perguntas com o mesmo id e as respostas
+           de uma iam parar à outra. Numera-se, como se faz nos quartos. */
+        if(D.divisoes.includes(divExtra)){
+          let n2=2;
+          while(D.divisoes.includes(divExtra+' '+n2)) n2++;
+          divExtra=divExtra+' '+n2;
+        }
         if(!D.divisoes.includes(divExtra)) D.divisoes.push(divExtra);
         // garantir que o objecto da divisão existe ANTES de injectar as perguntas —
         // isOrientComp e isVaosInline dependem de D.divisoesDados[div] para guardar dados
@@ -3999,28 +4032,27 @@ function renderQ(){
           chips:COMPARTIMENTOS_INDIVIDUAIS,isTextoLivre:true,key:'divExtraNome',
           cond:()=>getAns(idCiclo)==='Sim'});
         extras.push({id:`__div_extra_${divExtra}__`,isDivExtraMarker:true,
+          ynId:idCiclo,nomeId:idNomeCiclo,
           cond:()=>getAns(idCiclo)==='Sim'});
-        // Mesma protecção que em expandDivCompleto: reancorar curQ pelo id da
-        // pergunta actual. Hoje o marcador vem sempre DEPOIS de curQ (pelo que
-        // inserir não desloca a posição actual), mas isso é uma coincidência da
-        // ordem do fluxo, não uma garantia — se a ordem mudar, sem isto o
-        // utilizador saltaria para outra pergunta sem ter navegado.
-        const idAntes=(typeof curQ!=='undefined'&&qList[curQ])?qList[curQ].id:null;
-        const mi=qList.findIndex(q=>q.isDivExtraMarker);
-        if(mi>-1) comRespostasPreservadas(()=>qList.splice(mi,1,...extras));
-        if(idAntes){
-          const novaPos=qList.findIndex(q=>q.id===idAntes);
-          if(novaPos>-1&&novaPos!==curQ) curQ=novaPos;
+        /* SUBSTITUIR O MARCADOR QUE ESTÁ A SER PROCESSADO, NÃO O PRIMEIRO.
+           `findIndex` devolvia o primeiro marcador da lista, que nem sempre é
+           este. Acrescentando um compartimento com um nome JÁ usado — «Sala»
+           outra vez, coisa banal a corrigir um levantamento — as perguntas
+           novas levavam os mesmos ids das antigas, o marcador ia parar ao sítio
+           errado, e o ciclo voltava a expandir-se a cada passagem. O
+           questionário crescia sem fim até a app ficar sem memória e fechar.
+           Apanhado a saltar depressa entre perguntas.
+           O marcador em curso está em curQ: é esse que se substitui. */
+        /* Rede de segurança: se por alguma razão as perguntas deste
+           compartimento já existirem, o marcador sai sem duplicar nada. */
+        if(qList.some(x=>x&&x.id===`dc-${divExtra}-comp`)){
+          comRespostasPreservadas(()=>qList.splice(curQ,1));
+        } else {
+          comRespostasPreservadas(()=>qList.splice(curQ,1,...extras));
+          autoSave();
         }
-        autoSave();
       } else {
-        const idAntes2=(typeof curQ!=='undefined'&&qList[curQ])?qList[curQ].id:null;
-        const mi=qList.findIndex(q=>q.isDivExtraMarker);
-        if(mi>-1) comRespostasPreservadas(()=>qList.splice(mi,1));
-        if(idAntes2){
-          const novaPos2=qList.findIndex(q=>q.id===idAntes2);
-          if(novaPos2>-1&&novaPos2!==curQ) curQ=novaPos2;
-        }
+        comRespostasPreservadas(()=>qList.splice(curQ,1));
       }
       continue;
     }
@@ -4028,7 +4060,13 @@ function renderQ(){
     if(q.cond&&!q.cond()){curQ++;continue;}
     break;
   }
-  if(curQ>=qList.length){goSum();return;}
+  /* NÃO DEIXAR O CONTADOR FUGIR PARA ALÉM DO FIM.
+     `next()` incrementa sempre. Chegado ao resumo, cada toque a mais empurrava
+     curQ para longe (apanhado a 132, com 38 perguntas). Ao carregar em
+     «← Voltar» era preciso premir tantas vezes quantas as que se tinha
+     carregado a mais antes de o ecrã mexer — parecia que o botão não
+     respondia. Fixa-se no fim da lista. */
+  if(curQ>=qList.length){ curQ=qList.length; goSum(); return; }
   const q=qList[curQ];
 
   // Botão de voz: só faz sentido na pergunta de Observações — nas restantes fica escondido
@@ -5996,6 +6034,33 @@ function verificarLevantamento(){
   const E=(sec,msg)=>incoerencias.push({sec,msg});
   const A=(sec,msg)=>avisos.push({sec,msg});
 
+  /* DECLARAÇÃO DE VISITA — o que falta tem de aparecer AQUI.
+     A pergunta da DV está no fim do questionário, entre as fotos e as
+     observações, e passa-se por ela a tocar em «Seguinte» sem dar por isso. Só
+     se percebia que estava vazia ao carregar no botão do extrato, no ecrã de
+     exportação — quando já se saiu do imóvel. Na Elena e no João saiu tudo em
+     branco. Passa a ser assinalado com o resto. */
+  try{
+    (faltasDV()||[]).forEach(f=>L('Declaração de Visita',
+      f.charAt(0).toUpperCase()+f.slice(1)+' por preencher'));
+  }catch(e){}
+
+  /* O TXT NÃO PODE CONTRADIZER O QUE FOI RESPONDIDO.
+     Respondeu-se «Sim, há isolamento» e o TXT saía com o U da parede sem
+     isolamento, por ler um campo que não existia. Isto apanha a contradição
+     caso volte a acontecer por outro caminho. */
+  try{
+    if(isSimTxt(D.temIsolamento)){
+      const _t=buildTxt();
+      if(/Não foi possível identificar a existência de isolamento/i.test(_t))
+        E('Envolvente','Respondeste que HÁ isolamento nas paredes mas o texto do CE '+
+          'sai com a solução SEM isolamento — o U está errado');
+      if(!/^[\d,.]+$/.test(String(D.isolParedeEsp||'')))
+        A('Envolvente','Há isolamento mas sem espessura indicada — o cálculo usa '+
+          '2 cm de λ=0,060 (Guia SCE); confirma na ficha técnica');
+    }
+  }catch(e){}
+
   // ── identificação ──
   if(!D.nome) L('Identificação','Nome do projeto por preencher');
   if(!D.anoConstrucao) L('Identificação','Ano de construção em falta (afeta F_age e valores por defeito)');
@@ -6704,7 +6769,43 @@ function buildSum(){
 // ═══════════════════════════════════════
 // EXPORT
 // ═══════════════════════════════════════
-function goExp(){document.getElementById('exp-box').textContent=buildTxt();document.getElementById('copy-ok').style.display='none';show('scr-exp');try{renderFotosAlcadoThumbs();}catch(e){}}
+function goExp(){
+  document.getElementById('exp-box').textContent=buildTxt();
+  document.getElementById('copy-ok').style.display='none';
+  show('scr-exp');
+  try{renderFotosAlcadoThumbs();}catch(e){}
+  try{avisarDVporPreencher();}catch(e){}
+}
+/* AVISO NO ECRÃ DE EXPORTAÇÃO, COM ATALHO PARA A PERGUNTA.
+   Descobrir no escritório que a DV ficou vazia obriga a reabrir o processo,
+   procurar a pergunta e voltar a exportar. Aqui vê-se logo, e o botão leva lá. */
+function avisarDVporPreencher(){
+  const scr=document.getElementById('scr-exp'); if(!scr) return;
+  const velho=document.getElementById('aviso-dv'); if(velho) velho.remove();
+  let faltam=[]; try{ faltam=faltasDV()||[]; }catch(e){ return; }
+  if(!faltam.length) return;
+  const cx=document.createElement('div');
+  cx.id='aviso-dv';
+  cx.style.cssText='background:rgba(232,163,61,.12);border:1px solid var(--am,#e8a33d);'+
+    'border-radius:11px;padding:11px 12px;margin-bottom:10px';
+  const t2=document.createElement('div');
+  t2.style.cssText='font-size:13px;color:var(--am,#e8a33d);line-height:1.45;margin-bottom:8px';
+  t2.textContent='⚠️ Declaração de Visita por preencher: '+faltam.join(', ')+'.';
+  cx.appendChild(t2);
+  const b=document.createElement('button');
+  b.className='btn-next';
+  b.style.cssText='background:var(--bg3);color:var(--tx);font-size:13px;padding:9px';
+  b.textContent='Ir preencher agora';
+  b.onclick=()=>{
+    const i=qList.findIndex(q=>q&&q.id==='dv');
+    if(i<0){ alert('Não encontrei a pergunta da Declaração de Visita.'); return; }
+    curQ=i; show('scr-int'); renderQ();
+  };
+  cx.appendChild(b);
+  const box=document.getElementById('exp-box');
+  if(box&&box.parentNode) box.parentNode.insertBefore(cx,box);
+  else scr.appendChild(cx);
+}
 // Agrupa vãos por características (tipo, material, corte térmico, abertura,
 // proteção, cor) — vãos com as mesmas características partilham o mesmo VE.
 // Retorna um mapa: chave-características -> número VE, e a lista de todos os
@@ -7036,30 +7137,60 @@ function condutasDoLevantamento(){
   }];
 }
 
+/* AS ALTURAS DA FOLHA DE VENTILAÇÃO — Manual SCE, ponto 5.2.3, pág. 30-31.
+   As definições são literais e não deixam margem:
+
+     H_edif  «altura do edifício em estudo, correspondente à maior distância
+              vertical entre o ponto do TETO da fração mais elevada do edifício
+              (nível da cobertura) e o NÍVEL DO TERRENO»
+     H_FA    «altura da fração em estudo, correspondente à maior distância
+              vertical entre o TETO DA FRAÇÃO e o NÍVEL DO TERRENO»
+
+   Estavam as duas erradas:
+
+   · H_FA saía a altura do PAVIMENTO da fração acima do solo. É o TETO. Num 1.º
+     andar dava 2,9 m quando são 5,8: o pavimento está a um piso do solo e o
+     teto a dois. A cota entra na diferença de pressão e essa manda no caudal.
+
+   · H_edif saía nº de pisos × (pé-direito + laje). O pé-direito medido é o da
+     fração; os outros pisos podem ser diferentes, e a espessura da laje é um
+     palpite. O manual dá a saída para quando não se consegue medir: «na
+     impossibilidade de parametrizar devidamente H_edif, H_obs ou H_FA, deve ser
+     considerada uma altura de 3 metros por piso». É esse o valor a usar, não
+     uma estimativa nossa.
+
+   Se as alturas forem medidas em obra (D.ventHEdificio, D.ventHFracao), são
+   essas que valem — o manual só manda usar os 3 m quando não há medida. */
+const ALTURA_PISO_SCE=3.00;   // Manual SCE, pág. 31
 function ventAlturas(){
   const pd=_n(D.peDireitoMedio)||
     (Object.values(D.peDireitos||{}).map(_n).filter(x=>x>0)[0])||2.60;
   const nEdif=parseInt(D.nPisosEdificio)||parseInt(D.pisos)||1;
   const nFrac=parseInt(D.pisos)||1;
-  // altura por piso: pé-direito + espessura da laje (0,30 m, valor corrente)
-  const hPiso=pd+0.30;
-  /* H_FA é a altura do PAVIMENTO da fracção acima do solo, não a altura da
-     fracção em si. Estava a usar o nº de pisos DA FRACÇÃO — num apartamento é
-     sempre 1 — e dava a altura de um piso em vez da cota a que ele está.
-     Num 2.º andar (pisoLocal 3), o pavimento está a 2 pisos do solo. */
+
+  // ordem do piso no prédio: 1=R/C, 2=1.º, 3=2.º…
   const pl=String(D.pisoLocal||'').trim();
-  let nAbaixo=null;
-  if(/^r\/?c$|^0$|^r[ée]s/i.test(pl)) nAbaixo=0;
+  let ordem=null;
+  if(/^r\/?c$|^0$|^r[ée]s/i.test(pl)) ordem=1;
   else{
     const nn=parseInt(pl);
-    // pisoLocal é a ordem no prédio: 1=R/C, 2=1º, 3=2º… → pisos abaixo = n-1
-    if(isFinite(nn)&&nn>0) nAbaixo=nn-1;
+    if(isFinite(nn)&&nn>0) ordem=nn;
   }
-  const hFA=(nAbaixo===null)?(nFrac*hPiso):(nAbaixo*hPiso);
+  /* Pisos abaixo do TETO da fração = os que estão por baixo dela, mais os
+     dela própria. Num 1.º andar de um prédio de 3: 1 piso abaixo + 1 piso da
+     fração = 2 → H_FA = 6,00 m. O teto do 3.º piso é a cobertura: 3 × 3 = 9. */
+  const pisosAteTeto=(ordem===null)?nFrac:(ordem-1+nFrac);
+
+  const medidoEdif=_n(D.ventHEdificio), medidoFA=_n(D.ventHFracao);
+  const hEdif=medidoEdif>0?medidoEdif:nEdif*ALTURA_PISO_SCE;
+  const hFA=medidoFA>0?medidoFA:pisosAteTeto*ALTURA_PISO_SCE;
+
   return {peDireito:+pd.toFixed(2),
-    hEdificio:+(nEdif*hPiso).toFixed(1),
-    hFracao:+hFA.toFixed(1),
-    hFracaoBase:(nAbaixo!==null?nAbaixo:null),
+    hEdificio:+hEdif.toFixed(2),
+    hFracao:+hFA.toFixed(2),
+    hEdificioMedido:medidoEdif>0,
+    hFracaoMedida:medidoFA>0,
+    pisosAteTeto,ordemPiso:ordem,
     pisosEdificio:nEdif,pisosFracao:nFrac};
 }
 function ventVolume(){
@@ -7091,6 +7222,11 @@ function ventResumoITeCons(){
     fachadasExpostas:ventFachadasExpostas(),
     hEdificio:a.hEdificio,
     hFracao:a.hFracao,
+    hEdificioMedido:a.hEdificioMedido,
+    hFracaoMedida:a.hFracaoMedida,
+    pisosAteTeto:a.pisosAteTeto,
+    ordemPiso:a.ordemPiso,
+    pisosEdificio:a.pisosEdificio,
     obstaculos:D.ventObstaculos||'',
     hObstaculo:_n(D.ventHObstaculo)||null,
     dObstaculo:_n(D.ventDObstaculo)||null,
@@ -7180,6 +7316,30 @@ function textoCoberturaPorDefeito(tipo,isolCm,material){
    λ de catálogo: XPS 0,037 · EPS 0,040 · lã mineral 0,040 · poliuretano 0,028. */
 const LAMBDA_ISOL={'XPS':0.037,'EPS':0.040,'Lã mineral':0.040,'Poliuretano':0.028,
   'Desconhecido':0.060};
+/* O QUE FOI RESPONDIDO SOBRE O ISOLAMENTO DAS PAREDES.
+   Lê-se num sítio só. Havia duas leituras espalhadas pelo buildTxt e uma delas
+   apontava para um campo que não existe (D.paredeIsolamento) — o TXT dizia
+   «não foi possível identificar isolamento» com o isolamento respondido. */
+function isolamentoDasParedes(){
+  const tem=isSimTxt(D.temIsolamento);
+  const mat=(()=>{
+    const x=String(D.isolParedeMat||'').toLowerCase();
+    if(/\bxps\b|extrudid/.test(x)) return 'XPS';
+    if(/\beps\b|expandid|esferovite/.test(x)) return 'EPS';
+    if(/l[ãa]\s*(mineral|de rocha|de vidro)|rockwool/.test(x)) return 'Lã mineral';
+    if(/poliuretano|\bpur\b|\bpir\b/.test(x)) return 'Poliuretano';
+    return 'Desconhecido';
+  })();
+  // «Não tem» e «Não sei» são respostas, não espessuras
+  const esp=(D.isolParedeEsp&&/^[\d,.]+$/.test(String(D.isolParedeEsp)))
+    ?String(D.isolParedeEsp):'';
+  return {tem,mat,esp,
+    // sem espessura, o Guia SCE manda considerar 2 cm de λ=0,060
+    texto:tem?((esp?esp.replace('.',','):'2')+' cm de '+mat+
+      (esp?'':' (espessura não medida — 2 cm por defeito do Guia SCE)'))
+      :'sem isolamento'};
+}
+
 function uParedeComIsolamento(espCm,anoConstrucao,isolCm,material){
   const base=uParedePorDefeito(espCm,anoConstrucao);
   if(!base) return null;
@@ -7365,7 +7525,9 @@ function _perfilDoLevantamento(){
   return {tipo,piso,vidros,aqs:aqsL,avac,lareira,caixilharia:caix,protecao:prot,
     cidade:D.concelho||D.localidade||'',
     espParede:D.espParede?String(parseFloat(D.espParede)/100):'',
-    isolamento:/sim/i.test(D.paredeIsolamento||'')?'SIM':'NÃO',
+    // mesmo campo fantasma: o comparador dizia sempre «sem isolamento» e ia
+    // buscar processos que não se parecem com este
+    isolamento:isSimTxt(D.temIsolamento)?'SIM':'NÃO',
     solar:/sim/i.test(D.solar||'')?'SIM':'NÃO',
     adjacente:(D.divisoes||[]).some(dv=>
       Object.keys((D.divisoesDados[dv]||{}).envInt||{})
@@ -8295,10 +8457,17 @@ function buildTxt(){
     t+=ln('Nº de pisos da fração',String(v.pisosFracao));
     t+=ln('Nº de fachadas expostas',v.fachadasExpostas>=2
       ? ('>=2  ('+v.fachadasExpostas+' orientações medidas)') : String(v.fachadasExpostas));
-    t+=ln('Altura do edifício, Hedf (m)',v.hEdificio.toFixed(1).replace('.',',')+
-      '  (estimada: nº de pisos × (pé-direito + 0,30 m de laje) — confirmar)');
-    t+=ln('Altura da fração, HFA (m)',v.hFracao.toFixed(1).replace('.',',')+
-      '  (estimada — confirmar)');
+    /* As duas alturas medem-se do NÍVEL DO TERRENO até um TETO: a do edifício
+       até ao teto do último piso (a cobertura), a da fração até ao teto dela.
+       Manual SCE, ponto 5.2.3, pág. 30-31. */
+    t+=ln('Altura do edifício, Hedf (m)',v.hEdificio.toFixed(2).replace('.',',')+
+      (v.hEdificioMedido?'  (medida em obra)'
+        :'  ('+v.pisosEdificio+' piso(s) × 3,00 m — regra do Manual SCE pág. 31 '+
+         'quando não é possível medir; do terreno ao teto do último piso)'));
+    t+=ln('Altura da fração, HFA (m)',v.hFracao.toFixed(2).replace('.',',')+
+      (v.hFracaoMedida?'  (medida em obra)'
+        :'  ('+v.pisosAteTeto+' piso(s) × 3,00 m — do terreno ao TETO da fração'+
+         (v.ordemPiso?', que está no '+(v.ordemPiso===1?'R/C':(v.ordemPiso-1)+'º andar'):'')+')'));
     if(v.obstaculos) t+=ln('Edifícios/obstáculos',v.obstaculos);
     if(v.hObstaculo) t+=ln('Altura do obstáculo, Hobs (m)',v.hObstaculo.toFixed(1).replace('.',','));
     if(v.dObstaculo) t+=ln('Distância ao obstáculo, Dobs (m)',v.dObstaculo.toFixed(1).replace('.',','));
@@ -8315,9 +8484,14 @@ function buildTxt(){
            (c.altura?(String(c.altura).replace('.',',')+' m'):'desconhecida')+'\n';
       });
     }
-    t+='\nNota: os valores assinalados como estimados saem do nº de pisos e do pé-direito\n'+
-       'medidos. Confirma-os na folha antes de calcular — a altura entra na velocidade\n'+
-       'do vento e essa afeta o caudal de renovação.\n';
+    t+='\nAS ALTURAS (Manual SCE, ponto 5.2.3, pág. 30-31)\n'+
+       '  Hedf — do nível do TERRENO ao TETO do piso mais alto (o nível da cobertura).\n'+
+       '  HFA  — do nível do TERRENO ao TETO DA FRAÇÃO. É o teto, não o pavimento:\n'+
+       '         num 1.º andar são dois pisos de altura, não um.\n'+
+       '  Sem medida no local usam-se 3,00 m por piso, como o manual manda na\n'+
+       '  impossibilidade de parametrizar Hedf, Hobs ou HFA.\n'+
+       '  Se mediste as alturas em obra, corrige na folha — a altura entra na\n'+
+       '  velocidade do vento e essa afeta o caudal de renovação.\n';
     /* BLOCO PRONTO A COPIAR, NA ORDEM DA FOLHA
        O bloco acima é para ler; este é para transcrever. Segue exactamente a
        ordem em que os campos aparecem na folha do ITeCons, um por linha, sem
@@ -8336,8 +8510,10 @@ function buildTxt(){
     cp('Nº de pisos da fracção',String(v.pisosFracao));
     cp('Velocidade do vento, u10 (m/s)','Por defeito');
     cp('Nº fachadas expostas',v.fachadasExpostas>=2?'>=2':String(v.fachadasExpostas));
-    cp('Altura do edifício, Hedf (m)',v.hEdificio.toFixed(2).replace('.',','));
-    cp('Altura da fracção, HFA (m)',v.hFracao.toFixed(2).replace('.',','));
+    cp('Altura do edifício, Hedf (m)',v.hEdificio.toFixed(2).replace('.',',')+
+      (v.hEdificioMedido?'':'  ← 3 m/piso (Manual SCE)'));
+    cp('Altura da fracção, HFA (m)',v.hFracao.toFixed(2).replace('.',',')+
+      (v.hFracaoMedida?'':'  ← até ao TETO da fração'));
     cp('Edifícios/obstáculos?',v.obstaculos||'não indicado — deixar por marcar');
     if(v.hObstaculo) cp('Altura do obstáculo, Hobs (m)',v.hObstaculo.toFixed(1).replace('.',','));
     if(v.dObstaculo) cp('Distância ao obstáculo, Dobs (m)',v.dObstaculo.toFixed(1).replace('.',','));
@@ -9013,19 +9189,16 @@ function buildTxt(){
        Manual SCE. É uma SUGESTÃO: se a espessura não bater com nenhuma linha da
        tabela, não se sugere nada — mais vale um campo vazio que um U errado. */
     {
-      const _isol=String(D.paredeIsolamento||'').trim();
-      const _temIsol=!!_isol&&!/^(n[ãa]o|sem)/i.test(_isol);
-      // o material tem de casar EXACTAMENTE com a chave de LAMBDA_ISOL, senão
-      // caía no λ de 0,060 (o valor de "desconhecido") e o U saía errado
-      const _matIsol=(()=>{
-        const x=_isol.toLowerCase();
-        if(/\bxps\b|extrudid/.test(x)) return 'XPS';
-        if(/\beps\b|expandid|esferovite/.test(x)) return 'EPS';
-        if(/l[ãa]\s*(mineral|de rocha|de vidro)|rockwool/.test(x)) return 'Lã mineral';
-        if(/poliuretano|\bpur\b|\bpir\b/.test(x)) return 'Poliuretano';
-        return 'Desconhecido';
-      })();
-      const _eIsol=(_isol.match(/([\d,.]+)\s*cm/i)||[])[1]||'';
+      /* O ISOLAMENTO ESTAVA A SER LIDO DE UM CAMPO QUE NÃO EXISTE.
+         A app grava a resposta em D.temIsolamento, D.isolParedeEsp e
+         D.isolParedeMat (ver renderIsolInline). Aqui lia-se D.paredeIsolamento
+         — campo que nunca é escrito em lado nenhum. Resultado: por mais que se
+         respondesse «Sim, XPS, 3 cm», o TXT saía sempre com «não foi possível
+         identificar a existência de isolamento térmico» e com o U da parede
+         SEM isolamento. Um U de 1,10 em vez de 0,64: a diferença muda a classe
+         energética. Apanhado no certificado do João Santana. */
+      const _iso=isolamentoDasParedes();
+      const _temIsol=_iso.tem, _matIsol=_iso.mat, _eIsol=_iso.esp;
       const _ui=_temIsol?uParedeComIsolamento(D.espParede,D.anoConstrucao,_eIsol,_matIsol):null;
       const su=_ui?null:textoParedePorDefeito(D.espParede,D.anoConstrucao);
       /* ── DESCRIÇÃO DA BASE 2025 ──
@@ -9344,6 +9517,58 @@ function buildTxt(){
     t+=`\nTOTAL contável (circulação comum/marquises/garagens/etc.): ${totalCompContavel.toFixed(2)}m → ${totalAreaContavel.toFixed(2)}m²\n`;
     if(compAdjacente>0) t+=`TOTAL edifício adjacente (informativo, não contável): ${compAdjacente.toFixed(2)}m → ${areaAdjacente.toFixed(2)}m²\n`;
 
+    /* ── COMPOSIÇÃO E U DE CADA ENVOLVENTE INTERIOR ──
+       A secção dava comprimentos e áreas e ficava-se por aí: nem composição nem
+       U. Depois, na folha, tinha de se decidir de cabeça o que é cada parede.
+       O que manda é o que está do outro lado:
+       · MARQUISE — o que fecha a marquise é a antiga fachada. Mesma parede,
+         mesma espessura, MESMO isolamento. Foi por aqui que se envidraçou uma
+         varanda; a parede não mudou.
+       · EDIFÍCIO ADJACENTE — parede de meação, estrutural. Mesma construção e
+         mesmo isolamento da fachada.
+       · CIRCULAÇÃO COMUM, CAIXA DE ESCADAS, GARAGEM, ARRUMOS — parede de
+         compartimentação para dentro do prédio. Pode ser mais fina e é
+         frequente NÃO ter isolamento. Sai assinalada para confirmar, nunca
+         assumida igual à fachada. */
+    {
+      const COMO_A_FACHADA=['Marquise','Edifício adjacente'];
+      const _iso2=isolamentoDasParedes();
+      const _uExt=_iso2.tem
+        ? uParedeComIsolamento(D.espParede,D.anoConstrucao,_iso2.esp,_iso2.mat)
+        : uParedePorDefeito(D.espParede,D.anoConstrucao);
+      const _uT=v=>(v==null?'—':v.toFixed(2).replace('.',','));
+      const _isolTxt=_iso2.texto;
+      t+='\n'+'─'.repeat(60)+'\n';
+      t+='COMPOSIÇÃO DE CADA ENVOLVENTE INTERIOR\n';
+      t+='─'.repeat(60)+'\n';
+      _envIntKeys.forEach(tp=>{
+        const comoFachada=COMO_A_FACHADA.some(x=>
+          String(tp).toLowerCase().indexOf(x.toLowerCase())===0);
+        t+='\n'+tp+':\n';
+        if(comoFachada){
+          const porque=/marquise/i.test(tp)
+            ? 'É a antiga fachada, agora fechada pela marquise: a parede é a mesma.'
+            : 'Parede de meação, estrutural: mesma construção da fachada.';
+          t+='  '+porque+'\n';
+          t+='  Composição: a mesma da parede exterior — '+
+             (D.espParede?String(D.espParede)+' cm':'espessura por confirmar')+
+             ', '+_isolTxt+'.\n';
+          t+='  U a usar: '+(_uExt?_uT(_uExt.u):'—')+' W/(m².°C)'+
+             (_uExt?'  (igual ao da parede exterior)':' — determinar pela composição real')+'\n';
+          if(_iso2.tem)
+            t+='  ⚠ O isolamento da fachada acompanha esta parede. Não a lances sem ele.\n';
+        } else {
+          t+='  Parede de compartimentação para dentro do prédio — pode ser mais\n'+
+             '  fina do que a fachada e é frequente não levar isolamento.\n';
+          t+='  Composição: A CONFIRMAR no local ou no projeto.\n';
+          t+='  U a usar: a determinar. Não se assume o da fachada'+
+             (_iso2.tem?' — o isolamento exterior pode não continuar por aqui.':'.')+'\n';
+        }
+        t+='  Afetada pelo b_tr do espaço do outro lado (Tabela 22 do Manual SCE).\n';
+      });
+      t+='\n';
+    }
+
     // PTL das envolventes interiores — secção própria, a seguir a esta.
     // Dois Ψ distintos da Tabela 34: 0,70 nas ligações parede/pavimento com ENU,
     // 0,30 nas ligações com caixilharia (e caixa de estores).
@@ -9360,16 +9585,23 @@ function buildTxt(){
     if(_envIntPTLKeys.length||_temPortaEntrada){
       t+=sep('PONTES TÉRMICAS LINEARES INTERIORES (Tabela 34 Manual SCE)');
       t+='Ψ por defeito Tabela 34: 0,70 nas ligações parede/pavimento; 0,30 na caixilharia.\n';
+      t+='Conta-se cada LIGAÇÃO da parede (com o chão, com o teto, com a cobertura), uma vez\n'+
+         'cada. O comprimento da parede aparece como referência e NÃO se soma à parte —\n'+
+         'seria contar a mesma parede duas vezes.\n';
       t+='Contabilizam-se todos os ENU correntes (b_tr > 0,7 em existentes); o edifício adjacente\n'+
          '(b_tr = 0,6) não conta e não aparece aqui. Paredes em contacto com o SOLO também não.\n';
       if(_temPortaEntrada) t+='Ligação com caixilharia — Ψ = 0,30 W/m.ºC\n';
       t+='\n';
-      // A parede que dá para o ENU tem ligações em baixo e em cima, tal como a
-      // fachada: pavimento térreo / sobre ENU / de nível intermédio / cobertura,
-      // conforme a posição do piso. É a mesma regra da Tabela 34 aplicada ao
-      // perímetro interior — antes só se contava a parede e faltavam as lajes.
-      // Nota 1 da Tabela 33/34: no pavimento de nível intermédio o Ψ já é
-      // METADE da perda, por isso cada fração conta a metade que lhe pertence.
+      /* QUE LIGAÇÕES CONTAR NUMA PAREDE INTERIOR.
+         A parede que dá para o ENU tem ligações em baixo e em cima, tal como a
+         fachada: pavimento térreo, sobre ENU, de nível intermédio, ou
+         cobertura — conforme a posição do piso no prédio. É a regra da Tabela
+         34 aplicada ao perímetro interior.
+         Nota 1 da Tabela 33/34: no pavimento de nível intermédio o Ψ já é
+         METADE da perda, por isso cada fração conta a metade que lhe pertence
+         — o chão e o teto, um comprimento cada.
+         O que NÃO se conta é o comprimento da parede outra vez: a ponte
+         térmica é a ligação, não a parede. */
       const _pl=D.pisoLocal||'';
       /* O '4' desta escala antiga queria dizer "piso térreo"; com o pisoLocal a
          guardar a ordem do piso no prédio passou a ser o 3.º andar, e o caso
@@ -9384,22 +9616,38 @@ function buildTxt(){
             : ['pavimento intermédio (chão — metade)',L]);
       const _ligacoesPorPiso=L=>{
         if(_pl==='1') return [['pavimento sobre ENU (cave)',L],['pavimento intermédio (teto — metade)',L]];
-        if(_pl==='2') return [['pavimento intermédio (chão e teto — 2 × metade)',L*2]];
+        /* Duas ligações separadas, não uma de comprimento dobrado: o chão e o
+           teto são pontos diferentes e o quadro de controlo tem de bater com o
+           que está em cima. Cada uma leva a metade que pertence a esta fração
+           (Nota 1 da Tabela 33/34). */
+        if(_pl==='2') return [['pavimento intermédio (chão — metade)',L],
+                              ['pavimento intermédio (teto — metade)',L]];
         if(_pl==='3') return [['cobertura',L],['pavimento intermédio (chão — metade)',L]];
         if(_pl==='4') return [_baixo(L),['pavimento intermédio (teto — metade)',L]];
         // moradia ou sem informação: o de baixo confirma-se, a cobertura é dela
         return [_baixo(L),['cobertura',L]];
       };
       let _ptlPav=0, _ptlCaix=0;
+      /* A MESMA PAREDE ESTAVA A SER CONTADA DUAS VEZES.
+         Escrevia-se uma linha genérica «PTL interior parede/pavimento» com o
+         comprimento da parede E, logo a seguir, as ligações concretas dessa
+         mesma parede (chão, teto, cobertura). Somavam-se as duas: no João, a
+         parede de 8,20 m para a circulação comum dava 8,20 + 16,40 = 24,60 m
+         de ponte térmica linear, o triplo do que existe.
+         A ponte térmica linear é a LIGAÇÃO da parede com outro elemento. Uma
+         parede tem as ligações que tem — em baixo e em cima — e conta-se cada
+         uma delas uma vez. O comprimento da parede não é, ele próprio, uma
+         ponte térmica: é a medida de cada ligação.
+         Passa a haver só as ligações. O comprimento da parede fica como
+         referência, sem entrar na soma. */
       _envIntPTLKeys.forEach(tipo=>{
         const vals=_envIntRaw[tipo];
         const totalComp=vals.reduce((a,b)=>a+b,0);
-        _ptlPav+=totalComp;
-        t+=`  PTL interior parede/pavimento — ${tipo}: (${vals.map(v=>v.toFixed(2)).join('+')}) = ${totalComp.toFixed(2)} m`;
-        t+=`   Ψ 0,70 → ${(totalComp*PSI_PAV_PAREDE).toFixed(2)} W/ºC\n`;
+        t+=`  ${tipo} — parede de (${vals.map(v=>v.toFixed(2)).join('+')}) = ${totalComp.toFixed(2)} m.`;
+        t+=` Cada ligação abaixo mede este comprimento:\n`;
         _ligacoesPorPiso(totalComp).forEach(([nome,comp])=>{
           _ptlPav+=comp;
-          t+=`  PTL interior c/ ${nome} — ${tipo}: ${comp.toFixed(2)} m`;
+          t+=`     · ligação com ${nome}: ${comp.toFixed(2)} m`;
           t+=`   Ψ 0,70 → ${(comp*PSI_PAV_PAREDE).toFixed(2)} W/ºC\n`;
         });
       });
@@ -9416,15 +9664,20 @@ function buildTxt(){
       _envIntPTLKeys.forEach(tipo=>{
         const vals=_envIntRaw[tipo];
         const totalComp=vals.reduce((a,b)=>a+b,0);
-        t+=`  ${tipo}: ${vals.length} troço(s) — ${vals.map(v=>v.toFixed(2)).join(' + ')} = ${totalComp.toFixed(2)} m`;
-        t+=`   (Ψ×L = ${(totalComp*PSI_PAV_PAREDE).toFixed(2)} W/ºC)\n`;
+        const ligs=_ligacoesPorPiso(totalComp);
+        const somaLig=ligs.reduce((a,[,c])=>a+c,0);
+        t+=`  ${tipo}: ${vals.length} troço(s) — ${vals.map(v=>v.toFixed(2)).join(' + ')} = ${totalComp.toFixed(2)} m de parede\n`;
+        t+=`     ${ligs.length} ligação(ões) × ${totalComp.toFixed(2)} m = ${somaLig.toFixed(2)} m`;
+        t+=`   (Ψ×L = ${(somaLig*PSI_PAV_PAREDE).toFixed(2)} W/ºC)\n`;
       });
       if(_temPortaEntrada){
         t+=`  Porta de entrada: 2 ombreiras de ${PORTA_ENTRADA.altura.toFixed(2)} m + padieira de ${PORTA_ENTRADA.largura.toFixed(2)} m`;
         t+=` = ${PERIM_PORTA.toFixed(2)} m   (Ψ×L = ${(PERIM_PORTA*PSI_CAIXILHARIA).toFixed(2)} W/ºC)\n`;
         t+='  → Se a porta da fração tiver outras medidas, corrige aqui (o valor por omissão é 2,00 × 0,80 m).\n';
       }
-      t+='Regra: o comprimento da PTL interior é o mesmo do troço de parede em contacto com o ENU.\n';
+      t+='Regra: cada ligação da parede com o ENU mede o mesmo que o troço de parede.\n'+
+         'O que varia é o NÚMERO de ligações, conforme o piso: num piso intermédio são duas\n'+
+         '(chão e teto); no último piso, cobertura e chão; sobre cave, pavimento sobre ENU e teto.\n';
       t+='\nNÃO CONTABILIZAÇÃO (Manual SCE, regras da Tabela 33): não se contabilizam as PTL de\n'+
          'paredes interiores com b_tr ≤ 0,7, nem as paredes de compartimentação que intersetam a\n'+
          'envolvente, nem paredes em contacto com o solo.\n'+
@@ -10133,13 +10386,20 @@ function buildTxt(){
       if(c>0){compENU+=c;}
     });
   }
+  let _notaENUnoQuadroExt=0;
   Object.entries(_envIntRaw||{}).forEach(([tipo,vals])=>{
     if(tipo==='Edifício adjacente') return; // excluído do cálculo térmico, ver nota na outra secção
     compENU+=(vals||[]).reduce((a,b)=>a+b,0);
   });
+  /* A MESMA PAREDE APARECIA TAMBÉM AQUI, NO QUADRO DAS PTL EXTERIORES.
+     O comprimento das paredes para ENU entrava neste quadro como se fosse uma
+     ligação de fachada, e voltava a entrar — com as suas ligações ao chão e ao
+     teto — na secção das PTL INTERIORES. A mesma parede em dois quadros, ambos
+     somados: no João eram 11,24 m a mais.
+     As paredes para ENU pertencem às PTL interiores, que é onde se contam as
+     ligações que têm. Aqui fica só a remissão, para não se procurar em vão. */
   if(compENU>0){
-    // usar Ψ=0.70 (Tabela 34) para ligação fachada/ENU
-    ptlRows.push({tipo:'Fachada c/ ENU (ligação interior — global + por divisão)',L:compENU,psi:PSI.enu});
+    _notaENUnoQuadroExt=compENU;
   }
 
   // 4. Ângulos salientes — contar a partir das orientações únicas por divisão
@@ -10172,6 +10432,8 @@ function buildTxt(){
   });
   t+=`${'─'.repeat(50)}\n`;
   ptlRows.filter(r=>r._nota).forEach(r=>{ t+='  ⚠ '+r.tipo+': '+r._nota+'\n'; });
+  t+='\nPAREDES PARA ENU: contam-se na secção das PTL INTERIORES, não neste quadro —\n'+
+     'é lá que estão as ligações dessas paredes com o chão, o teto ou a cobertura.\n';
   t+='\nREGRAS DE NÃO CONTABILIZAÇÃO (Tabela 33 do Manual SCE):\n'+
      '  · paredes de compartimentação que intersetam a envolvente exterior ou ENU\n'+
      '  · paredes em contacto com o solo\n'+
@@ -11342,7 +11604,7 @@ async function buildPacoteZipBlob(show){
     (dd.fotos||[]).forEach(f=>{contador++;listaFotos.push({f,nomeFicheiro:`${div.replace(/[^a-zA-Z0-9À-ú]/g,'_')}_${contador}.jpg`});});
   });
 
-  const NOMES_FOTO_CAMPO={vidros:'espessura_vidros',parede:'espessura_parede',peDireito:'pe_direito'};
+  // nome dos ficheiros de foto: ver _nomeFotoCampo, definida uma só vez
   for(const [campo,info] of Object.entries(D.fotosCampos||{})){
     const lista=fotosDoCampo(info);
     /* A lareira é um sistema de climatização como os outros — a foto vai para o
@@ -11352,7 +11614,7 @@ async function buildPacoteZipBlob(show){
        O nome fica "lareira_Sala.jpg" em vez de "lareira-Sala.jpg": no ITeCons
        procura-se por nome e o traço confunde-se com o resto. */
     const ehLareira=/^lareira[-_]/i.test(campo);
-    const base=NOMES_FOTO_CAMPO[campo]||
+    const base=_nomeFotoCampo(campo)||
       (ehLareira?campo.replace(/^lareira[-_]/i,'lareira_'):campo);
     lista.forEach((f,i)=>{
       contador++;
@@ -13816,6 +14078,13 @@ function renderDocsInline(wrap){
     let docs=[];
     try{ docs=await dbGetAllDocsDoProjeto(); }catch(e){ docs=window._docsAnexos||[]; }
     window._docsAnexos=docs;
+    /* O ECRÃ PODE JÁ TER MUDADO.
+       A leitura dos documentos é assíncrona. Quem toca em «Seguinte» antes de
+       ela acabar deixa este código a escrever num ecrã que já foi desmontado —
+       e `thumbs.parentNode` é null, o que rebentava com
+       «Cannot read properties of null (reading 'insertBefore')» e deixava a
+       pergunta a meio. Apanhado a saltar depressa entre perguntas. */
+    if(!thumbs.isConnected||!estado.isConnected) return;
     if(docs.length){
       estado.style.color='var(--ac)';
       estado.textContent=`✅ ${docs.length} documento${docs.length!==1?'s':''} anexado${docs.length!==1?'s':''} a este projeto`;
@@ -13837,6 +14106,7 @@ function renderDocsInline(wrap){
     if(D.numeroFracao) lidos.push(['Fração',D.numeroFracao]);
     let boxLidos=document.getElementById('docs-inline-lidos');
     if(!boxLidos){
+      if(!thumbs.parentNode) return;      // o ecrã mudou entretanto
       boxLidos=document.createElement('div');
       boxLidos.id='docs-inline-lidos';
       thumbs.parentNode.insertBefore(boxLidos,thumbs.nextSibling);
@@ -14283,7 +14553,7 @@ function renderMultiFotoThumb(campo,wrap,minFotos){
     cell.style.cssText='display:flex;flex-direction:column;align-items:center;gap:2px';
     const img=document.createElement('img');
     img.style.cssText='width:52px;height:52px;object-fit:cover;border-radius:6px;border:1px solid var(--br)';
-    resolverFotoURL(info).then(url=>{if(url) img.src=url;});
+    resolverFotoURL(info).then(url=>{if(url) img.src=url;}).catch(()=>{});
     const del=document.createElement('button');del.textContent='✕';del.type='button';
     del.style.cssText='font-size:10px;border:none;background:none;color:var(--red);cursor:pointer;padding:0';
     del.onclick=()=>{
@@ -14829,7 +15099,7 @@ function renderUnidExt(wrap){
       row.style.cssText='display:flex;align-items:center;gap:8px;margin-bottom:6px;background:var(--bg3);border-radius:8px;padding:6px';
       const img=document.createElement('img');
       img.style.cssText='width:56px;height:56px;object-fit:cover;border-radius:6px;background:var(--bg3)';
-      resolverFotoURL(f).then(url=>{if(url)img.src=url;});
+      resolverFotoURL(f).then(url=>{if(url)img.src=url;}).catch(()=>{});
       const meta=document.createElement('div');
       meta.style.cssText='flex:1;font-size:12.5px;color:var(--tx2);line-height:1.4';
       const d=f.dados||{};
@@ -15091,11 +15361,11 @@ async function partilharFotos(){
     const dd=D.divisoesDados[div]||{};
     (dd.fotos||[]).forEach((f,i)=>fotos.push({...f,nome:div.replace(/[^a-zA-Z0-9À-ú]/g,'_')+'_'+(i+1)+'.jpg'}));
   });
-  const NOMES_FOTO_CAMPO={vidros:'espessura_vidros',parede:'espessura_parede',peDireito:'pe_direito'};
+  // nome dos ficheiros de foto: ver _nomeFotoCampo, definida uma só vez
   Object.entries(D.fotosCampos||{}).forEach(([campo,info])=>{
     const lista=fotosDoCampo(info);
     lista.forEach((f,i)=>fotos.push({...f,
-      nome:(NOMES_FOTO_CAMPO[campo]||campo)+(lista.length>1?'_'+(i+1):'')+'.jpg'}));
+      nome:_nomeFotoCampo(campo)+(lista.length>1?'_'+(i+1):'')+'.jpg'}));
   });
   if(D.obsAudioKey) fotos.push({idbKey:D.obsAudioKey,nome:'observacoes_audio.webm'});
   if(!fotos.length){alert('Sem fotos na recolha.\nAs fotos de compartimentos, alçados, etiquetas e unidades exteriores aparecem aqui.');return;}
@@ -15463,13 +15733,25 @@ function tirarFotoAlcadoInline(statusEl,thumbsEl){
 
 // Versão parametrizável de renderFotosAlcadoThumbs — desenha num contentor
 // arbitrário (não depende de #foto-status existir no ecrã actual).
+/* O NOME DO FICHEIRO DE CADA FOTO DE CAMPO.
+   Estava escrito em dois sítios, e ao acrescentar o pé-direito por piso as duas
+   cópias podiam divergir — no ZIP com um nome e na partilha com outro. Fica uma
+   só. O pé-direito é medido piso a piso: a foto leva o piso no nome, senão
+   chegam ao ITeCons duas imagens indistinguíveis. */
+const NOMES_FOTO_CAMPO={vidros:'espessura_vidros',parede:'espessura_parede',
+  peDireito:'pe_direito'};
+function _nomeFotoCampo(c){
+  return NOMES_FOTO_CAMPO[c]||
+    String(c).replace(/^peDireito-/,'pe_direito_').replace(/[^\w\-]+/g,'_');
+}
+
 function renderFotosAlcadoThumbsEm(box){
   box.innerHTML='';
   (D.fotosAlcado||[]).forEach((f,idx)=>{
     const wrap=document.createElement('div');wrap.style.cssText='position:relative';
     const img=document.createElement('img');
     img.style.cssText='width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--br);background:var(--bg3)';
-    resolverFotoURL(f).then(url=>{if(url)img.src=url;});
+    resolverFotoURL(f).then(url=>{if(url)img.src=url;}).catch(()=>{});
     const del=document.createElement('button');del.textContent='✕';
     del.style.cssText='position:absolute;top:-6px;right:-6px;border:none;background:var(--red);color:#fff;border-radius:50%;width:20px;height:20px;font-size:11px;cursor:pointer;line-height:1';
     del.onclick=()=>{if(f.idbKey)fotoDbDelete(f.idbKey).catch(()=>{});D.fotosAlcado.splice(idx,1);renderFotosAlcadoThumbsEm(box);};
@@ -15492,7 +15774,7 @@ function renderFotosAlcadoThumbs(){
     const wrap=document.createElement('div');wrap.style.cssText='position:relative';
     const img=document.createElement('img');
     img.style.cssText='width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--br);background:var(--bg3)';
-    resolverFotoURL(f).then(url=>{if(url)img.src=url;});
+    resolverFotoURL(f).then(url=>{if(url)img.src=url;}).catch(()=>{});
     const del=document.createElement('button');del.textContent='✕';
     del.style.cssText='position:absolute;top:-6px;right:-6px;border:none;background:var(--red);color:#fff;border-radius:50%;width:20px;height:20px;font-size:11px;cursor:pointer;line-height:1';
     del.onclick=()=>{if(f.idbKey)fotoDbDelete(f.idbKey).catch(()=>{});D.fotosAlcado.splice(idx,1);renderFotosAlcadoThumbs();};
