@@ -573,7 +573,7 @@ Ver tudo</button>
   window.addEventListener('online',aviso);
 })();
 "use strict";
-const PLANTA_VERSAO='v1.46.0 (2026-08-30)';
+const PLANTA_VERSAO='v1.47.0 (2026-08-31)';
 /* ══════════════════════════════════════════════════════════════════
    CE Voz · motor de planta interativa
    Fonte de verdade: o levantamento (D). A planta é uma camada de
@@ -1730,6 +1730,23 @@ function auditar(){
     (d.vaos||[]).forEach((v,i)=>{
       if(!L.vaos.some(x=>x.div===nome&&x.i===i))
         add('erro','Vão sem parede',nome+' · '+rotuloVao(nome,i)+' a '+(v.orient||'?'),{t:'div',div:nome});
+    });
+    /* VÃOS ENVIDRAÇADOS INTERIORES.
+       A janela entre a cozinha e a marquise é envolvente interior: entra pelo
+       Uwdn e pelo btr do espaço do outro lado, e não se desenha na fachada.
+       A planta não os conhecia — a parede aparecia cega onde há um vão, e a
+       área dele não era deduzida à parede interior. */
+    Object.entries(d.vaosInt||{}).forEach(([tipo,lista])=>{
+      const areaVI=(lista||[]).reduce((s2,v)=>
+        s2+(parseM(v.larg)||0)*(parseM(v.alt)||0),0);
+      if(!(areaVI>0)) return;
+      const medido=parseM((d.envInt||{})[tipo]);
+      add('aviso','Vão interior para espaço não útil',
+        nome+' — '+(lista||[]).length+' vão(s) para '+tipo+', '+fmt(areaVI)+' m². '+
+        'Não se desenha na fachada: é envolvente interior (Uwdn + btr).'+
+        (medido>0?' A área deduz-se à parede de '+fmt(medido)+' m para '+tipo+'.'
+                 :' ⚠ Sem parede medida para '+tipo+' — o vão fica sem envolvente onde encaixar.'),
+        {t:'div',div:nome});
     });
   });
 
@@ -3447,6 +3464,9 @@ function espExterior(){
 const ESP_MEACAO=null;   // = a da fachada; nomeado para se ver a intenção
 function espDaParede(par){
   if(vaosLivres(par).exterior>.05) return espExterior();
+  /* Uma parede com vão interior para a marquise continua a ser parede de
+     compartimentação: leva a espessura de meação, não a de divisória. Sem
+     isto, uma cozinha fechada por marquise era desenhada com a parede fina. */
   const eo=envObj(par.bloco,par.lado);
   if(eo&&eo.tipo!==DIVISORIA) return espExterior();   // meação
   if(trocosDe(par.bloco,par.lado).length) return espExterior();

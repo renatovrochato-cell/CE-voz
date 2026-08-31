@@ -547,7 +547,7 @@ const DIVS_BASE=[
 // VERSÃO — fonte única (selo no ecrã inicial + cabeçalho do TXT exportado).
 // Subir aqui a cada alteração ao ficheiro.
 // ═══════════════════════════════════════
-const APP_VERSION='v2026.08.29-FIX218';
+const APP_VERSION='v2026.08.31-FIX220';
 
 // ═══════════════════════════════════════
 // ESTADO
@@ -658,9 +658,10 @@ function buildQs(){
       '|quartos',
       '1 quarto','2 quartos','3 quartos','4 quartos','5 quartos',
       '|casas de banho',
-      '1 casa de banho','2 casas de banho','3 casas de banho','wc','2 wc',
+      '1 casa de banho','2 casas de banho','3 casas de banho',
+      '4 casas de banho','5 casas de banho','6 casas de banho','wc','2 wc',
       '|circulação',
-      '1 circulação','2 circulações','3 circulações',
+      '1 circulação','2 circulações','3 circulações','4 circulações',
       '|áreas habitáveis',
       'sala','sala de estar','sala de jantar','cozinha','kitchenette','hall','escritório',
       '|serviços e anexos',
@@ -670,8 +671,9 @@ function buildQs(){
     ],
     isDivisoesComplexo:true,
     grpQuartos:['1 quarto','2 quartos','3 quartos','4 quartos','5 quartos'],
-    grpBanhos:['1 casa de banho','2 casas de banho','3 casas de banho','wc','2 wc'],
-    grpCirc:['1 circulação','2 circulações','3 circulações'],
+    grpBanhos:['1 casa de banho','2 casas de banho','3 casas de banho',
+      '4 casas de banho','5 casas de banho','6 casas de banho','wc','2 wc'],
+    grpCirc:['1 circulação','2 circulações','3 circulações','4 circulações'],
     grpAreas:['sala','sala de estar','sala de jantar','cozinha','kitchenette','hall','escritório','lavandaria','despensa','arrumos','garagem','arrecadação'],
     key:'divisoes'});
 
@@ -1111,8 +1113,9 @@ function parseDivs(raw){
   const parts=raw.split('|||').map(s=>s.trim()).filter(Boolean);
   const cap=s=>s?s.charAt(0).toUpperCase()+s.slice(1):s;
   const grpQ=['1 quarto','2 quartos','3 quartos','4 quartos','5 quartos'];
-  const grpB=['1 casa de banho','2 casas de banho','3 casas de banho','wc','2 wc'];
-  const grpC=['1 circulação','2 circulações','3 circulações'];
+  const grpB=['1 casa de banho','2 casas de banho','3 casas de banho',
+    '4 casas de banho','5 casas de banho','6 casas de banho','wc','2 wc'];
+  const grpC=['1 circulação','2 circulações','3 circulações','4 circulações'];
   const NOME_CANON={
     'sala':'Sala','sala de estar':'Sala de estar','sala de jantar':'Sala de jantar',
     'cozinha':'Cozinha','kitchenette':'Kitchenette','hall':'Hall',
@@ -1120,25 +1123,49 @@ function parseDivs(raw){
     'lavandaria':'Lavandaria','despensa':'Despensa','arrumos':'Arrumos',
     'garagem':'Garagem','arrecadação':'Arrecadação','arrecadacao':'Arrecadação',
   };
+  /* CONTAGENS POR EXPRESSÃO, NÃO POR LISTA FECHADA.
+     As listas paravam em "3 casas de banho". Numa casa com 4 não havia
+     hipótese: a frase inteira caía no fallback lá em baixo e entrava como
+     NOME de compartimento — foi assim que apareceu uma divisão chamada
+     "3 quartos, 4 casas de banho, 2 circulações, sala de estar, cozinha".
+     Agora reconhece-se qualquer número. */
+  const NUM_EXTENSO={um:1,uma:1,dois:2,duas:2,tres:3,'três':3,quatro:4,cinco:5,
+    seis:6,sete:7,oito:8,nove:9,dez:10};
+  const semAcento=t=>String(t||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+  function contagem(pl,padrao){
+    const t=semAcento(pl).trim();
+    const m=t.match(new RegExp('^(\\d+|[a-z]+)\\s+'+padrao+'$','i'));
+    if(!m) return null;
+    const bruto=m[1].toLowerCase();
+    const n=/^\d+$/.test(bruto)?parseInt(bruto):NUM_EXTENSO[bruto];
+    if(!n||n<1||n>20) return null;
+    return n;
+  }
   const out=[];
   for(const p of parts){
     const pl=p.toLowerCase();
-    if(grpQ.includes(pl)){
-      const n=parseInt(pl)||1;
-      for(let i=1;i<=n;i++) out.push(`Quarto ${i}`);
-      continue;
-    }
-    if(grpB.includes(pl)){
-      const n=parseInt(pl)||1;
-      if(n===1||pl==='wc') out.push('WC');
-      else for(let i=1;i<=n;i++) out.push(`WC ${i}`);
-      continue;
-    }
-    if(grpC.includes(pl)){
-      const n=parseInt(pl)||1;
-      for(let i=1;i<=n;i++) out.push(`Circulação ${i}`);
-      continue;
-    }
+    /* UMA CONTAGEM REPETIDA NÃO DUPLICA A SÉRIE.
+       Ao voltar atrás e corrigir, a frase podia trazer duas contagens da mesma
+       família ("3 quartos … 3 quartos, 4 casas de banho"). A série era gerada
+       duas vezes e ficavam Quarto 1..3 seguidos de Quarto 1..3 outra vez.
+       Vale a maior contagem: quem corrige de 2 para 4 quer 4, não 2+4. */
+    const serie=(prefixo,n,unico)=>{
+      if(n===1&&unico){ if(!out.includes(unico)) out.push(unico); return; }
+      // se antes tinha entrado o nome sem número, dá lugar à série numerada
+      if(unico){ const iu=out.indexOf(unico); if(iu>=0) out.splice(iu,1); }
+      for(let i=1;i<=n;i++){
+        const nome=prefixo+' '+i;
+        if(!out.includes(nome)) out.push(nome);
+      }
+    };
+    const nQ=grpQ.includes(pl)?(parseInt(pl)||1):contagem(pl,'quartos?');
+    if(nQ){ serie('Quarto',nQ,null); continue; }
+    const nB=grpB.includes(pl)?(pl==='wc'?1:(parseInt(pl)||1))
+      :(contagem(pl,'(?:casas? de banho|wc|wcs|is|instalacoes? sanitarias?)'));
+    if(nB){ serie('WC',nB,'WC'); continue; }
+    const nC=grpC.includes(pl)?(parseInt(pl)||1)
+      :contagem(pl,'(?:circulacoes|circulacao|corredores|corredor|halls?)');
+    if(nC){ serie('Circulação',nC,null); continue; }
     // compartimento custom ("outro compartimento: NOME")
     if(/^outro compartimento:/i.test(p)||/^outro:/i.test(p)||/^\[outro\]/i.test(p)){
       const nome=p.replace(/^outro compartimento:\s*/i,'').replace(/^outro:\s*/i,'').replace(/^\[outro\]\s*/i,'').trim();
@@ -1153,8 +1180,23 @@ function parseDivs(raw){
       continue; // não entra no levantamento
     }
     if(NOME_CANON[pl]){out.push(NOME_CANON[pl]);continue;}
-    // fallback: qualquer texto restante (nomes custom guardados pelo "Outro") entra na ordem
-    if(p&&!out.includes(cap(p))) out.push(cap(p));
+    /* UMA FRASE INTEIRA NÃO É UM COMPARTIMENTO.
+       O fallback aceitava qualquer texto como nome. Uma enumeração que não
+       tivesse sido reconhecida — porque a app foi editada à mão, ou porque um
+       número não estava na lista — passava a ser uma "divisão" com sala,
+       cozinha, quartos e casas de banho lá dentro. Essa divisão fantasma
+       aparecia depois nas tabelas de áreas, nas portas e no texto da descrição
+       sucinta. E como o nome tinha VÍRGULAS, partia a ordem de percurso, que é
+       guardada como texto separado por vírgulas.
+       Regra: se o pedaço tem vírgulas ou parece uma enumeração, volta a
+       partir-se e cada parte é interpretada outra vez. Nunca entra inteiro. */
+    if(/[,;]/.test(p)||/\b(e|com)\b.*\b(quartos?|casas? de banho|circula)/i.test(semAcento(pl))){
+      const sub=p.split(/[,;]|\s+e\s+/).map(x=>x.trim()).filter(Boolean);
+      if(sub.length>1){ parts.push(...sub); continue; }
+    }
+    // um nome com vírgulas nunca pode ser gravado: parte a ordem de percurso
+    const limpo=cap(p.replace(/[,;]/g,' ').replace(/\s+/g,' ').trim());
+    if(limpo&&!out.includes(limpo)) out.push(limpo);
   }
   // A ORDEM É DO UTILIZADOR, PONTO.
   // Havia aqui uma regra que puxava sempre a Sala para primeiro. Resultado: quem
@@ -1209,6 +1251,8 @@ function show(id){
   document.getElementById(id).classList.add('active');
   // ao entrar no ecrã de exportar, lembrar se o processo está há muito no telemóvel
   if(id==='scr-exp'){ try{ mostrarAvisoCopia(); }catch(e){} }
+  // o botão da foto de alçado só faz sentido durante o levantamento
+  try{ mostrarFabAlcado(id==='scr-int'); }catch(e){}
 }
 
 async function iniciar(_restoreCurQ, _restoreAnswers){
@@ -1231,9 +1275,14 @@ async function iniciar(_restoreCurQ, _restoreAnswers){
   // fluxo (pergunta 'docs-inicio', já com o projecto nomeado), o problema deixa
   // de existir na origem; para documentos órfãos antigos há a recuperação
   // explícita no painel de documentos, decidida pelo utilizador.
+  /* IDENTIFICADOR DE SESSÃO — ver _gravarSeguro.
+     Marca todas as gravações desta utilização da app, para se distinguir
+     "a mesma pessoa a continuar" de "a app recarregou e voltou ao início". */
+  if(!D._sessao) D._sessao=Date.now().toString(36)+Math.random().toString(36).slice(2,8);
+  if(!isRestore) D._sessao=Date.now().toString(36)+Math.random().toString(36).slice(2,8);
   if(!isRestore){
     // reset completo só em início novo
-    Object.assign(D,{tipologia:'',pisos:1,peDireitos:{},coberturaInclinada:'',peDireitoMax:'',peDireitoMin:'',divisoes:[],climaSistemas:[],aqsTipo:'',aqsMarcas:[],aqsMarca:'',aqsModelo:'',aqsRendimento:'',aqsPotencia:'',aqsCapacidade:'',aqsIdadeEquip:'',aqsFatorIdade:null,aqsAnoFabrico:'',aqsManutencao:'',solar:'',solDet:'',solN:'',solArea:'',solMarca:'',edificioTipo:'',pisoLocal:'',levParedes:'sim',ventTipo:'',ventCondutasIS:'',ventCondutasISAbrang:'',ventCondutasISDetalhe:'',ventCondutasISWCs:[],ventTaxaRenovacao:'',obs:'',obsAudioKey:null,climaDivisoes:{},enuYN:'',enuMedida:'',enuTipos:{},enuVaosYN:'',enuVaosLoc:[],enuVaosDim:'',enuVaosDimLarg:'',enuVaosDimAlt:'',espParede:'',espVidros:'',caixaArGlobal:6,fotoEtiquetas:[],unidadesExtFotos:[],unidExtAcessiveis:'',fotosAlcado:[],gpsCoords:null,ordemDivisoes:'',ordemDivisoesTemp:null,localidade:'',freguesia:'',concelho:'',zonaClimatica:'I1-V3',zonaClimaticaAuto:true,anoConstrucao:'',inerciaTermica:'Forte',nPisosEdificio:'',pisosDeDocumento:false,divisoesDados:{},numeroMatriz:'',numeroFracao:'',moradaCaderneta:'',certidaoPermanenteNumero:'',concelhoCaderneta:'',anoInscricaoMatriz:'',fotosCampos:{},numeroDescricaoPredial:'',areasPlanta:[],areaUtilPlantaTotal:null,_hist:[]});
+    Object.assign(D,{tipologia:'',pisos:1,peDireitos:{},coberturaInclinada:'',peDireitoMax:'',peDireitoMin:'',divisoes:[],climaSistemas:[],aqsTipo:'',aqsMarcas:[],aqsMarca:'',aqsModelo:'',aqsRendimento:'',aqsPotencia:'',aqsCapacidade:'',aqsIdadeEquip:'',aqsFatorIdade:null,aqsAnoFabrico:'',aqsManutencao:'',solar:'',solDet:'',solN:'',solArea:'',solMarca:'',edificioTipo:'',pisoLocal:'',levParedes:'sim',ventTipo:'',ventCondutasIS:'',ventCondutasISAbrang:'',ventCondutasISDetalhe:'',ventCondutasISWCs:[],ventTaxaRenovacao:'',obs:'',obsAudioKey:null,climaDivisoes:{},enuYN:'',enuMedida:'',enuTipos:{},enuVaosYN:'',enuVaosLoc:[],enuVaosDim:'',enuVaosDimLarg:'',enuVaosDimAlt:'',espParede:'',espVidros:'',caixaArGlobal:6,fotoEtiquetas:[],unidadesExtFotos:[],unidExtAcessiveis:'',fotosAlcado:[],gpsCoords:null,ordemDivisoes:'',ordemDivisoesTemp:null,localidade:'',freguesia:'',concelho:'',zonaClimatica:'I1-V3',zonaClimaticaAuto:true,anoConstrucao:'',inerciaTermica:'Forte',nPisosEdificio:'',pisosDeDocumento:false,divisoesDados:{},numeroMatriz:'',numeroFracao:'',moradaCaderneta:'',certidaoPermanenteNumero:'',concelhoCaderneta:'',anoInscricaoMatriz:'',fotosCampos:{},numeroDescricaoPredial:'',areasPlanta:[],areaUtilPlantaTotal:null,_hist:[],_sessao:D._sessao});
     // aplicar perfil de edifício se seleccionado
     if(window._perfilPendente){aplicarPerfil(window._perfilPendente);window._perfilPendente=null;}
     // já não é preciso limpar a IndexedDB aqui: os documentos ficam sempre associados
@@ -3601,6 +3650,172 @@ function renderVaosInline(div,n){
   notaTA.oninput=()=>{D.divisoesDados[div].nota=notaTA.value;};
   notaWrap.appendChild(notaL);notaWrap.appendChild(notaTA);
   wrap.appendChild(notaWrap);
+
+  // vãos interiores para espaço não útil (marquise, garagem, circulação comum…)
+  renderVaosInterioresInline(div,wrap);
+}
+
+/* ══════════ VÃOS ENVIDRAÇADOS INTERIORES ══════════
+   Uma cozinha fechada por uma marquise tem, quase sempre, uma janela ou uma
+   porta envidraçada entre as duas. Esse vão é envolvente interior: não tem
+   orientação nem ganhos solares — o que interessa é o Uwdn e o btr do espaço
+   não útil do outro lado. Estava a ficar de fora do levantamento e tinha de ser
+   acrescentado à mão no ITeCons.
+   A pergunta só aparece nas divisões onde já foi declarada uma parede em
+   contacto com um espaço não útil, logo a seguir aos vãos exteriores. */
+const ENVINT_COM_VAO=['Marquise','Circulação comum','Caixa de escadas','Garagem',
+  'Arrumos comuns','Edifício adjacente'];
+function renderVaosInterioresInline(div,wrap){
+  const dd=D.divisoesDados[div]; if(!dd) return;
+  const tipos=Object.keys(dd.envInt||{}).filter(t=>ENVINT_COM_VAO.includes(t));
+  if(!tipos.length) return;                  // sem parede para ENU, sem pergunta
+  if(!dd.vaosInt) dd.vaosInt={};
+  if(!dd.vaosIntYN) dd.vaosIntYN={};
+
+  const sec=document.createElement('div');
+  sec.style.cssText='margin-top:14px;padding-top:10px;border-top:1px dashed var(--br)';
+  const hdr=document.createElement('div');
+  hdr.style.cssText='font-size:12px;color:var(--tx2);font-weight:600;margin-bottom:8px';
+  hdr.textContent='🪟 Vãos envidraçados INTERIORES (para espaço não útil)';
+  sec.appendChild(hdr);
+
+  tipos.forEach(tipo=>{
+    const bloco=document.createElement('div');
+    bloco.style.cssText='margin-bottom:10px';
+    const perg=document.createElement('div');
+    perg.style.cssText='font-size:13px;color:var(--tx);margin-bottom:5px';
+    perg.textContent='Há vão envidraçado entre a '+div.toLowerCase()+' e '+
+      (/^(marquise|garagem)$/i.test(tipo)?'a ':'a ')+tipo.toLowerCase()+'?';
+    bloco.appendChild(perg);
+
+    const simNao=document.createElement('div');
+    simNao.style.cssText='display:flex;gap:6px;margin-bottom:6px';
+    ['Sim','Não'].forEach(op=>{
+      const c=document.createElement('div');
+      c.className='chip'+(dd.vaosIntYN[tipo]===op?' on':'');
+      c.style.fontSize='12px'; c.textContent=op;
+      c.onclick=()=>{
+        dd.vaosIntYN[tipo]=op;
+        if(op==='Não') delete dd.vaosInt[tipo];
+        else if(!dd.vaosInt[tipo]||!dd.vaosInt[tipo].length) dd.vaosInt[tipo]=[novoVaoInterior(1)];
+        renderVaosInline(div,(dd.vaos||[]).length);
+      };
+      simNao.appendChild(c);
+    });
+    bloco.appendChild(simNao);
+
+    if(dd.vaosIntYN[tipo]==='Sim'){
+      (dd.vaosInt[tipo]||[]).forEach((vi,idx)=>
+        bloco.appendChild(cartaoVaoInterior(div,tipo,vi,idx)));
+      const add=document.createElement('button');
+      add.textContent='+ Outro vão para '+tipo.toLowerCase();
+      add.style.cssText='border:1px dashed var(--ac);background:transparent;color:var(--ac);'+
+        'border-radius:8px;padding:8px 12px;font-size:12.5px;cursor:pointer;width:100%';
+      add.onclick=()=>{
+        dd.vaosInt[tipo].push(novoVaoInterior(dd.vaosInt[tipo].length+1));
+        renderVaosInline(div,(dd.vaos||[]).length);
+      };
+      bloco.appendChild(add);
+    }
+    sec.appendChild(bloco);
+  });
+  wrap.appendChild(sec);
+}
+
+function novoVaoInterior(n){
+  const pv=D.perfilVaoTipo||{};
+  return {id:'VI'+n,larg:'',alt:'',tipo:pv.tipo||'',caixMat:pv.caixMat||'Alumínio',
+    abertura:pv.abertura||'',corteTerm:!!pv.corteTerm,caixAr:D.caixaArGlobal||6,prot:''};
+}
+
+function cartaoVaoInterior(div,tipo,vi,idx){
+  const dd=D.divisoesDados[div];
+  const card=document.createElement('div');
+  card.className='ve-card';
+  const linha=(txt,el)=>{
+    const r=document.createElement('div');
+    r.style.cssText='display:flex;flex-direction:column;gap:3px;margin-bottom:6px';
+    const l=document.createElement('div');
+    l.style.cssText='font-size:11px;color:var(--tx2)'; l.textContent=txt;
+    r.appendChild(l); r.appendChild(el); return r;
+  };
+  const cabec=document.createElement('div');
+  cabec.style.cssText='display:flex;justify-content:space-between;align-items:center;margin-bottom:4px';
+  const tit=document.createElement('div');
+  tit.className='ve-card-title'; tit.textContent=vi.id+' → '+tipo;
+  const rem=document.createElement('button');
+  rem.textContent='✕'; rem.title='Apagar este vão interior';
+  rem.style.cssText='border:none;background:transparent;color:var(--tx3);font-size:16px;cursor:pointer';
+  rem.onclick=()=>{
+    dd.vaosInt[tipo].splice(idx,1);
+    if(!dd.vaosInt[tipo].length) dd.vaosIntYN[tipo]='Não';
+    renderVaosInline(div,(dd.vaos||[]).length);
+  };
+  cabec.appendChild(tit); cabec.appendChild(rem); card.appendChild(cabec);
+
+  // dimensões — os mesmos campos do vão exterior, com o laser a funcionar
+  const dims=document.createElement('div');
+  dims.style.cssText='display:flex;gap:8px';
+  [['larg','Largura (m)'],['alt','Altura (m)']].forEach(([campo,rot])=>{
+    const inp=document.createElement('input');
+    inp.type='number'; inp.step='0.01'; inp.inputMode='decimal';
+    inp.placeholder='0.00'; inp.value=vi[campo]||'';
+    inp.style.cssText='width:100%;border-radius:8px;border:1px solid var(--br);'+
+      'background:var(--bg3);color:var(--tx);font-size:14px;padding:8px 10px;box-sizing:border-box';
+    inp.oninput=()=>{vi[campo]=inp.value;atualizar();};
+    inp.onfocus=()=>{if(laserAtivo){campoLaserActivo=inp;inp.style.outline='2px solid var(--ac)';}};
+    inp.onblur=()=>{inp.style.outline='';};
+    const cel=linha(rot,inp); cel.style.flex='1'; dims.appendChild(cel);
+  });
+  card.appendChild(dims);
+
+  const chips=(rot,ops,campo)=>{
+    const box=document.createElement('div');
+    box.style.cssText='display:flex;flex-wrap:wrap;gap:5px';
+    ops.forEach(o=>{
+      const c=document.createElement('div');
+      c.className='chip'+(vi[campo]===o?' on':'');
+      c.style.fontSize='12px'; c.textContent=o;
+      c.onclick=()=>{vi[campo]=(vi[campo]===o?'':o);renderVaosInline(div,(dd.vaos||[]).length);};
+      box.appendChild(c);
+    });
+    card.appendChild(linha(rot,box));
+  };
+  chips('Vidro',['Simples','Duplo'],'tipo');
+  chips('Caixilharia',['Alumínio','PVC','Madeira'],'caixMat');
+  chips('Abertura',['De abrir','De correr'],'abertura');
+
+  const ct=document.createElement('div');
+  ct.style.cssText='display:flex;gap:6px;align-items:center;margin-bottom:6px';
+  const ctc=document.createElement('div');
+  ctc.className='chip'+(vi.corteTerm?' on':''); ctc.style.fontSize='12px';
+  ctc.textContent='Corte térmico';
+  ctc.onclick=()=>{vi.corteTerm=!vi.corteTerm;renderVaosInline(div,(dd.vaos||[]).length);};
+  ct.appendChild(ctc); card.appendChild(ct);
+
+  /* Uwdn de um vão INTERIOR: sem proteção exterior — uma janela para a
+     marquise não leva persiana — o Uwdn é o próprio Uw. É esse o valor que
+     entra no ITeCons, afetado depois pelo btr do espaço não útil. */
+  const calc=document.createElement('div');
+  calc.style.cssText='font-size:11px;color:var(--ac);background:var(--bg3);border-radius:8px;'+
+    'padding:6px 9px;font-family:monospace';
+  function atualizar(){
+    const a=(parseFloat(vi.larg)||0)*(parseFloat(vi.alt)||0);
+    vi.area=a>0?a.toFixed(2):'';
+    try{
+      const r=calcUw({...vi,prot:vi.prot||'Sem proteção exterior',
+        caixAr:vi.caixAr||D.caixaArGlobal||6});
+      vi.uw=r.uw;
+      vi.uwdn=(r.uwdn!==null&&r.uwdn!==undefined)?r.uwdn:r.uw;
+      calc.textContent='Área '+(a>0?a.toFixed(2):'—')+' m² · Uw '+fmtUw(r.uw)+
+        ' → Uwdn '+fmtUw(vi.uwdn)+' W/(m².°C) — vão interior, sem ganhos solares';
+    }catch(e){ calc.textContent='Área '+(a>0?a.toFixed(2):'—')+' m²'; }
+  }
+  atualizar();
+  card.appendChild(calc);
+  card.addEventListener('click',()=>setTimeout(atualizar,0));
+  card.addEventListener('input',()=>setTimeout(atualizar,0));
+  return card;
 }
 
 function saveVaosToD(div){
@@ -3671,14 +3886,21 @@ function divisoesComOrdemEscolhida(){
      pergunta, nem a gravada. Olhar só a D.ordemDivisoes deixava de fora quem
      tinha respondido à pergunta e ainda não a tinha gravado, e a ordem escolhida
      era reordenada. A escolha do utilizador manda sempre. */
-  const _semOrdem=!String(D.ordemDivisoes||'').trim()&&
-                  !String(getAns('ordem-divisoes')||'').trim();
+  const _ordemGravada=Array.isArray(D.ordemDivisoes)
+    ? (D.ordemDivisoes.length?D.ordemDivisoes:null)
+    : (String(D.ordemDivisoes||'').trim()||null);
+  const _semOrdem=!_ordemGravada&&!String(getAns('ordem-divisoes')||'').trim();
   if(_semOrdem&&D.edificioTipo==='Apartamento'){
     return ordemSugerida(base);
   }
-  const ordemResp=getAns('ordem-divisoes')||D.ordemDivisoes||'';
-  if(!ordemResp) return base;
-  const ordem=ordemResp.split(',').map(s=>s.trim()).filter(Boolean);
+  const ordemResp=getAns('ordem-divisoes')||_ordemGravada||'';
+  if(!ordemResp||(Array.isArray(ordemResp)&&!ordemResp.length)) return base;
+  /* Separadores: '|||' é o da resposta; a vírgula fica para os levantamentos
+     antigos. Uma lista chega intacta e não precisa de ser partida — era aí que
+     um nome com vírgulas desfazia a ordem toda. */
+  const ordem=Array.isArray(ordemResp)?ordemResp.slice()
+    :String(ordemResp).split(ordemResp.indexOf('|||')>=0?'|||':',')
+       .map(s=>s.trim()).filter(Boolean);
   if(!ordem.length) return base;
   // reordenar 'base' pela ordem escolhida, emparelhando por chave normalizada e
   // mantendo o nome tal como está em 'base'
@@ -4467,9 +4689,20 @@ function setAns(val, autoAdvance=false){
     setTimeout(()=>next(),250);
   }
 }
+/* EDITAR A CAIXA DE RESPOSTA NÃO PODE DESTRUIR A ESTRUTURA.
+   As respostas de várias escolhas são guardadas com '|||' entre os itens, mas a
+   caixa mostra-as juntas por ", " — e ao editar gravava-se o texto em bruto,
+   sem um único '|||'. A lista passava a ter UM item: a frase toda. Foi assim
+   que "3 quartos, 4 casas de banho, …" virou o nome de uma divisão.
+   Agora, nas perguntas de várias escolhas, o que está separado por vírgulas
+   volta a ser separado por '|||' — que é como a caixa o mostrou. */
 function onAnsEdit(el){
   const v=el.value.trim();
-  answers[curQ]=v||'';
+  const q=qList[curQ];
+  const multiplo=q&&(q.isDivisoesComplexo||q.isMarcaLocal||q.isGrouped||q.multi);
+  answers[curQ]=(v&&multiplo&&v.indexOf('|||')<0)
+    ? v.split(',').map(x=>x.trim()).filter(Boolean).join('|||')
+    : (v||'');
   el.className=v?'ans-box done':'ans-box ans-ph';
   document.getElementById('btn-next').disabled=false;
 }
@@ -4554,8 +4787,13 @@ function saveToD(key,raw){
     // já escolhida: aplica-se a ordem aos que continuam a existir e os novos
     // entram no fim.
     const nova=parseDivs(raw||'');
-    if(D.ordemDivisoes){
-      const ordem=String(D.ordemDivisoes).split(',').map(x=>x.trim()).filter(Boolean);
+    if(D.ordemDivisoes&&(Array.isArray(D.ordemDivisoes)?D.ordemDivisoes.length:String(D.ordemDivisoes).trim())){
+      /* A ordem era guardada como texto com vírgulas e voltava a ser partida
+         por vírgulas. Bastava um nome de divisão com uma vírgula lá dentro
+         para a ordem se desfazer em pedaços. Guarda-se em lista; o texto
+         antigo continua a ser lido, para não partir levantamentos já feitos. */
+      const ordem=Array.isArray(D.ordemDivisoes)?D.ordemDivisoes.slice()
+        :String(D.ordemDivisoes).split(',').map(x=>x.trim()).filter(Boolean);
       const porChave=new Map();
       nova.forEach(d=>{const k=_chaveOrdemDiv(d); if(!porChave.has(k)) porChave.set(k,d);});
       const usadas=new Set(), emOrdem=[];
@@ -4563,7 +4801,7 @@ function saveToD(key,raw){
         if(porChave.has(k)&&!usadas.has(k)){emOrdem.push(porChave.get(k));usadas.add(k);}});
       const novos=nova.filter(d=>!usadas.has(_chaveOrdemDiv(d)));
       D.divisoes=[...emOrdem,...novos];
-      D.ordemDivisoes=D.divisoes.join(', ');
+      D.ordemDivisoes=D.divisoes.slice();
     } else {
       D.divisoes=nova;
     }
@@ -5323,6 +5561,16 @@ function initSpeech(){
       if(q&&q.chips){
         const matched=q.chips.filter(c=>!c.startsWith('|')&&fc.toLowerCase().includes(c.toLowerCase()));
         if(matched.length){
+          /* DITAR DE NOVO SUBSTITUI, NÃO ACRESCENTA.
+             Ao voltar atrás para corrigir as divisões, o que já lá estava
+             ficava e o novo ditado era acrescentado ao fim: "3 quartos,
+             2 casas de banho" + "3 quartos, 4 casas de banho" davam uma lista
+             com tudo duplicado. Se o que se dita é uma enumeração completa
+             (mais de um item reconhecido), é uma correcção da resposta toda. */
+          if(q.isDivisoesComplexo&&matched.length>1&&(answers[curQ]||'').trim()){
+            answers[curQ]='';
+            document.querySelectorAll('#chips .chip').forEach(el=>el.classList.remove('on'));
+          }
           matched.forEach(m=>{
             const parts=(answers[curQ]||'').split('|||').map(s=>s.trim()).filter(Boolean);
             if(!parts.map(p=>p.toLowerCase()).includes(m.toLowerCase())) parts.push(m);
@@ -5381,6 +5629,200 @@ function resetMicUI(){
 // ═══════════════════════════════════════
 // RESUMO
 // ═══════════════════════════════════════
+/* ══════════ RECLASSIFICAR ENVOLVENTES NA REVISÃO ══════════
+   O que se decide em obra nem sempre está certo. Uma parede medida como
+   fachada a Sudeste pode dar, afinal, para a marquise; um vão dado como
+   exterior pode ser a janela entre a cozinha e essa marquise. Isto muda o
+   cálculo por inteiro — a parede passa a interior com btr, o vão perde os
+   ganhos solares — e até agora só se resolvia refazendo o levantamento.
+   Aqui muda-se com um toque, e o comprimento (ou o vão) MUDA de sítio: não
+   fica nos dois. */
+const ENU_REVISAO=['Circulação comum','Caixa de escadas','Marquise','Garagem',
+  'Arrumos comuns','Edifício adjacente'];
+const ORIENTS_REVISAO=['Norte','NE','Este','SE','Sul','SO','Oeste','NO'];
+
+const _numRev=v=>{const x=parseFloat(String(v==null?'':v).replace(',','.').replace(/[^\d.]/g,''));
+  return isFinite(x)?x:0;};
+function _somaTrocos(arr){return (arr||[]).reduce((a,b)=>a+_numRev(b),0);}
+
+/* Escreve o total no campo-resumo com o formato que o resto da app já lê:
+   comprimentos['NE'] = '3.06 m' e envInt['Marquise'] = '3.04m'. */
+function _fixarTotalParede(dd,pd){
+  if(pd.lado==='ext'){
+    const t=_somaTrocos(dd.trocos&&dd.trocos[pd.chave]);
+    if(t>0) dd.comprimentos[pd.chave]=t.toFixed(2)+' m';
+    else { delete dd.comprimentos[pd.chave]; if(dd.trocos) delete dd.trocos[pd.chave]; }
+  } else {
+    const t=_somaTrocos(dd.envIntTrocos&&dd.envIntTrocos[pd.chave]);
+    if(t>0) dd.envInt[pd.chave]=t.toFixed(2)+'m';
+    else { delete dd.envInt[pd.chave]; if(dd.envIntTrocos) delete dd.envIntTrocos[pd.chave]; }
+  }
+}
+
+function reclassificarParede(div,de,para){
+  const dd=D.divisoesDados[div]; if(!dd) return;
+  if(de.lado===para.lado&&de.chave===para.chave) return;
+  dd.trocos=dd.trocos||{}; dd.envIntTrocos=dd.envIntTrocos||{};
+  dd.comprimentos=dd.comprimentos||{}; dd.envInt=dd.envInt||{};
+  // troços de origem — se não houver lista, usa-se o total já registado
+  let lista=(de.lado==='ext'?dd.trocos[de.chave]:dd.envIntTrocos[de.chave])||[];
+  lista=lista.filter(v=>_numRev(v)>0);
+  if(!lista.length){
+    const total=de.lado==='ext'?dd.comprimentos[de.chave]:dd.envInt[de.chave];
+    if(_numRev(total)>0) lista=[_numRev(total).toFixed(2)];
+  }
+  if(!lista.length) return;
+  // apaga na origem
+  if(de.lado==='ext'){ delete dd.trocos[de.chave]; delete dd.comprimentos[de.chave]; }
+  else { delete dd.envIntTrocos[de.chave]; delete dd.envInt[de.chave]; }
+  // acrescenta no destino, sem esmagar o que já lá estivesse
+  const alvo=para.lado==='ext'
+    ? (dd.trocos[para.chave]=dd.trocos[para.chave]||[])
+    : (dd.envIntTrocos[para.chave]=dd.envIntTrocos[para.chave]||[]);
+  lista.forEach(v=>alvo.push(v));
+  _fixarTotalParede(dd,para);
+  autoSave();
+}
+
+function reclassificarVao(div,de,para){
+  const dd=D.divisoesDados[div]; if(!dd) return;
+  dd.vaos=dd.vaos||[]; dd.vaosInt=dd.vaosInt||{}; dd.vaosIntYN=dd.vaosIntYN||{};
+  let v;
+  if(de.lado==='ext'){ v=dd.vaos[de.idx]; if(!v) return; dd.vaos.splice(de.idx,1); }
+  else {
+    const l=dd.vaosInt[de.tipo]||[]; v=l[de.idx]; if(!v) return; l.splice(de.idx,1);
+    if(!l.length){ delete dd.vaosInt[de.tipo]; dd.vaosIntYN[de.tipo]='Não'; }
+  }
+  if(para.lado==='ext'){
+    v.orient=para.chave;
+    /* Um vão que volta a ser exterior precisa outra vez de sombreamento — sem
+       isto ficava com Fh em branco e o cálculo solar saía errado. */
+    v.sombAquec=v.sombAquec||'Sombreamento normal/standard';
+    v.sombArref=v.sombArref||'Sombreamento normal/standard';
+    dd.vaos.push(v);
+  } else {
+    /* Um vão interior não tem orientação, nem sombreamento, nem proteção
+       exterior — a persiana da fachada não existe entre a cozinha e a
+       marquise. Limpa-se, senão sobravam valores que falseavam o Uwdn. */
+    delete v.orient; delete v.sombAquec; delete v.sombArref;
+    delete v.portadaPermeab; delete v.protInt; delete v.caixCor;
+    v.prot=''; v.caixEstore=false;
+    dd.vaosInt[para.tipo]=dd.vaosInt[para.tipo]||[];
+    dd.vaosInt[para.tipo].push(v);
+    dd.vaosIntYN[para.tipo]='Sim';
+    /* Sem parede declarada para esse espaço o vão ficaria órfão — e a pergunta
+       dos vãos interiores nem sequer apareceria no levantamento. */
+    dd.envInt=dd.envInt||{};
+    if(dd.envInt[para.tipo]===undefined){
+      dd.envInt[para.tipo]=''; dd.envIntTrocos=dd.envIntTrocos||{};
+      dd.envIntTrocos[para.tipo]=[''];
+    }
+  }
+  /* Renumerar SEMPRE os dois lados. Ao tirar um vão exterior os que ficam têm
+     de fechar a numeração — senão sobrava um VE2 sem VE1, e no ITeCons os
+     números deixavam de bater com o levantamento. */
+  dd.vaos.forEach((x,i)=>x.id='VE'+(i+1));
+  Object.values(dd.vaosInt).forEach(l=>(l||[]).forEach((x,i)=>x.id='VI'+(i+1)));
+  autoSave();
+}
+
+function _seletorDestino(atual,aoMudar){
+  const sel=document.createElement('select');
+  sel.style.cssText='border:1px solid var(--br);border-radius:6px;background:var(--bg3);'+
+    'color:var(--tx);font-size:11.5px;padding:5px 6px;max-width:150px';
+  const grpE=document.createElement('optgroup'); grpE.label='Exterior';
+  ORIENTS_REVISAO.forEach(o=>{
+    const op=document.createElement('option');
+    op.value='ext|'+o; op.textContent=o; grpE.appendChild(op);
+  });
+  const grpI=document.createElement('optgroup'); grpI.label='Interior (espaço não útil)';
+  ENU_REVISAO.forEach(t=>{
+    const op=document.createElement('option');
+    op.value='int|'+t; op.textContent=t; grpI.appendChild(op);
+  });
+  sel.appendChild(grpE); sel.appendChild(grpI);
+  sel.value=atual;
+  if(sel.value!==atual){            // orientação ou tipo fora das listas
+    const op=document.createElement('option');
+    op.value=atual; op.textContent=atual.split('|')[1]||atual;
+    sel.insertBefore(op,sel.firstChild); sel.value=atual;
+  }
+  sel.onchange=()=>{
+    const [lado,chave]=sel.value.split('|');
+    aoMudar({lado,chave,tipo:chave});
+  };
+  return sel;
+}
+
+function linhaParedeRevisao(div,pd,refrescar){
+  const dd=D.divisoesDados[div]||{};
+  const row=document.createElement('div');
+  row.style.cssText='display:flex;align-items:center;gap:6px;font-size:12px;'+
+    'background:var(--bg3);border-radius:6px;padding:5px 7px';
+  const marca=document.createElement('span');
+  marca.style.cssText='font-size:12px';
+  marca.textContent=pd.lado==='ext'?'🧱':'🚪';
+  marca.title=pd.lado==='ext'?'Parede exterior':'Parede interior (espaço não útil)';
+  const total=pd.lado==='ext'
+    ? _somaTrocos((dd.trocos||{})[pd.chave])||_numRev((dd.comprimentos||{})[pd.chave])
+    : _somaTrocos((dd.envIntTrocos||{})[pd.chave])||_numRev((dd.envInt||{})[pd.chave]);
+  const inp=document.createElement('input');
+  inp.type='number'; inp.step='0.01'; inp.inputMode='decimal';
+  inp.value=total>0?total.toFixed(2):'';
+  inp.style.cssText='width:74px;border:1px solid var(--br);border-radius:6px;'+
+    'background:var(--bg2);color:var(--tx);font-size:12px;padding:5px 7px';
+  inp.onchange=()=>{
+    // ao corrigir o total à mão, os troços passam a ser um só com esse valor
+    const v=_numRev(inp.value);
+    if(pd.lado==='ext'){ dd.trocos=dd.trocos||{}; dd.trocos[pd.chave]=v>0?[v.toFixed(2)]:[]; }
+    else { dd.envIntTrocos=dd.envIntTrocos||{}; dd.envIntTrocos[pd.chave]=v>0?[v.toFixed(2)]:[]; }
+    _fixarTotalParede(dd,pd); autoSave(); refrescar();
+  };
+  const un=document.createElement('span');
+  un.style.cssText='color:var(--tx3);font-size:11px'; un.textContent='m · dá para';
+  const sel=_seletorDestino(pd.lado+'|'+pd.chave,destino=>{
+    reclassificarParede(div,pd,{lado:destino.lado,chave:destino.chave});
+    refrescar();
+  });
+  row.appendChild(marca); row.appendChild(inp); row.appendChild(un); row.appendChild(sel);
+  return row;
+}
+
+function linhaVaoRevisao(div,ref,v,refrescar){
+  const row=document.createElement('div');
+  row.style.cssText='display:flex;align-items:center;gap:6px;font-size:12px;'+
+    'background:var(--bg3);border-radius:6px;padding:5px 7px;flex-wrap:wrap';
+  const id=document.createElement('span');
+  id.style.cssText='color:var(--ac);font-weight:600;min-width:34px';
+  id.textContent=v.id||(ref.lado==='ext'?'VE':'VI');
+  const dim=document.createElement('span');
+  dim.style.cssText='color:var(--tx)';
+  dim.textContent=(v.larg||'?')+'×'+(v.alt||'?')+' m';
+  const car=document.createElement('span');
+  car.style.cssText='color:var(--tx3);font-size:11px';
+  car.textContent=[v.tipo||'—',ref.lado==='ext'?(v.prot||''):'interior'].filter(Boolean).join(' · ');
+  const da=document.createElement('span');
+  da.style.cssText='color:var(--tx3);font-size:11px'; da.textContent='dá para';
+  const atual=ref.lado==='ext'?('ext|'+(v.orient||'Sul')):('int|'+ref.tipo);
+  const sel=_seletorDestino(atual,destino=>{
+    reclassificarVao(div,ref,{lado:destino.lado,chave:destino.chave,tipo:destino.chave});
+    refrescar();
+  });
+  [id,dim,car,da,sel].forEach(e=>row.appendChild(e));
+  return row;
+}
+
+/* Reabrir mantendo a posição da lista: reclassificar uma parede reconstrói o
+   painel, e sem isto saltava sempre para o topo. */
+let _revScroll=0;
+function abrirRevisao(){
+  const antigo=document.querySelector('#modal-revisao > div:last-child');
+  if(antigo) _revScroll=antigo.scrollTop;
+  modoRevisao();
+  const novo=document.querySelector('#modal-revisao > div:last-child');
+  if(novo) novo.scrollTop=_revScroll;
+}
+
 function modoRevisao(){
   const existing=document.getElementById('modal-revisao');
   if(existing) existing.remove();
@@ -5425,29 +5867,68 @@ function modoRevisao(){
     const body=document.createElement('div');
     body.style.cssText='padding:8px 12px;display:flex;flex-direction:column;gap:6px';
 
-    // Paredes por orientação
-    Object.entries(dd.comprimentos||{}).forEach(([orient,comp])=>{
-      const row=document.createElement('div');
-      row.style.cssText='display:flex;align-items:center;gap:8px;font-size:12px';
-      const lbl=document.createElement('span');lbl.style.cssText='color:var(--tx2);min-width:60px';lbl.textContent=orient;
-      const inp=document.createElement('input');
-      inp.type='text';inp.value=comp;
-      inp.style.cssText='flex:1;border:1px solid var(--br);border-radius:6px;background:var(--bg3);color:var(--tx);font-size:12px;padding:5px 8px';
-      inp.oninput=()=>{dd.comprimentos[orient]=inp.value;};
-      row.appendChild(lbl);row.appendChild(inp);body.appendChild(row);
-    });
+    // ── PAREDES — cada uma com o "dá para" editável ──
+    // Em obra confunde-se: mede-se a parede da cozinha como exterior a SE e
+    // depois percebe-se que o que está do outro lado é a marquise. Sem forma
+    // de reclassificar, ficava contada duas vezes — uma como fachada e outra
+    // como envolvente interior — e o CE saía com o dobro da área de parede.
+    /* Ler só comprimentos/envInt deixava paredes de fora. Na cozinha do João
+       Santana o resumo `comprimentos` está vazio e os 3,04 m vivem só em
+       `trocos.SE` — essa parede não aparecia no painel e não havia como a
+       reclassificar. A verdade está nos troços; o resumo é derivado. */
+    const _chaves=(resumo,trocos)=>{
+      const fora=[];
+      Object.keys(trocos||{}).forEach(k=>{ if(_somaTrocos(trocos[k])>0) fora.push(k); });
+      Object.keys(resumo||{}).forEach(k=>{ if(!fora.includes(k)&&_numRev(resumo[k])>0) fora.push(k); });
+      return fora;
+    };
+    const paredesDaDiv=[
+      ..._chaves(dd.comprimentos,dd.trocos).map(o=>({lado:'ext',chave:o})),
+      ..._chaves(dd.envInt,dd.envIntTrocos).map(t=>({lado:'int',chave:t})),
+    ];
+    if(paredesDaDiv.length){
+      const h=document.createElement('div');
+      h.style.cssText='font-size:11px;color:var(--tx3);font-weight:600;margin-top:2px';
+      h.textContent='PAREDES — comprimento e o que está do outro lado';
+      body.appendChild(h);
+    }
+    paredesDaDiv.forEach(pd=>body.appendChild(linhaParedeRevisao(div,pd,()=>abrirRevisao())));
 
-    // VEs resumo
-    (dd.vaos||[]).forEach((ve,i)=>{
-      const veRow=document.createElement('div');
-      veRow.style.cssText='display:flex;align-items:center;gap:6px;font-size:12px;background:var(--bg3);border-radius:6px;padding:5px 8px';
-      veRow.innerHTML=`<span style="color:var(--ac);font-weight:600">${ve.id}</span>
-        <span style="color:var(--tx2)">${ve.orient||'—'}</span>
-        <span>${ve.larg||'?'}×${ve.alt||'?'}m</span>
-        <span style="color:var(--tx2)">${ve.tipo||'—'}</span>
-        <span style="color:var(--tx3)">${ve.prot||''}</span>`;
-      body.appendChild(veRow);
-    });
+    // ── VÃOS — exteriores e interiores, com o "dá para" editável ──
+    if((dd.vaos||[]).length||Object.keys(dd.vaosInt||{}).length){
+      const h=document.createElement('div');
+      h.style.cssText='font-size:11px;color:var(--tx3);font-weight:600;margin-top:4px';
+      h.textContent='VÃOS ENVIDRAÇADOS';
+      body.appendChild(h);
+    }
+    (dd.vaos||[]).forEach((ve,i)=>
+      body.appendChild(linhaVaoRevisao(div,{lado:'ext',idx:i},ve,()=>abrirRevisao())));
+    Object.entries(dd.vaosInt||{}).forEach(([tipo,lista])=>
+      (lista||[]).forEach((vi,i)=>
+        body.appendChild(linhaVaoRevisao(div,{lado:'int',tipo,idx:i},vi,()=>abrirRevisao()))));
+
+    /* PAREDE CONTADA DUAS VEZES.
+       Aconteceu na cozinha do João Santana: 3,04 m como fachada a Sudeste e
+       3,04 m para a marquise — é a mesma parede, medida uma vez e classificada
+       duas. No cálculo dava o dobro da área de envolvente. */
+    (function(){
+      const _tot=(resumo,trocos,k)=>_somaTrocos((trocos||{})[k])||_numRev((resumo||{})[k]);
+      const ext=paredesDaDiv.filter(x=>x.lado==='ext')
+        .map(x=>({o:x.chave,v:_tot(dd.comprimentos,dd.trocos,x.chave)}));
+      const int=paredesDaDiv.filter(x=>x.lado==='int')
+        .map(x=>({t:x.chave,v:_tot(dd.envInt,dd.envIntTrocos,x.chave)}));
+      const iguais=[];
+      ext.forEach(e=>int.forEach(i=>{
+        if(e.v>0&&Math.abs(e.v-i.v)<0.03) iguais.push(e.o+' e '+i.t+' têm ambos '+e.v.toFixed(2)+' m');
+      }));
+      if(!iguais.length) return;
+      const av=document.createElement('div');
+      av.style.cssText='font-size:11px;color:var(--am,#e8a33d);background:rgba(232,163,61,.12);'+
+        'border-radius:6px;padding:6px 8px;margin-top:4px;line-height:1.35';
+      av.textContent='⚠️ Possível parede contada duas vezes: '+iguais.join('; ')+
+        '. Se for a mesma parede, muda uma delas para o lado certo e apaga a outra.';
+      body.appendChild(av);
+    })();
 
     // Nota
     if(dd.nota){
@@ -5802,7 +6283,8 @@ function importarLevantamento(){
           const iDiv=(qList||[]).findIndex(q=>q&&q.key==='divisoes');
           if(iDiv>=0&&(D.divisoes||[]).length) answers[iDiv]=D.divisoes.join('|||');
           const iOrd=(qList||[]).findIndex(q=>q&&q.key==='ordem-divisoes');
-          if(iOrd>=0&&D.ordemDivisoes) answers[iOrd]=D.ordemDivisoes;
+          if(iOrd>=0&&D.ordemDivisoes) answers[iOrd]=Array.isArray(D.ordemDivisoes)
+            ? D.ordemDivisoes.join('|||') : D.ordemDivisoes;
           // 3. expandir as perguntas por divisão, senão não há por onde continuar
           if((D.divisoes||[]).length){
             _ultimaExpansaoDivisoesKey=null;
@@ -6447,6 +6929,7 @@ const ORDEM_SECCOES_TXT=[
   'VÃOS ENVIDRAÇADOS — TEXTOS PARA CE',
   'VÃOS ENVIDRAÇADOS — LISTA FINAL ITeCons',
   'VÃOS ENVIDRAÇADOS — SOMBREAMENTO POR ESTAÇÃO',
+  'VÃOS ENVIDRAÇADOS INTERIORES (para espaço não útil)',
   'PORTAS EM CONTACTO COM O EXTERIOR / ENU',
   'PAVIMENTO EM CONTACTO COM O SOLO',
   'PONTES TÉRMICAS LINEARES EXTERIORES (Tabela 34 Manual SCE)',
@@ -9111,6 +9594,54 @@ function buildTxt(){
   t+='Fo e Ff (palas/elementos verticais) a determinar em campo — Fs = Fh × Fo × Ff.\n';
   t+='⚠ Quando Xj×Fh×Fo×Ff < 0,27: usar Fs = 0,27/Xj (Eq. 33 do Manual SCE).\n';
 
+  /* ── VÃOS ENVIDRAÇADOS INTERIORES ──
+     Segmento próprio, separado dos exteriores. Um vão entre a cozinha e a
+     marquise é envolvente INTERIOR: entra no ITeCons pelo Uwdn e pelo btr do
+     espaço não útil do outro lado, e não tem orientação, Xj, fator solar nem
+     sombreamento — pô-lo na lista dos exteriores daria ganhos solares que não
+     existem. */
+  const linhasVI=[];
+  (D.divisoes||[]).forEach(div=>{
+    const dd=(D.divisoesDados||{})[div]||{};
+    Object.entries(dd.vaosInt||{}).forEach(([tipo,lista])=>{
+      (lista||[]).forEach(vi=>{
+        const larg=parseFloat(vi.larg)||0, alt=parseFloat(vi.alt)||0;
+        if(!(larg>0&&alt>0)) return;
+        let uwdn=vi.uwdn;
+        if(uwdn===undefined||uwdn===null){
+          try{ const r=calcUw({...vi,prot:vi.prot||'Sem proteção exterior',
+            caixAr:vi.caixAr||D.caixaArGlobal||6});
+            uwdn=(r.uwdn!==null&&r.uwdn!==undefined)?r.uwdn:r.uw; }catch(e){ uwdn=null; }
+        }
+        linhasVI.push({div,tipo,id:vi.id||'VI',larg,alt,area:larg*alt,
+          vidro:vi.tipo||'—',caix:vi.caixMat||'—',abertura:vi.abertura||'—',
+          corte:vi.corteTerm?'com corte térmico':'sem corte térmico',uwdn});
+      });
+    });
+  });
+  if(linhasVI.length){
+    t+=sep('VÃOS ENVIDRAÇADOS INTERIORES (para espaço não útil)');
+    t+='ID     Divisão              Dá para              L×A (m)      Área     Uwdn\n';
+    t+=`${'─'.repeat(95)}\n`;
+    let totalVI=0;
+    linhasVI.forEach(v=>{
+      totalVI+=v.area;
+      t+=`${v.id.padEnd(6)} ${v.div.slice(0,20).padEnd(20)} ${v.tipo.slice(0,20).padEnd(20)} `+
+         `${(v.larg.toFixed(2)+'×'+v.alt.toFixed(2)).padEnd(12)} ${(v.area.toFixed(2)+'m²').padEnd(8)} `+
+         `${v.uwdn!==null&&v.uwdn!==undefined?fmtUw(v.uwdn):'—'}\n`;
+      t+=`       ${v.vidro} · caixilharia ${v.caix} · ${v.abertura} · ${v.corte}\n`;
+    });
+    t+=`${'─'.repeat(95)}\n`;
+    t+=`Total de vãos interiores: ${totalVI.toFixed(2)}m²\n\n`;
+    t+='COMO ENTRAM NO ITeCons:\n';
+    t+='  · Envolvente INTERIOR (não exterior) — folha dos vãos em contacto com espaços não úteis.\n';
+    t+='  · U a usar = Uwdn acima. Sem proteção exterior num vão interior, Uwdn = Uw.\n';
+    t+='  · Sem orientação, sem Xj, sem fator solar e sem sombreamento: um vão para espaço\n';
+    t+='    não útil não tem ganhos solares directos.\n';
+    t+='  · A perda é afectada pelo btr do espaço do outro lado (Tabela 22 do Manual SCE),\n';
+    t+='    calculado a partir de Ai/Au — o mesmo btr das paredes para esse espaço.\n';
+    t+='  · A área destes vãos DEDUZ-SE à área da parede interior para o mesmo espaço.\n';
+  }
 
   /* ── PORTAS EM CONTACTO COM O EXTERIOR ──
      A porta é um vão OPACO e entra na envolvente à parte dos envidraçados —
@@ -12245,7 +12776,7 @@ function usarCompartimentosDaPlanta(){
     }
     if(d.orients&&d.orients.length){ dd.orientsPlanta=d.orients; comOrient++; }
   });
-  D.ordemDivisoes='';                       // a ordem de visita é escolha do utilizador
+  D.ordemDivisoes=[];                       // a ordem de visita é escolha do utilizador
   autoSave();
   try{ renderPlantaAreasLista(); }catch(e){}
   const st=document.getElementById('planta-status');
@@ -12623,7 +13154,8 @@ async function apagarDivisao(div){
   try{
     const iDiv=qList.findIndex(q=>q.id==='divisoes');
     if(iDiv>-1) answers[iDiv]=D.divisoes.join('|||');
-    if(D.ordemDivisoes) D.ordemDivisoes=D.divisoes.join(', ');
+    if(D.ordemDivisoes&&(Array.isArray(D.ordemDivisoes)?D.ordemDivisoes.length:String(D.ordemDivisoes).trim()))
+      D.ordemDivisoes=D.divisoes.slice();
   }catch(e){}
 
   // Reconstruir as perguntas por divisão
@@ -14039,20 +14571,29 @@ function renderOrdemDivisoes(wrap){
     wrap.appendChild(chipsWrap);
   }
 
-  // botão confirmar — só quando todas ordenadas
-  if(!disponiveis.length&&D.ordemDivisoesTemp.length){
+  /* CONFIRMAR SEM TER DE TOCAR EM TODAS.
+     O botão só aparecia depois de TODAS as divisões estarem colocadas. Bastava
+     ficar uma por tocar para o botão nunca surgir — e a ordem escolhida, que
+     estava toda ali no rascunho, era descartada ao avançar. Na prática o
+     levantamento seguia pela ordem do interpretador, não pela do percurso.
+     Agora confirma-se a qualquer momento: as que faltarem vão para o fim, pela
+     ordem em que já estavam. */
+  if(D.ordemDivisoesTemp.length){
     const confirmBtn=document.createElement('button');
-    confirmBtn.textContent='✅ Confirmar ordem e continuar';
+    confirmBtn.textContent=disponiveis.length
+      ? `✅ Confirmar ordem (as ${disponiveis.length} restantes vão para o fim)`
+      : '✅ Confirmar ordem e continuar';
     confirmBtn.style.cssText='width:100%;border:none;background:var(--ac);color:#fff;border-radius:10px;padding:12px;font-size:14px;font-weight:700;cursor:pointer';
     confirmBtn.onclick=()=>{
-      D.divisoes=[...D.ordemDivisoesTemp];
-      D.ordemDivisoes=D.divisoes.join(', ');
-      answers[curQ]=D.ordemDivisoes;
+      D.divisoes=[...D.ordemDivisoesTemp,...disponiveis];
+      D.ordemDivisoes=D.divisoes.slice();
+      answers[curQ]=D.divisoes.join('|||');
       D.ordemDivisoesTemp=null;
       next();
     };
     wrap.appendChild(confirmBtn);
-  } else if(!D.divisoes||!D.divisoes.length){
+  }
+  if(!D.divisoes||!D.divisoes.length){
     const warn=document.createElement('div');
     warn.style.cssText='font-size:12px;color:var(--tx3)';
     warn.textContent='Sem divisões seleccionadas na pergunta anterior.';
@@ -15898,22 +16439,76 @@ async function oneDriveUploadFile(pastaRelativa,nomeFicheiro,blob,onProgress){
     return await sessResp.json();
   });
   const uploadUrl=sess.uploadUrl;
-  const CHUNK=5*1024*1024;
-  let offset=0,lastResult=null;
-  while(offset<blob.size){
-    const fim=Math.min(offset+CHUNK,blob.size);
-    const chunk=blob.slice(offset,fim);
-    // retry só deste bloco — uma quebra de sinal a meio não obriga a recomeçar
-    // o upload todo (a sessão/uploadUrl mantém-se válida durante uns minutos)
-    const resp=await comRetry(async()=>{
+  /* BLOCOS À MEDIDA DA REDE.
+     Um bloco de 5 MB é razoável em Wi-Fi e é demais em dados móveis: com sinal
+     fraco a ligação cai a meio, o pedido fica pendurado sem limite de tempo, e
+     as 3 tentativas do comRetry esgotam-se sempre no mesmo sítio — o upload
+     nunca chega ao fim. Em rede móvel usam-se blocos pequenos, com limite de
+     tempo por bloco e mais tentativas.
+     O Graph exige blocos múltiplos de 320 KiB. */
+  const KIB320=327680;
+  const rede=(navigator.connection||navigator.mozConnection||navigator.webkitConnection||{});
+  const lenta=rede.saveData===true||/^(slow-2g|2g|3g)$/.test(rede.effectiveType||'')||
+              (typeof rede.downlink==='number'&&rede.downlink>0&&rede.downlink<3);
+  const movel=/cellular/i.test(rede.type||'')||lenta;
+  const CHUNK=lenta?KIB320*2:(movel?KIB320*4:KIB320*16);   // 640 KiB | 1,25 MB | 5 MB
+  const ESPERA=lenta?120000:60000;                          // limite de tempo por bloco
+  const TENTATIVAS=movel?6:4;
+
+  async function enviarBloco(ini,fim){
+    const ctl=new AbortController();
+    const relogio=setTimeout(()=>ctl.abort(),ESPERA);
+    try{
+      /* Content-Length é um cabeçalho proibido no fetch — o browser ignora-o e
+         calcula-o sozinho. Enviá-lo não fazia mal, mas também não fazia nada. */
       const r=await fetch(uploadUrl,{
         method:'PUT',
-        headers:{'Content-Length':String(fim-offset),'Content-Range':`bytes ${offset}-${fim-1}/${blob.size}`},
-        body:chunk,
+        headers:{'Content-Range':`bytes ${ini}-${fim-1}/${blob.size}`},
+        body:blob.slice(ini,fim),
+        signal:ctl.signal,
       });
       if(!r.ok&&r.status!==202) throw new Error('Bloco de upload falhou: HTTP '+r.status);
       return r;
-    });
+    } finally { clearTimeout(relogio); }
+  }
+  /* RETOMAR DE ONDE FICOU.
+     Quando um bloco falha, o servidor sabe o que já recebeu. Perguntar-lhe
+     evita reenviar o que já lá está — que em dados móveis é a diferença entre
+     acabar e nunca acabar. */
+  async function proximoEsperado(){
+    try{
+      const r=await fetch(uploadUrl);
+      if(!r.ok) return null;
+      const j=await r.json();
+      const faixa=(j.nextExpectedRanges||[])[0];
+      if(!faixa) return null;
+      const v=parseInt(String(faixa).split('-')[0],10);
+      return isFinite(v)?v:null;
+    }catch(e){ return null; }
+  }
+
+  let offset=0,lastResult=null;
+  while(offset<blob.size){
+    const fim=Math.min(offset+CHUNK,blob.size);
+    let resp=null,erro=null;
+    for(let tent=0;tent<TENTATIVAS;tent++){
+      try{ resp=await enviarBloco(offset,fim); erro=null; break; }
+      catch(e){
+        erro=e;
+        const msg=String((e&&e.message)||'');
+        if(msg.includes('401')) throw e;         // sessão expirada: repetir não resolve
+        // espera crescente — dá tempo ao sinal de voltar
+        await new Promise(r=>setTimeout(r,1500*(tent+1)));
+        const jaTem=await proximoEsperado();
+        if(jaTem!==null&&jaTem>offset){          // o servidor recebeu-o à mesma
+          offset=jaTem; resp=null; erro=null; break;
+        }
+      }
+    }
+    if(erro) throw new Error('Não consegui enviar o pacote — a ligação está a cair. '+
+      'Tenta com Wi-Fi, ou aproxima-te de onde houver melhor sinal. ('+((erro.name==='AbortError')
+        ? 'o bloco demorou mais de '+Math.round(ESPERA/1000)+'s' : (erro.message||erro))+')');
+    if(!resp) continue;                          // retomado: recalcula o bloco seguinte
     if(onProgress) onProgress(fim,blob.size);
     if(resp.status!==202) lastResult=await resp.json();
     offset=fim;
@@ -15926,6 +16521,9 @@ async function guardarNoOneDrive(){
   const st=document.getElementById('onedrive-status');
   const show=(m,e)=>{if(st){st.style.display='block';st.style.color=e?'var(--red)':'var(--ac)';st.textContent=m;}};
   try{
+    const _rede=(navigator.connection||navigator.mozConnection||navigator.webkitConnection||{});
+    if(/^(slow-2g|2g)$/.test(_rede.effectiveType||''))
+      show('⚠️ Sinal fraco — o envio vai ser lento. Não feches a app.',true);
     show('A ligar ao OneDrive…');
     const conta=await oneDriveLogin();
     show(`A preparar pacote (${conta.username})…`);
@@ -16035,6 +16633,13 @@ window.addEventListener('DOMContentLoaded',()=>{
       document.body.classList.add('com-planta');
       const bv=document.getElementById('btVisPlanta'); if(bv) bv.classList.add('on');
       setTimeout(posicionarDivisoria,60);
+      /* OS GESTOS TÊM DE SER LIGADOS TAMBÉM AQUI.
+         ligarGestosPlanta() só era chamada ao carregar no botão que abre o
+         painel. Se o painel já estava aberto da sessão anterior — que é o
+         normal, porque a escolha fica guardada — a app arrancava com ele
+         aberto e SEM um único ouvinte de toque: a planta aparecia e não se
+         mexia nem com um dedo, nem com dois, nem com a roda do rato. */
+      setTimeout(ligarGestosPlanta,60);
     }
     const largo=window.innerWidth>=900;
     if(guardado==='1'||(guardado===null&&largo)){
@@ -16171,16 +16776,74 @@ function guardarAgora(){
    ficar órfão.
    Regra: uma gravação com MENOS conteúdo do que a que já lá está não substitui
    — é arquivada à parte, com a hora, e nunca se perde nada. */
+/* O PESO TEM DE CONTAR O TRABALHO TODO.
+   Contava divisões (10 pontos cada), troços, vãos e fotos — e mais nada. Uma
+   manhã inteira a medir paredes, a preencher pés-direitos, climatização, AQS e
+   ventilação não mexia um ponto. Pior: apagar UMA divisão a mais custava 10
+   pontos, e a partir daí todas as gravações seguintes eram recusadas em
+   silêncio até se tirarem 10 fotografias. Foi assim que se perderam 1h20 de
+   levantamento. Agora conta-se tudo o que é trabalho de campo, e cada peça
+   pesa pouco, para que nenhuma remoção legítima faça o peso desabar. */
 function _pesoDoLevantamento(D2){
   if(!D2||typeof D2!=='object') return -1;
-  let p=(D2.divisoes||[]).length*10;
+  const cheio=v=>v!==null&&v!==undefined&&String(v).trim()!=='';
+  let p=(D2.divisoes||[]).length*3;
   Object.values(D2.divisoesDados||{}).forEach(dd=>{
+    if(!dd) return;
     p+=Object.values(dd.trocos||{}).filter(v=>v&&String(v[0]||'').trim()).length*3;
-    p+=(dd.vaos||[]).length*2+(dd.fotos||[]).length;
+    p+=Object.values(dd.comprimentos||{}).filter(cheio).length*3;
+    p+=(dd.areaRect||[]).length*3;
+    p+=(dd.vaos||[]).length*4;
+    p+=(dd.fotos||[]).length*2;
+    p+=Object.keys(dd.envInt||{}).length*2;
+    p+=Object.keys(dd.envIntTrocos||{}).length*2;
+    p+=Object.keys(dd.vaosInt||{}).length*3;
+    if(cheio(dd.areaUtil)) p+=3;
+    if(cheio(dd.piso)) p+=1;
   });
-  p+=(D2.fotosAlcado||[]).length+(D2.fotoEtiquetas||[]).length+(D2.unidadesExtFotos||[]).length;
-  if(D2.moradaCaderneta) p+=2;
+  p+=((D2.fotosAlcado||[]).length+(D2.fotoEtiquetas||[]).length+
+      (D2.unidadesExtFotos||[]).length)*2;
+  Object.values(D2.fotosCampos||{}).forEach(v=>{
+    p+=(Array.isArray(v)?v.length:(v?1:0))*2; });
+  p+=Object.keys(D2.peDireitos||{}).length*2;
+  p+=Object.keys(D2.climaDivisoes||{}).length*2;
+  p+=Object.keys(D2.enuTipos||{}).length*2;
+  p+=(D2.areasPlanta||[]).length*2;
+  p+=(D2._hist||[]).length;            // cada resposta dada é trabalho feito
+  ['aqsTipo','aqsMarca','aqsModelo','aqsAnoFabrico','solar','solDet','ventTipo',
+   'ventCondutasIS','espParede','espVidros','obs','anoConstrucao','tipologia',
+   'edificioTipo','localidade','concelho','freguesia','moradaCaderneta',
+   'numeroMatriz','numeroFracao','levParedes','inerciaTermica','dvRequerente',
+   'dvData','pisoLocal','nPisosEdificio'].forEach(k=>{ if(cheio(D2[k])) p+=2; });
+  if(D2.obsAudioKey) p+=2;
+  if(D2.gpsCoords) p+=2;
+  if(D2.plantaLayout) p+=5;
   return p;
+}
+/* A PROTECÇÃO NÃO PODE TRANCAR A SESSÃO EM CURSO.
+   A regra "não gravar mais leve por cima de mais pesado" existe para o caso em
+   que a app recarrega, volta ao ecrã inicial vazio e grava esse vazio por cima
+   do levantamento. Mas era aplicada TAMBÉM dentro da mesma sessão: bastava
+   apagar uma divisão a mais para o peso descer e, a partir daí, TODAS as
+   gravações eram recusadas — e recusadas em silêncio, porque 'protegido'
+   contava como sucesso. O levantamento continuava só na memória até a app
+   fechar.
+   Agora: cada sessão tem um identificador. Se quem grava é a MESMA sessão que
+   gravou o que lá está, é a mesma pessoa a trabalhar no mesmo levantamento e a
+   gravação passa sempre — arquivando antes a versão mais pesada, para nada se
+   perder. A protecção só se aplica entre sessões diferentes, que é o caso para
+   que foi feita. */
+function _sessaoDe(raw){
+  try{
+    const a=typeof raw==='string'?JSON.parse(raw):raw;
+    const d=typeof a.data==='string'?JSON.parse(a.data):a.data;
+    return (d&&d._sessao)||'';
+  }catch(e){ return ''; }
+}
+function _arquivar(chave,antigoRaw){
+  const arq='ce_arquivo_'+Date.now().toString(36)+'_'+chave.slice(0,40);
+  try{ localStorage.setItem(arq,antigoRaw); }catch(e){}
+  try{ localStorage.setItem('ce_ultimo_cheio',antigoRaw); }catch(e){}
 }
 function _gravarSeguro(chave,snap,pesoNovo){
   try{
@@ -16191,13 +16854,16 @@ function _gravarSeguro(chave,snap,pesoNovo){
         const a=JSON.parse(antigoRaw);
         pesoAntigo=_pesoDoLevantamento(typeof a.data==='string'?JSON.parse(a.data):a.data);
       }catch(e){}
-      // só se perde trabalho se o novo tiver MENOS. Nesse caso, arquiva-se o antigo.
       if(pesoAntigo>0&&pesoNovo<pesoAntigo){
-        // NÃO substituir é uma decisão, não uma falha: o trabalho continua gravado
-        const arq='ce_arquivo_'+Date.now().toString(36)+'_'+chave.slice(0,40);
-        try{ localStorage.setItem(arq,antigoRaw); }catch(e){}
-        try{ localStorage.setItem('ce_ultimo_cheio',antigoRaw); }catch(e){}
-        return 'protegido';           // o antigo, mais completo, fica
+        const mesmaSessao=D._sessao&&_sessaoDe(antigoRaw)===D._sessao;
+        if(mesmaSessao){
+          // é a própria pessoa a apagar algo. Guarda-se a versão anterior à
+          // parte e grava-se na mesma: o trabalho seguinte NUNCA fica de fora.
+          _arquivar(chave,antigoRaw);
+        } else {
+          _arquivar(chave,antigoRaw);
+          return 'protegido';         // outra sessão, mais completa: fica a dela
+        }
       }
     }
     localStorage.setItem(chave,JSON.stringify(snap));
@@ -16237,6 +16903,31 @@ function _libertarEspaco(){
     return n;
   }catch(e){ return 0; }
 }
+/* BOTÃO FLUTUANTE DA FOTO DE ALÇADO
+   A foto do alçado tira-se de qualquer ponto do levantamento — quando se passa
+   à frente da fachada. Ter de voltar ao ecrã de exportar para isso é perder o
+   momento. Fica no canto, sozinho: o botão MEDIR que partilhava este sítio foi
+   retirado por se sobreporem. */
+function montarFabAlcado(){
+  let fab=document.getElementById('fab-alcado');
+  if(!fab){
+    fab=document.createElement('button');
+    fab.id='fab-alcado';
+    fab.textContent='📷 ALÇADO';
+    fab.title='Fotografar alçado (guarda o GPS)';
+    fab.style.cssText='position:fixed;bottom:90px;right:14px;z-index:997;border:none;'+
+      'background:var(--ac);color:#04140c;border-radius:50px;padding:14px 18px;'+
+      'font-size:14px;font-weight:800;box-shadow:0 4px 16px rgba(0,0,0,.4);cursor:pointer';
+    fab.onclick=()=>{ try{ tirarFotoAlcado(); }catch(e){ alert('Não consegui abrir a câmara: '+(e.message||e)); } };
+    document.body.appendChild(fab);
+  }
+  return fab;
+}
+function mostrarFabAlcado(mostrar){
+  const fab=montarFabAlcado();
+  fab.style.display=mostrar?'block':'none';
+}
+
 /* ══════════ PAINEL LATERAL (ecrãs largos) ══════════
    Mostra o que se anda sempre a consultar durante o levantamento: quantas
    divisões estão feitas, as medidas de cada uma, e as fotos já tiradas. Num
@@ -16705,10 +17396,16 @@ function autoSave(){
 
   // 'protegido' significa que o que lá está é MELHOR — isso é sucesso, não falha.
   // Só é falha quando nem gravou nem protegeu nada.
+  /* 'protegido' NÃO é gravação feita.
+     Contava como sucesso, e por isso uma sessão inteira podia decorrer sem que
+     uma única resposta chegasse ao disco, sem um aviso. Agora só true conta; se
+     nenhuma das duas chaves gravou mesmo, avisa-se. */
+  let _protegido=false;
   const tentar=()=>{
     const a=_gravarSeguro(recolhaKey(D.nome),snap,peso);
     const b=_gravarSeguro('ce_ultimo',snap,peso);
-    return (a===true||b===true||a==='protegido'||b==='protegido');
+    if(a==='protegido'||b==='protegido') _protegido=true;
+    return (a===true||b===true);
   };
   try{
     if(tentar()) return true;
@@ -16720,8 +17417,13 @@ function autoSave(){
       const D2=JSON.parse(snap.data); D2._hist=[];
       semHist.data=JSON.stringify(D2);
     }catch(e){}
-    if(_gravarSeguro(recolhaKey(D.nome),semHist,peso)||
-       _gravarSeguro('ce_ultimo',semHist,peso)) return true;
+    if(_gravarSeguro(recolhaKey(D.nome),semHist,peso)===true||
+       _gravarSeguro('ce_ultimo',semHist,peso)===true) return true;
+    if(_protegido){
+      _avisarFalhaGravacao('Já existe gravado um levantamento MAIS COMPLETO com este nome — '+
+        'para não o destruir, o que estás a fazer agora não está a ser gravado.');
+      return false;
+    }
     _avisarFalhaGravacao('O armazenamento do navegador está cheio ou bloqueado.');
     return false;
   }catch(e){
@@ -17129,22 +17831,13 @@ async function ligarLaser(){
 
     laserAtivo=true;
     if(btn){btn.textContent='📏🟢';btn.style.color='#4f4';}
-    // botão flutuante MEDIR — dispara medição remota (frame validado por sniffing)
-    let fabMedir=document.getElementById('fab-medir');
-    if(!fabMedir){
-      fabMedir=document.createElement('button');
-      fabMedir.id='fab-medir';
-      fabMedir.textContent='📏 MEDIR';
-      fabMedir.style.cssText='position:fixed;bottom:90px;right:14px;z-index:997;border:none;background:#4f4;color:#000;border-radius:50px;padding:14px 20px;font-size:15px;font-weight:800;box-shadow:0 4px 16px rgba(0,0,0,.4);cursor:pointer';
-      fabMedir.onclick=medirRemoto;
-      document.body.appendChild(fabMedir);
-    }
-    fabMedir.style.display='block';
+    /* O botão flutuante MEDIR foi retirado: ficava por cima do botão da foto
+       de alçado, no mesmo canto, e tapava-o. A medição continua a fazer-se
+       pelo 📏 junto a cada campo e pelo botão do próprio laser. */
     bleDevice.addEventListener('gattserverdisconnected',()=>{
       laserAtivo=false;bleChar=null;
       if(btn){btn.textContent='📏';btn.style.color='';}
       document.querySelectorAll('.laser-field-btn').forEach(b2=>b2.style.display='none');
-      const fm=document.getElementById('fab-medir');if(fm)fm.style.display='none';
       mostrarToastLaser('GLM desligado.');
     });
     mostrarToastLaser('✅ GLM ligado ('+protocolo+')!\n1) Toca em 📏 junto ao campo\n2) Mede no aparelho OU toca no botão MEDIR',8000);
@@ -17186,15 +17879,20 @@ async function medirRemoto(){
   if(!bleChar||!laserAtivo){console.warn('Laser: tentativa de medir sem ligação ativa.');return;}
   try{
     await bleChar.writeValue(mtFrame(0x56,[0x00]));
+    /* O estado do ciclo (1º toque acende, 2º mede) mostrava-se no botão
+       flutuante MEDIR, que foi retirado por se sobrepor ao da foto de alçado.
+       Passa a mostrar-se nos próprios botões 📏 junto aos campos, que é onde a
+       mão já está. */
+    const marcarBotoes=txt=>{
+      document.querySelectorAll('.laser-field-btn').forEach(b=>{b.textContent=txt;});
+    };
     if(!laserAceso){
       laserAceso=true;
-      const fm=document.getElementById('fab-medir');
-      if(fm)fm.textContent='🔴 DISPARAR';
-      mostrarToastLaser('✅ Comando enviado — Laser aceso 🔴. Aponta e toca DISPARAR para medir.',4000);
+      marcarBotoes('🔴');
+      mostrarToastLaser('✅ Comando enviado — Laser aceso 🔴. Aponta e toca outra vez no 📏 para medir.',4000);
     }else{
       laserAceso=false;
-      const fm=document.getElementById('fab-medir');
-      if(fm)fm.textContent='📏 MEDIR';
+      marcarBotoes('📏');
       toastLaserDiag('Comando de disparo enviado — a aguardar resposta',4000);
       // a medição chega via indication no onMedicaoRecebida; se não aparecer mais
       // nada a seguir a isto, o aparelho não respondeu (ver ponto seguinte).
