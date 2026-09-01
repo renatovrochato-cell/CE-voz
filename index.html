@@ -255,10 +255,22 @@ body.com-planta #visDivisoria.a-arrastar::after{color:#04140c}
 
 <!-- ENTREVISTA -->
 <div class="screen" id="scr-int">
+  <!-- ESTADO DA GRAVAÇÃO, SEMPRE À VISTA.
+       A Elena trabalhou 1h20 com a gravação trancada e sem uma palavra. O
+       único aviso era um alert, uma vez, e o resto ficava num ecrã que não se
+       via. Esta faixa está no cabeçalho do levantamento e muda de cor a cada
+       gravação: verde quando gravou, vermelha e fixa enquanto falhar. -->
+  <div id="estado-grav" style="display:none;font-size:12px;padding:6px 12px;text-align:center;
+       line-height:1.35;border-bottom:1px solid var(--br)"></div>
   <div class="hdr">
     <div class="hdr-l">
       <div class="hdr-proj" id="hdr-proj">—</div>
       <div class="hdr-step" id="hdr-step">Pergunta 1</div>
+      <!-- fora do hdr-step: o renderQ reescreve-lhe o texto e levava o span -->
+      <div style="font-size:11px;margin-top:1px;display:flex;gap:10px">
+        <span id="hdr-grav" style="color:var(--tx3)"></span>
+        <span id="hdr-nuvem" style="color:var(--tx3)" title="cópia automática no OneDrive"></span>
+      </div>
     </div>
     <div style="display:flex;gap:6px">
       <div class="hdr-btn" id="btn-fullscreen" onclick="alternarEcraInteiro()" title="Ecrã inteiro" style="display:none">⛶</div>
@@ -547,7 +559,7 @@ const DIVS_BASE=[
 // VERSÃO — fonte única (selo no ecrã inicial + cabeçalho do TXT exportado).
 // Subir aqui a cada alteração ao ficheiro.
 // ═══════════════════════════════════════
-const APP_VERSION='v2026.08.31-FIX226';
+const APP_VERSION='v2026.09.01-FIX228';
 
 // ═══════════════════════════════════════
 // ESTADO
@@ -9361,7 +9373,10 @@ function buildTxt(){
         t+=sep('COBERTURAS');
         cobs.forEach((c,i2)=>{
           /* A base 2025 primeiro; o cálculo próprio só quando ela não tem. */
-          const _cEsp=(D.isolCobEsp&&/^\d+$/.test(D.isolCobEsp))?+D.isolCobEsp:null;
+          /* «3,5» ou «3.5» chumbava no /^\d+$/ e a cobertura saía SEM
+             isolamento — mesmo erro de família do isolParedeEsp. */
+          const _cEsp=(D.isolCobEsp&&/^[\d,.]+$/.test(String(D.isolCobEsp)))
+            ?parseFloat(String(D.isolCobEsp).replace(',','.')):null;
           const _bc=descCobertura2025({tipo:/terra[çc]o|horizontal/i.test(String(c))?'terraço':'inclinada',
             temIsol:isSimTxt(D.temIsolamento)&&!!_cEsp,espIsol:_cEsp});
           t+=(cobs.length>1?('['+(i2+1)+'] '):'')+String(c)+'\n';
@@ -9376,7 +9391,16 @@ function buildTxt(){
               : '______ m²   (por medir)')+'\n\n';
             return;
           }
-          const r=textoCoberturaPorDefeito(c,D.coberturaIsolCm,D.coberturaIsolMat);
+          /* CAMPOS FANTASMA — D.coberturaIsolCm e D.coberturaIsolMat nunca
+             foram escritos em lado nenhum. Quando a base 2025 não tinha a
+             cobertura, o cálculo próprio saía sempre sem isolamento, por mais
+             que se tivesse respondido. Lê-se o que a app grava: a espessura
+             da cobertura (isolCobEsp) e o material, que é o mesmo das paredes
+             quando não há outro. Apanhado na caça a campos lidos-e-nunca-
+             escritos, depois do caso do isolParedeEsp. */
+          const r=textoCoberturaPorDefeito(c,
+            _cEsp!=null?String(_cEsp):'',
+            _cEsp!=null?(isolamentoDasParedes().mat||'Desconhecido'):'');
           if(r){
             t+='    '+r.texto.replace(/\n/g,'\n    ')+'\n';
             t+='    '+ln('U sugerido',r.u.toFixed(2).replace('.',',')+' W/(m².°C)').trim()+'\n';
@@ -10598,9 +10622,23 @@ function buildTxt(){
   // Registo do que foi alterado durante o levantamento, com data/hora. Serve
   // para reconstituir o processo se o CE for contestado, e para perceber o que
   // mudou entre visitas ao mesmo imóvel.
-  if(D._hist&&D._hist.length){
+  if((D._hist&&D._hist.length)||(Array.isArray(D.docsLidosRevisao)&&D.docsLidosRevisao.length)){
+    D._hist=D._hist||[];
     t+=sep('HISTÓRICO DE ALTERAÇÕES');
+    /* Documentos lidos DEPOIS do levantamento, na revisão — o cliente mandou a
+       caderneta uma semana depois. Fica registado que dados vieram daí, para
+       se saber de onde saiu a matriz que está no certificado. */
+    if(Array.isArray(D.docsLidosRevisao)&&D.docsLidosRevisao.length){
+      t+='Documentos lidos na revisão (depois do levantamento):\n';
+      D.docsLidosRevisao.forEach(d=>{
+        t+='  '+(d.ts||'')+'  '+(d.tipo||'documento')+' — '+(d.nome||'')+
+           (d.campos&&d.campos.length?' → '+d.campos.join(', '):'')+'\n';
+      });
+      t+='\n';
+    }
     t+=`${D._hist.length} alteração${D._hist.length!==1?'ões':''} registada${D._hist.length!==1?'s':''}`;
+    // «1 alteraçãoões» — o plural estava a colar-se ao singular
+    t=t.replace(/alteraçãoões/g,'alterações');
     if(D._hist.length>=MAX_HIST) t+=` (limite de ${MAX_HIST} — as mais antigas não constam)`;
     t+='\n\n';
     // agrupar por dia para ficar legível
@@ -12052,6 +12090,40 @@ window.addEventListener('beforeunload',ev=>{
   }catch(e){}
 });
 
+/* ══════════════════════════════════════════════════════════════════
+   GRAVAÇÃO POR TEMPO E AO SAIR — A REDE DE SEGURANÇA
+   ══════════════════════════════════════════════════════════════════
+   Tudo o que se gravava dependia de alguém ter escrito autoSave() no sítio
+   certo. Um handler que se esqueça, e aquilo que ele mudou fica só na
+   memória até ao próximo que se lembre. E no Android a app é morta sem
+   beforeunload: passa para segundo plano e, ao voltar, arranca do zero.
+
+   Duas defesas, que não dependem de ninguém se lembrar:
+   1. De 20 em 20 s, se D ou as respostas mudaram desde a última gravação,
+      grava. Compara-se uma impressão do JSON, não se grava por gravar.
+   2. Ao ir para segundo plano (visibilitychange → hidden) e ao pagehide,
+      grava de imediato — é o último instante em que a app ainda corre. */
+let _impressaoGravada='';
+function _impressaoAtual(){
+  try{ return JSON.stringify(D).length+':'+JSON.stringify(answers).length+':'+
+    String(D._hist&&D._hist.length||0)+':'+curQ; }
+  catch(e){ return ''; }
+}
+function _gravarSeMudou(motivo){
+  try{
+    if(!D||!D.nome) return false;
+    const agora=_impressaoAtual();
+    if(agora===_impressaoGravada) return false;
+    if(autoSave()===true){ _impressaoGravada=agora; return true; }
+  }catch(e){}
+  return false;
+}
+setInterval(()=>_gravarSeMudou('tempo'),20000);
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState==='hidden') _gravarSeMudou('segundo plano');
+});
+window.addEventListener('pagehide',()=>_gravarSeMudou('pagehide'));
+
 async function exportarPacoteCompleto(){
   // guarda: incoerências detetadas param a exportação até confirmares
   try{
@@ -12068,19 +12140,63 @@ async function exportarPacoteCompleto(){
   try{
     const {zipBlob,zipNome,nome,nFotos,docsCount}=await buildPacoteZipBlob(show);
     const zipFile=new File([zipBlob],zipNome,{type:'application/zip'});
+    const resumo=`${nFotos} foto${nFotos!==1?'s':''}${docsCount?' + '+docsCount+' doc.':''} + TXT + KMZ`;
 
+    /* A PARTILHA TEM DE ACONTECER DENTRO DE UM TOQUE.
+       O Android só deixa abrir a folha de partilha (WhatsApp, Drive, e-mail)
+       nos segundos a seguir a um toque. Montar o ZIP demora mais do que isso,
+       e a partilha era recusada com «NotAllowedError» — parecia que o botão
+       não fazia nada. Agora o ZIP monta-se primeiro e aparece um botão
+       «Partilhar»: é ESSE toque que abre a folha, com o ficheiro já pronto. */
     if(navigator.canShare&&navigator.canShare({files:[zipFile]})){
-      await navigator.share({title:nome,text:'Pacote completo CE',files:[zipFile]});
-      show(`✅ Pacote partilhado (${nFotos} foto${nFotos!==1?'s':''}${docsCount?' + '+docsCount+' doc.':''} + TXT + KMZ)`);
-      marcarCopiaFeita('partilha'); mostrarAvisoCopia();
+      _zipPronto={zipFile,zipNome,nome,resumo};
+      show(`✅ Pacote pronto (${resumo}). Toca em «Partilhar» para o enviar.`);
+      _mostrarBotaoPartilharZip();
     }else{
       const url=URL.createObjectURL(zipBlob);
       const a=document.createElement('a');a.href=url;a.download=zipNome;a.click();
       setTimeout(()=>URL.revokeObjectURL(url),3000);
-      show(`✅ ${zipNome} descarregado (${nFotos} fotos${docsCount?' + '+docsCount+' doc.':''} + TXT + KMZ)`);
+      show(`✅ ${zipNome} descarregado (${resumo})`);
+      marcarCopiaFeita('transferência'); mostrarAvisoCopia();
     }
   }catch(e){
     show('❌ Erro ('+(e.name||'?')+'): '+e.message,true);
+  }
+}
+let _zipPronto=null;
+function _mostrarBotaoPartilharZip(){
+  const st=document.getElementById('pacote-status'); if(!st) return;
+  let b=document.getElementById('btn-partilhar-zip');
+  if(!b){
+    b=document.createElement('button');
+    b.id='btn-partilhar-zip'; b.className='btn-next';
+    b.style.cssText='margin-top:8px;font-size:15px';
+    st.parentNode.insertBefore(b,st.nextSibling);
+  }
+  b.textContent='📤 Partilhar '+(_zipPronto?_zipPronto.zipNome:'o pacote');
+  b.style.display='block';
+  b.onclick=partilharZipPronto;
+}
+async function partilharZipPronto(){
+  const st=document.getElementById('pacote-status');
+  const show=(m,e)=>{if(st){st.style.display='block';st.style.color=e?'var(--red)':'var(--ac)';st.textContent=m;}};
+  if(!_zipPronto){ show('O pacote ainda não está montado — carrega primeiro em «Pacote completo».',true); return; }
+  const {zipFile,zipNome,nome,resumo}=_zipPronto;
+  try{
+    await navigator.share({title:nome,text:'Pacote completo CE — '+zipNome,files:[zipFile]});
+    show(`✅ Pacote partilhado (${resumo})`);
+    marcarCopiaFeita('partilha'); mostrarAvisoCopia();
+  }catch(e){
+    if(e&&e.name==='AbortError'){ show('Partilha cancelada. O pacote continua pronto.'); return; }
+    /* Se a folha de partilha recusar (ficheiro grande demais para a app
+       escolhida, por exemplo), descarrega-se — fica nas transferências e
+       manda-se a partir daí. */
+    try{
+      const url=URL.createObjectURL(zipFile);
+      const a=document.createElement('a');a.href=url;a.download=zipNome;a.click();
+      setTimeout(()=>URL.revokeObjectURL(url),3000);
+      show('A folha de partilha recusou ('+(e.name||'?')+'). Descarreguei o ZIP para as transferências — envia-o a partir daí.',true);
+    }catch(e2){ show('❌ Erro ('+(e.name||'?')+'): '+e.message,true); }
   }
 }
 
@@ -16823,6 +16939,7 @@ async function guardarNoOneDrive(){
       show(`A enviar… ${Math.round(done/total*100)}%`);
     });
     marcarCopiaFeita('OneDrive'); mostrarAvisoCopia();
+    try{ copiaAutomaticaOneDrive(true); }catch(e){}
     show(`✅ Guardado no OneDrive: ${ONEDRIVE_PASTA_BASE}/${zipNomeMorada} — abre o ZIP e tens a pasta ${nomeMorada} com tudo lá dentro (${nFotos} fotos${docsCount?' + '+docsCount+' doc.':''})`);
     atualizarBotaoOneDrive();
   }catch(e){
@@ -16830,6 +16947,81 @@ async function guardarNoOneDrive(){
     console.error(e);
   }
 }
+
+/* ══════════════════════════════════════════════════════════════════
+   CÓPIA AUTOMÁTICA PARA O ONEDRIVE — A MEDIDA QUE TERIA SALVO A ELENA
+   ══════════════════════════════════════════════════════════════════
+   De 10 em 10 minutos, se o levantamento mudou desde a última cópia e há
+   sessão OneDrive aberta, sobe o JSON inteiro para _AUTOSAVE/<nome>.json.
+   Sem fotos (essas ficam no telemóvel e vão no ZIP final) — o JSON tem uns
+   100-300 KB e sobe em segundos, mesmo por dados móveis.
+
+   Regras que NÃO se quebram:
+   · NUNCA abre popup nem redirect. Se não há sessão, não faz nada e diz-o
+     no cabeçalho. A pessoa liga o OneDrive uma vez, no início, e pronto.
+   · NUNCA interrompe o trabalho: corre em segundo plano, sem alert.
+   · O pior caso passa a ser perder 10 minutos, não 1h20. */
+const AUTOSAVE_OD_PASTA='_AUTOSAVE';
+const AUTOSAVE_OD_INTERVALO=10*60*1000;
+let _odAutoImpressao='', _odAutoUltima=null, _odAutoEmCurso=false, _odAutoErro='';
+
+async function _odTokenSilencioso(){
+  // só devolve token se já houver conta; nunca pergunta nada
+  try{
+    if(typeof getMsalApp!=='function') return null;
+    const app=await getMsalApp();
+    if(typeof app.initialize==='function') await app.initialize();
+    await _msalPronto(app);
+    const accounts=app.getAllAccounts();
+    if(!accounts.length) return null;
+    const r=await app.acquireTokenSilent({scopes:ONEDRIVE_SCOPES,account:accounts[0]});
+    return r&&r.accessToken||null;
+  }catch(e){ return null; }
+}
+function _odAutoNome(){
+  const base=(typeof nomePacoteExportacao==='function'?nomePacoteExportacao():'')||D.nome||'sem_nome';
+  return String(base).replace(/[\\/:*?"<>|]+/g,'_').slice(0,120)+'.json';
+}
+function _mostrarEstadoCopiaNuvem(txt,cor){
+  try{
+    const el=document.getElementById('hdr-nuvem');
+    if(el){ el.textContent=txt; el.style.color=cor||'var(--tx3)'; }
+  }catch(e){}
+}
+async function copiaAutomaticaOneDrive(forcar){
+  if(_odAutoEmCurso) return false;
+  if(!D||!D.nome) return false;
+  const impressao=(typeof _impressaoAtual==='function')?_impressaoAtual():String(Date.now());
+  if(!forcar&&impressao===_odAutoImpressao) return false;   // nada mudou
+  if(!navigator.onLine){ _mostrarEstadoCopiaNuvem('☁ sem rede','var(--tx3)'); return false; }
+  _odAutoEmCurso=true;
+  try{
+    const token=await _odTokenSilencioso();
+    if(!token){
+      _mostrarEstadoCopiaNuvem('☁ OneDrive por ligar','var(--am)');
+      return false;
+    }
+    const conteudo=JSON.stringify({app:'CE Voz',versao:APP_VERSION,
+      autosave:new Date().toISOString(),D,answers,pergunta:curQ},null,0);
+    const blob=new Blob([conteudo],{type:'application/json'});
+    await oneDriveUploadFile(AUTOSAVE_OD_PASTA,_odAutoNome(),blob);
+    _odAutoImpressao=impressao;
+    _odAutoUltima=new Date();
+    _odAutoErro='';
+    _mostrarEstadoCopiaNuvem('☁ '+_odAutoUltima.toLocaleTimeString('pt-PT',{hour:'2-digit',minute:'2-digit'}),'var(--ac)');
+    return true;
+  }catch(e){
+    _odAutoErro=String(e&&e.message||e);
+    _mostrarEstadoCopiaNuvem('☁ falhou'+(_odAutoUltima?' · última '+
+      _odAutoUltima.toLocaleTimeString('pt-PT',{hour:'2-digit',minute:'2-digit'}):''),'var(--am)');
+    return false;
+  }finally{ _odAutoEmCurso=false; }
+}
+setInterval(()=>{ copiaAutomaticaOneDrive(false); },AUTOSAVE_OD_INTERVALO);
+// e ao ir para segundo plano — é o último instante em que a app corre
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState==='hidden') copiaAutomaticaOneDrive(false);
+});
 
 function atualizarBotaoOneDrive(){
   const btn=document.getElementById('btn-onedrive');
@@ -16997,12 +17189,55 @@ function mostrarTemplates(){
   document.body.appendChild(modal);
 }
 
+/* RETOMAR A CÓPIA MAIS COMPLETA, NÃO A PRIMEIRA QUE APARECE.
+   Cada gravação escreve em duas chaves — ce_ultimo e ce_proj_<nome> — e ainda
+   pode deixar arquivos ce_arquivo_… quando o peso desce. Retomava-se sempre
+   ce_ultimo. Se essa escrita falhou e a do projeto passou (ou o contrário), ou
+   se um arquivo tem mais do que a cópia corrente, arrancava-se com a versão
+   mais pobre sem ninguém dar por isso. Agora comparam-se todas as candidatas
+   do mesmo processo pelo peso e escolhe-se a mais completa. */
+function _candidatasRetoma(){
+  const out=[];
+  const ler=(k)=>{
+    try{
+      const raw=localStorage.getItem(k); if(!raw) return;
+      const snap=JSON.parse(raw);
+      const D2=JSON.parse(snap.data);
+      out.push({chave:k,snap,D:D2,peso:_pesoDoLevantamento(D2),
+        ts:Date.parse(snap.ts&&snap.ts.replace(/(\d{2})\/(\d{2})\/(\d{4}),?\s*/,'$3-$2-$1T'))||0});
+    }catch(e){}
+  };
+  ler('ce_ultimo');
+  const nome=(out[0]&&out[0].D&&out[0].D.nome)||'';
+  if(nome){
+    const kp=recolhaKey(nome);
+    ler(kp);
+    try{
+      /* key(i) em vez de Object.keys(localStorage): é o método de todos os
+         navegadores, e o único que funciona num armazenamento substituído. */
+      const ks=[]; for(let i=0;i<localStorage.length;i++) ks.push(localStorage.key(i));
+      ks.filter(k=>k&&k.startsWith('ce_arquivo_')&&k.endsWith('_'+kp)).forEach(ler);
+    }catch(e){}
+  }
+  // só candidatas do MESMO processo; a mais pesada primeiro, e a mais recente em empate
+  const mesmo=out.filter(c=>!nome||(c.D&&c.D.nome===nome));
+  mesmo.sort((a,b)=>(b.peso-a.peso)||(b.ts-a.ts));
+  return mesmo;
+}
 function retomar(){
   try{
-    const raw=localStorage.getItem('ce_ultimo');
-    if(!raw) return;
-    const snap=JSON.parse(raw);
-    const snapD=JSON.parse(snap.data);
+    const cands=_candidatasRetoma();
+    if(!cands.length) return;
+    const esc=cands[0];
+    if(esc.chave!=='ce_ultimo'&&cands.length>1){
+      const atual=cands.find(c=>c.chave==='ce_ultimo');
+      if(atual&&esc.peso>atual.peso)
+        alert('Encontrei uma cópia MAIS COMPLETA deste levantamento'+
+          (esc.chave.startsWith('ce_arquivo_')?' (arquivada)':'')+
+          '.\n\nÉ essa que vou abrir. Confirma que está tudo lá.');
+    }
+    const snap=esc.snap;
+    const snapD=esc.D;
     const snapA=JSON.parse(snap.answers);
     Object.assign(D,snapD);
     if(!D.divisoesDados||typeof D.divisoesDados!=='object')D.divisoesDados={};
@@ -17148,7 +17383,13 @@ function _gravarSeguro(chave,snap,pesoNovo){
         }
       }
     }
-    localStorage.setItem(chave,JSON.stringify(snap));
+    const texto=JSON.stringify(snap);
+    localStorage.setItem(chave,texto);
+    /* LER DE VOLTA. Um setItem que não lança pode, mesmo assim, não ter
+       escrito o que se pediu — armazenamento a expulsar, navegador em modo
+       privado a fingir que grava. Confirma-se lendo. Custa um getItem. */
+    const lido=localStorage.getItem(chave);
+    if(lido!==texto) throw new Error('o navegador não guardou o que lhe foi pedido');
     return true;
   }catch(e){
     // deixar a exceção subir: quem chama tem de saber que NÃO gravou
@@ -17162,18 +17403,50 @@ function _gravarSeguro(chave,snap,pesoNovo){
    Agora: avisa à primeira falha, tenta libertar espaço, e se não conseguir
    grava o essencial (sem histórico) para salvar o que dá. */
 let _falhaGravacaoAvisada=false;
+/* O ESTADO DA GRAVAÇÃO À VISTA, EM CADA GRAVAÇÃO.
+   O aviso antigo disparava um alert UMA vez e nunca mais: quem carregava em OK
+   e continuava, continuava às escuras. A faixa no cabeçalho mostra o resultado
+   de cada gravação — hora quando correu bem, vermelho fixo enquanto falhar, e
+   volta a verde sozinha quando voltar a gravar. O alert mantém-se para a
+   primeira falha, porque a faixa pode passar despercebida a quem está a medir. */
+let _ultimaGravacaoOk=null;
+function _mostrarEstadoGravacao(ok,msg){
+  try{
+    const faixa=document.getElementById('estado-grav');
+    const mini=document.getElementById('hdr-grav');
+    const hora=new Date().toLocaleTimeString('pt-PT',{hour:'2-digit',minute:'2-digit'});
+    if(ok){
+      _ultimaGravacaoOk=hora;
+      if(faixa){ faixa.style.display='none'; }
+      if(mini){ mini.textContent='💾 '+hora; mini.style.color='var(--tx3)'; }
+    } else {
+      if(faixa){
+        faixa.style.display='block';
+        faixa.style.background='rgba(239,83,80,.16)';
+        faixa.style.color='#ff8a80';
+        faixa.style.fontWeight='700';
+        faixa.textContent='⚠ NÃO ESTÁ A GRAVAR'+(msg?' — '+msg:'')+
+          (_ultimaGravacaoOk?' · última gravação boa às '+_ultimaGravacaoOk:' · nada gravado ainda')+
+          ' · EXPORTA JÁ';
+      }
+      if(mini){ mini.textContent='⚠ não grava'; mini.style.color='#ff8a80'; }
+    }
+  }catch(e){}
+}
 function _avisarFalhaGravacao(msg){
+  _mostrarEstadoGravacao(false,msg);
+  try{
+    const st=document.getElementById('pacote-status');
+    if(st){st.style.display='block';st.style.color='var(--am)';
+      st.textContent='⚠️ Gravação a falhar — exporta já, o trabalho está só na memória.';}
+  }catch(e){}
   if(_falhaGravacaoAvisada) return;
   _falhaGravacaoAvisada=true;
   try{
     alert('⚠️ NÃO CONSIGO GRAVAR NO TELEMÓVEL\n\n'+msg+'\n\n'+
       'O levantamento está só na memória: se fechares a app, PERDE-SE.\n\n'+
-      'Exporta AGORA (ecrã Exportar → Partilhar) antes de continuares.');
-  }catch(e){}
-  try{
-    const st=document.getElementById('pacote-status');
-    if(st){st.style.display='block';st.style.color='var(--am)';
-      st.textContent='⚠️ Gravação a falhar — exporta já, o trabalho está só na memória.';}
+      'Exporta AGORA (ecrã Exportar → Partilhar) antes de continuares.\n\n'+
+      'A faixa vermelha no cabeçalho fica lá enquanto isto não se resolver.');
   }catch(e){}
 }
 function _libertarEspaco(){
@@ -17689,10 +17962,13 @@ function autoSave(){
     if(a==='protegido'||b==='protegido') _protegido=true;
     return (a===true||b===true);
   };
+  const ok=()=>{ _mostrarEstadoGravacao(true);
+    try{ _impressaoGravada=_impressaoAtual(); }catch(e){}
+    return true; };
   try{
-    if(tentar()) return true;
+    if(tentar()) return ok();
     // não gravou: pode ser falta de espaço — libertar e tentar outra vez
-    if(_libertarEspaco()&&tentar()) return true;
+    if(_libertarEspaco()&&tentar()) return ok();
     // último recurso: gravar sem o histórico, que é o que mais cresce
     const semHist={...snap};
     try{
@@ -17700,7 +17976,7 @@ function autoSave(){
       semHist.data=JSON.stringify(D2);
     }catch(e){}
     if(_gravarSeguro(recolhaKey(D.nome),semHist,peso)===true||
-       _gravarSeguro('ce_ultimo',semHist,peso)===true) return true;
+       _gravarSeguro('ce_ultimo',semHist,peso)===true) return ok();
     if(_protegido){
       _avisarFalhaGravacao('Já existe gravado um levantamento MAIS COMPLETO com este nome — '+
         'para não o destruir, o que estás a fazer agora não está a ser gravado.');
