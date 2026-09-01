@@ -559,7 +559,93 @@ const DIVS_BASE=[
 // VERSÃO — fonte única (selo no ecrã inicial + cabeçalho do TXT exportado).
 // Subir aqui a cada alteração ao ficheiro.
 // ═══════════════════════════════════════
-const APP_VERSION='v2026.09.01-FIX228';
+const APP_VERSION='v2026.09.01-FIX230';
+
+/* ══════════════════════════════════════════════════════════════════
+   A APP INSTALADA FICAVA PRESA NUMA VERSÃO ANTIGA
+   ══════════════════════════════════════════════════════════════════
+   O Chrome mostrava a versão nova e a app instalada ficava na FIX226 —
+   mesmo depois de desinstalar e instalar. A causa é um service worker de
+   uma versão antiga: fica registado no telemóvel a servir a cópia que
+   guardou, e sobrevive à desinstalação da app.
+
+   Duas defesas:
+   1. Ao arrancar, apaga-se qualquer service worker e qualquer cache desta
+      origem. Se havia um a controlar a página, recarrega-se uma vez.
+   2. Confronta-se a versão desta cópia com a que está no servidor (pedido
+      sem cache). Se o servidor tem uma mais recente, aparece uma faixa
+      «Há uma versão nova — actualizar» que recarrega sem cache. */
+// ce_ultimo antigo (cópia inteira) → ponteiro. Liberta logo metade do espaço.
+(function migrarCeUltimo(){
+  try{
+    const raw=localStorage.getItem('ce_ultimo'); if(!raw) return;
+    const snap=JSON.parse(raw);
+    if(!snap||snap.ponteiro||snap.data===undefined||!snap.nome) return;
+    const k='ce_proj_'+String(snap.nome).replace(/[^a-zA-Z0-9À-ú]/g,'_').toLowerCase();
+    /* Só se aponta para o processo se ele lá estiver SÃO. Se estiver estragado
+       ou em falta, a cópia inteira de ce_ultimo é a boa — passa a ser ela. */
+    let alvoSao=false;
+    try{ const a=JSON.parse(localStorage.getItem(k)||''); alvoSao=!!(a&&a.data&&JSON.parse(a.data)); }catch(e){}
+    if(!alvoSao) localStorage.setItem(k,raw);
+    localStorage.setItem('ce_ultimo',JSON.stringify({ponteiro:k,nome:snap.nome,
+      morada:snap.morada,ts:snap.ts,pergunta:snap.pergunta}));
+  }catch(e){}
+})();
+(async function limparServiceWorkerAntigo(){
+  try{
+    if(!('serviceWorker' in navigator)) return;
+    const regs=await navigator.serviceWorker.getRegistrations();
+    const tinhaControlo=!!navigator.serviceWorker.controller;
+    for(const r of regs){ try{ await r.unregister(); }catch(e){} }
+    if(window.caches){
+      const nomes=await caches.keys();
+      for(const n of nomes){ try{ await caches.delete(n); }catch(e){} }
+    }
+    if(regs.length&&tinhaControlo&&!sessionStorage.getItem('ce_sw_limpo')){
+      sessionStorage.setItem('ce_sw_limpo','1');
+      _recarregarApp();
+    }
+  }catch(e){}
+})();
+// ponto único de recarga — substituível nos testes, e um só sítio para gravar antes
+function _recarregarApp(semCache){
+  try{ if(typeof autoSave==='function') autoSave(); }catch(e){}
+  if(semCache) location.replace(location.pathname+'?v='+Date.now());
+  else location.reload();
+}
+function _versaoNumero(v){
+  const m=/FIX(\d+)/.exec(String(v||'')); return m?parseInt(m[1]):0;
+}
+async function verificarVersaoNoServidor(){
+  try{
+    if(location.protocol==='file:') return;
+    const r=await fetch(location.pathname.replace(/[^/]*$/,'')+'index.html?v='+Date.now(),
+      {cache:'no-store'});
+    if(!r.ok) return;
+    const html=await r.text();
+    const m=/APP_VERSION='([^']+)'/.exec(html);
+    if(!m) return;
+    const nova=_versaoNumero(m[1]), esta=_versaoNumero(APP_VERSION);
+    if(nova>esta) mostrarFaixaVersaoNova(m[1]);
+  }catch(e){}
+}
+function mostrarFaixaVersaoNova(v){
+  if(document.getElementById('faixa-versao')) return;
+  const f=document.createElement('div');
+  f.id='faixa-versao';
+  f.style.cssText='position:fixed;left:0;right:0;top:0;z-index:99999;background:#e8a33d;'+
+    'color:#1a1200;font:600 13px/1.4 -apple-system,Roboto,sans-serif;padding:10px 12px;'+
+    'display:flex;gap:10px;align-items:center;justify-content:center;flex-wrap:wrap';
+  f.innerHTML='<span>Há uma versão nova da app ('+String(v).replace(/</g,'')+'). Esta é a '+APP_VERSION+'.</span>';
+  const b=document.createElement('button');
+  b.textContent='Actualizar agora';
+  b.style.cssText='background:#1a1200;color:#fff;border:0;border-radius:8px;padding:8px 14px;font-weight:700';
+  // pedido sem cache: o «?v=» obriga o navegador a ir ao servidor
+  b.onclick=()=>_recarregarApp(true);
+  f.appendChild(b);
+  document.body.appendChild(f);
+}
+window.addEventListener('load',()=>{ setTimeout(verificarVersaoNoServidor,1500); });
 
 // ═══════════════════════════════════════
 // ESTADO
@@ -12266,7 +12352,7 @@ async function fotoDbListKeys(){
 // em segurança (o projeto que as usava foi apagado ou nunca mais vai ser reaberto).
 function chavesFotosReferenciadas(){
   const referenciadas=new Set();
-  Object.keys(localStorage).filter(k=>k.startsWith('ce_proj_')).forEach(k=>{
+  _chavesLS().filter(k=>k.startsWith('ce_proj_')).forEach(k=>{
     try{
       const snap=JSON.parse(localStorage.getItem(k));
       const d=JSON.parse(snap.data);
@@ -15543,7 +15629,7 @@ const CAMPOS_HERDADOS=[
 
 function clonarLevantamento(){
   let chaves=[];
-  try{ chaves=Object.keys(localStorage).filter(k=>k.startsWith('ce_proj_')); }catch(e){}
+  try{ chaves=_chavesLS().filter(k=>k.startsWith('ce_proj_')); }catch(e){}
   if(!chaves.length){ alert('Ainda não há levantamentos guardados para usar como base.'); return; }
 
   const modal=document.createElement('div');
@@ -17200,8 +17286,13 @@ function _candidatasRetoma(){
   const out=[];
   const ler=(k)=>{
     try{
-      const raw=localStorage.getItem(k); if(!raw) return;
-      const snap=JSON.parse(raw);
+      let raw=localStorage.getItem(k); if(!raw) return;
+      let snap=JSON.parse(raw);
+      // ce_ultimo é um ponteiro: segue-se para o processo a que aponta
+      if(snap&&snap.ponteiro&&snap.data===undefined){
+        raw=localStorage.getItem(snap.ponteiro); if(!raw) return;
+        snap=JSON.parse(raw);
+      }
       const D2=JSON.parse(snap.data);
       out.push({chave:k,snap,D:D2,peso:_pesoDoLevantamento(D2),
         ts:Date.parse(snap.ts&&snap.ts.replace(/(\d{2})\/(\d{2})\/(\d{4}),?\s*/,'$3-$2-$1T'))||0});
@@ -17213,14 +17304,17 @@ function _candidatasRetoma(){
     const kp=recolhaKey(nome);
     ler(kp);
     try{
-      /* key(i) em vez de Object.keys(localStorage): é o método de todos os
+      /* key(i) em vez de _chavesLS(): é o método de todos os
          navegadores, e o único que funciona num armazenamento substituído. */
       const ks=[]; for(let i=0;i<localStorage.length;i++) ks.push(localStorage.key(i));
       ks.filter(k=>k&&k.startsWith('ce_arquivo_')&&k.endsWith('_'+kp)).forEach(ler);
     }catch(e){}
   }
   // só candidatas do MESMO processo; a mais pesada primeiro, e a mais recente em empate
-  const mesmo=out.filter(c=>!nome||(c.D&&c.D.nome===nome));
+  let mesmo=out.filter(c=>!nome||(c.D&&c.D.nome===nome));
+  // ponteiro e alvo são a mesma cópia: fica um
+  const viu=new Set();
+  mesmo=mesmo.filter(c=>{ const id=c.snap&&c.snap.data; if(viu.has(id)) return false; viu.add(id); return true; });
   mesmo.sort((a,b)=>(b.peso-a.peso)||(b.ts-a.ts));
   return mesmo;
 }
@@ -17363,6 +17457,18 @@ function _arquivar(chave,antigoRaw){
   try{ localStorage.setItem('ce_ultimo_cheio',antigoRaw); }catch(e){}
 }
 function _gravarSeguro(chave,snap,pesoNovo){
+  /* ce_ultimo ERA UMA CÓPIA INTEIRA DO PROCESSO — cada levantamento ocupava
+     o dobro. Passa a ser um ponteiro pequeno para ce_proj_<nome>, com o que o
+     ecrã inicial precisa para mostrar «retomar»: nome, morada, pergunta, hora.
+     As leituras antigas continuam a funcionar: quem encontrar um ce_ultimo
+     com `data` (formato antigo) lê-o na mesma. */
+  if(chave==='ce_ultimo'&&snap&&snap.data!==undefined){
+    try{
+      localStorage.setItem('ce_ultimo',JSON.stringify({ponteiro:recolhaKey(snap.nome),
+        nome:snap.nome,morada:snap.morada,ts:snap.ts,pergunta:snap.pergunta}));
+      return true;
+    }catch(e){ throw e; }
+  }
   try{
     const antigoRaw=localStorage.getItem(chave);
     if(antigoRaw){
@@ -17449,15 +17555,57 @@ function _avisarFalhaGravacao(msg){
       'A faixa vermelha no cabeçalho fica lá enquanto isto não se resolver.');
   }catch(e){}
 }
-function _libertarEspaco(){
-  // apagar arquivos antigos, do mais velho para o mais novo
-  try{
-    const arq=Object.keys(localStorage).filter(k=>k.startsWith('ce_arquivo_')).sort();
-    let n=0;
-    while(arq.length>3&&n<20){ localStorage.removeItem(arq.shift()); n++; }
-    return n;
-  }catch(e){ return 0; }
+/* QUANTO OCUPA CADA COISA NO ARMAZENAMENTO.
+   O limite é de uns 5 MB para tudo. Cada processo é guardado duas vezes
+   (ce_proj_x e ce_ultimo), os arquivos somam, e o histórico cresce. Ao fim
+   de meia dúzia de levantamentos sem limpar, enche — e a gravação do processo
+   NOVO é recusada logo na pergunta 1, como se viu no «Teste 2». */
+function _chavesLS(){
+  const ks=[]; try{ for(let i=0;i<localStorage.length;i++) ks.push(localStorage.key(i)); }catch(e){}
+  return ks.filter(Boolean);
 }
+function _tamanhoLS(k){ try{ return (localStorage.getItem(k)||'').length*2; }catch(e){ return 0; } }
+function ocupacaoArmazenamento(){
+  const itens=_chavesLS().map(k=>({chave:k,bytes:_tamanhoLS(k)}));
+  const total=itens.reduce((a,x)=>a+x.bytes,0);
+  const porTipo={processos:0,arquivos:0,copia:0,outros:0};
+  itens.forEach(x=>{
+    if(x.chave.startsWith('ce_proj_')) porTipo.processos+=x.bytes;
+    else if(x.chave.startsWith('ce_arquivo_')) porTipo.arquivos+=x.bytes;
+    else if(x.chave==='ce_ultimo'||x.chave==='ce_ultimo_cheio') porTipo.copia+=x.bytes;
+    else porTipo.outros+=x.bytes;
+  });
+  return {itens,total,porTipo,limite:5*1024*1024};
+}
+function _libertarEspaco(){
+  /* Por ordem de dor: primeiro o que não custa nada perder.
+     1. arquivos (cópias de segurança de versões anteriores) — todos menos os 2
+        mais recentes;
+     2. ce_ultimo_cheio (cópia extra antiga);
+     3. o histórico (_hist) dos processos que NÃO são o corrente — é o que
+        mais cresce e não é dado de levantamento.
+     Nunca se apaga um processo: isso decide-o a pessoa, na lista. */
+  let n=0;
+  try{
+    const arq=_chavesLS().filter(k=>k.startsWith('ce_arquivo_')).sort();
+    while(arq.length>2){ localStorage.removeItem(arq.shift()); n++; }
+    if(localStorage.getItem('ce_ultimo_cheio')){ localStorage.removeItem('ce_ultimo_cheio'); n++; }
+    const atual=D&&D.nome?recolhaKey(D.nome):null;
+    _chavesLS().filter(k=>k.startsWith('ce_proj_')&&k!==atual).forEach(k=>{
+      try{
+        const snap=JSON.parse(localStorage.getItem(k));
+        const D2=JSON.parse(snap.data);
+        if(Array.isArray(D2._hist)&&D2._hist.length>20){
+          D2._hist=D2._hist.slice(-20);
+          snap.data=JSON.stringify(D2);
+          localStorage.setItem(k,JSON.stringify(snap)); n++;
+        }
+      }catch(e){}
+    });
+  }catch(e){}
+  return n;
+}
+function _mbTxt(b){ return (b/1048576).toFixed(2)+' MB'; }
 /* BOTÃO FLUTUANTE DA FOTO DE ALÇADO
    A foto do alçado tira-se de qualquer ponto do levantamento — quando se passa
    à frente da fachada. Ter de voltar ao ecrã de exportar para isso é perder o
@@ -17982,11 +18130,29 @@ function autoSave(){
         'para não o destruir, o que estás a fazer agora não está a ser gravado.');
       return false;
     }
-    _avisarFalhaGravacao('O armazenamento do navegador está cheio ou bloqueado.');
+    {
+      let det='';
+      try{
+        const o=ocupacaoArmazenamento();
+        const nProc=o.itens.filter(x=>x.chave.startsWith('ce_proj_')).length;
+        det=' Ocupado: '+_mbTxt(o.total)+' — '+nProc+' processo(s) guardado(s) ('+_mbTxt(o.porTipo.processos)+
+          ')'+(o.porTipo.arquivos?', arquivos '+_mbTxt(o.porTipo.arquivos):'')+
+          '. Apaga processos já exportados em ☰ → Recolhas guardadas.';
+      }catch(e){}
+      _avisarFalhaGravacao('O armazenamento do navegador está cheio.'+det);
+    }
     return false;
   }catch(e){
-    if(String(e&&e.name).indexOf('Quota')>=0||/quota|exceeded|full/i.test(String(e&&e.message)))
-      _avisarFalhaGravacao('O armazenamento do navegador está CHEIO.');
+    if(String(e&&e.name).indexOf('Quota')>=0||/quota|exceeded|full/i.test(String(e&&e.message))){
+      let det='';
+      try{
+        const o=ocupacaoArmazenamento();
+        const nProc=o.itens.filter(x=>x.chave.startsWith('ce_proj_')).length;
+        det=' Ocupado: '+_mbTxt(o.total)+' — '+nProc+' processo(s) ('+_mbTxt(o.porTipo.processos)+'). '+
+          'Apaga os já exportados em ☰ → Recolhas guardadas.';
+      }catch(e2){}
+      _avisarFalhaGravacao('O armazenamento do navegador está CHEIO.'+det);
+    }
     else _avisarFalhaGravacao('Erro ao gravar: '+(e&&e.message||e));
     return false;
   }
@@ -18009,7 +18175,7 @@ function saveRecolha(){
 }
 
 function listRecolhas(){
-  const projKeys=Object.keys(localStorage).filter(k=>k.startsWith('ce_proj_'));
+  const projKeys=_chavesLS().filter(k=>k.startsWith('ce_proj_'));
   const existing=document.getElementById('modal-recolhas');
   if(existing) existing.remove();
   if(!projKeys.length){alert('Sem recolhas guardadas.');return;}
@@ -18032,6 +18198,23 @@ function listRecolhas(){
   searchBox.style.cssText='border:1px solid var(--br);border-radius:10px;background:var(--bg3);color:var(--tx);font-size:13px;padding:10px 12px;width:100%;box-sizing:border-box';
   box.appendChild(searchBox);
 
+  // medidor: quanto está ocupado e quanto sobra
+  const medidor=document.createElement('div');
+  medidor.style.cssText='font-size:12px;color:var(--tx2);line-height:1.4';
+  const pintarMedidor=()=>{
+    try{
+      const o=ocupacaoArmazenamento();
+      const pct=Math.min(100,Math.round(o.total/o.limite*100));
+      medidor.innerHTML='<div style="display:flex;justify-content:space-between"><span>Armazenamento: '+
+        _mbTxt(o.total)+' de ~5 MB ('+pct+'%)</span><span>'+projKeys.length+' processo(s)</span></div>'+
+        '<div style="height:6px;background:var(--bg3);border-radius:3px;margin-top:4px;overflow:hidden">'+
+        '<div style="height:100%;width:'+pct+'%;background:'+(pct>85?'#ef5350':pct>60?'var(--am,#e8a33d)':'var(--ac)')+'"></div></div>'+
+        (pct>85?'<div style="color:#ff8a80;margin-top:4px">Quase cheio — apaga processos já exportados (✅) para a gravação não falhar.</div>':'');
+    }catch(e){}
+  };
+  pintarMedidor();
+  box.appendChild(medidor);
+
   const listWrap=document.createElement('div');listWrap.style.cssText='display:flex;flex-direction:column;gap:8px';
   box.appendChild(listWrap);
 
@@ -18045,8 +18228,14 @@ function listRecolhas(){
         const row=document.createElement('div');
         row.style.cssText='display:flex;align-items:center;gap:8px;background:var(--bg3);border-radius:10px;padding:10px';
         const info=document.createElement('div');info.style.flex='1';
-        info.innerHTML='<div style="font-size:13px;font-weight:600;color:var(--tx)">'+escHtml(s.nome||'—')+'</div>'+
-          '<div style="font-size:11px;color:var(--tx2)">'+escHtml(s.morada?s.morada+' · ':'')+escHtml(s.ts||'')+(s.concluido?' ✅':' (em progresso)')+'</div>';
+        /* Tamanho e se já foi exportado: é o que se precisa de saber para
+           decidir o que apagar quando o armazenamento enche. */
+        let exportado=false, bytes=_tamanhoLS(k);
+        try{ const D2=JSON.parse(s.data); exportado=!!D2._jaExportado; }catch(e){}
+        info.innerHTML='<div style="font-size:13px;font-weight:600;color:var(--tx)">'+escHtml(s.nome||'—')+
+          ' <span style="font-weight:400;color:var(--tx3);font-size:11px">'+_mbTxt(bytes)+'</span></div>'+
+          '<div style="font-size:11px;color:var(--tx2)">'+escHtml(s.morada?s.morada+' · ':'')+escHtml(s.ts||'')+
+          (exportado?' · ✅ exportado':' · <span style="color:var(--am,#e8a33d)">por exportar</span>')+'</div>';
         const loadBtn=document.createElement('button');
         loadBtn.textContent='Abrir';
         loadBtn.style.cssText='border:none;background:var(--ac);color:#fff;border-radius:8px;padding:6px 12px;font-size:12px;cursor:pointer;font-weight:600;flex-shrink:0';
@@ -18062,7 +18251,14 @@ function listRecolhas(){
         const delBtn=document.createElement('button');
         delBtn.textContent='🗑️';
         delBtn.style.cssText='border:1px solid var(--red);background:none;color:var(--red);border-radius:8px;padding:6px 9px;font-size:13px;cursor:pointer;flex-shrink:0';
-        delBtn.onclick=()=>{if(!confirm('Apagar "'+s.nome+'"?'))return;localStorage.removeItem(k);row.remove();};
+        delBtn.onclick=()=>{
+          if(!exportado&&!confirm('«'+s.nome+'» NÃO foi exportado. Se apagares, perde-se.\n\nApagar mesmo assim?')) return;
+          if(exportado&&!confirm('Apagar «'+s.nome+'»? ('+_mbTxt(bytes)+')')) return;
+          localStorage.removeItem(k);
+          // os arquivos deste processo vão com ele
+          _chavesLS().filter(a=>a.startsWith('ce_arquivo_')&&a.endsWith('_'+k)).forEach(a=>localStorage.removeItem(a));
+          row.remove(); pintarMedidor();
+        };
         row.appendChild(info);row.appendChild(loadBtn);row.appendChild(delBtn);
         listWrap.appendChild(row);
       }catch(e){}
