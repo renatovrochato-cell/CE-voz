@@ -394,6 +394,8 @@ body.com-planta #visDivisoria.a-arrastar::after{color:#04140c}
     </div>
     <div id="docs-thumbs" style="display:flex;flex-wrap:wrap;gap:8px"></div>
     <button class="btn-next" onclick="adicionarDocumento()">📷 Fotografar / digitalizar documento</button>
+    <button class="btn-next" style="background:var(--bg3);color:var(--tx)" onclick="escolherDoOneDrive()">☁ Escolher no OneDrive (vários de uma vez)</button>
+    <div id="od-browser" style="display:none"></div>
     <button class="btn-next" style="background:var(--bg3);color:var(--tx)" onclick="anexarPlanta()">📐 Anexar planta (extrai áreas automaticamente)</button>
     <div id="planta-status" style="font-size:13.5px;color:var(--tx2);text-align:center;padding:4px;display:none"></div>
     <div id="planta-areas-lista" style="display:none"></div>
@@ -559,7 +561,7 @@ const DIVS_BASE=[
 // VERSÃO — fonte única (selo no ecrã inicial + cabeçalho do TXT exportado).
 // Subir aqui a cada alteração ao ficheiro.
 // ═══════════════════════════════════════
-const APP_VERSION='v2026.09.01-FIX230';
+const APP_VERSION='v2026.09.02-FIX238';
 
 /* ══════════════════════════════════════════════════════════════════
    A APP INSTALADA FICAVA PRESA NUMA VERSÃO ANTIGA
@@ -863,6 +865,18 @@ function buildQs(){
     chips:['Natural','Mecânica extração','Mecânica insuflação','Mecânica duplo fluxo com recuperação','Híbrida'],
     isVentInline:true,
     key:'ventTipo'});
+
+  /* OBSTÁCULOS À VENTILAÇÃO — a folha ITeCons pergunta «Edifícios/obstáculos?»,
+     altura e distância, e a app nunca o perguntava: saía sempre «sem
+     obstáculos» e a classe de protecção ao vento vinha errada num prédio com
+     outro em frente. Manual SCE 5.2.3: H_obs e D_obs; sem medida, 3 m por
+     piso do obstáculo. «Não sei» é resposta válida e fica assinalado. */
+  qs.push({id:'vent-obst',ctx:'Ventilação',
+    text:'Há edifícios ou obstáculos em frente às fachadas expostas?',
+    hint:'Conta o que está a menos de ~4× a altura do imóvel. Se sim, dá a altura do obstáculo (ou os pisos) e a distância.',
+    chips:['Não','Sim','Não sei'],
+    isVentObstInline:true,
+    key:'ventObstaculos'});
 
   // ELEMENTOS GERAIS
   /* ISOLAMENTO — pergunta-se cedo porque muda a descrição de TODAS as
@@ -1770,6 +1784,36 @@ let obsAudioURL=null;
 let obsAudioCarregando=false; // true enquanto vai buscar a gravação persistida ao IndexedDB
 let obsBlobDeProjeto=undefined; // a que D.obsAudioKey pertence o obsBlob atual em memória
 
+/* Os pormenores do obstáculo, só depois do Sim: altura (em metros ou em
+   pisos — 3 m/piso, Manual SCE) e distância. Tudo em chips para ser rápido. */
+function renderVentObstInline(wrap){
+  wrap.innerHTML='';
+  if(String(D.ventObstaculos||answers[curQ]||'')!=='Sim'){
+    const n=document.createElement('div');
+    n.style.cssText='font-size:12.5px;color:var(--tx3);margin-top:8px';
+    n.textContent=(D.ventObstaculos==='Não sei')
+      ?'Fica assinalado como por confirmar na folha de ventilação.'
+      :'Sem obstáculos: a folha sai com «Edifícios/obstáculos» desmarcado.';
+    wrap.appendChild(n); return;
+  }
+  const grupo=(rotulo,opcoes,campo,sufixo)=>{
+    const g=document.createElement('div'); g.style.marginTop='12px';
+    const r=document.createElement('div'); r.style.cssText='font-size:12px;color:var(--tx2);margin-bottom:6px'; r.textContent=rotulo; g.appendChild(r);
+    const row=document.createElement('div'); row.style.cssText='display:flex;flex-wrap:wrap;gap:6px';
+    opcoes.forEach(o=>{
+      const c=document.createElement('div'); c.className='chip'+(String(D[campo]||'')===String(o)?' sel':''); c.textContent=o+(sufixo&&/^\d/.test(o)?sufixo:'');
+      c.onclick=()=>{ D[campo]=String(o); autoSave(); renderVentObstInline(wrap); };
+      row.appendChild(c);
+    });
+    g.appendChild(row); wrap.appendChild(g);
+  };
+  grupo('Altura do obstáculo',['3','6','9','12','15','18','Não sei'],'ventHObstaculo',' m');
+  grupo('Distância ao obstáculo',['5','10','15','20','30','50','Não sei'],'ventDObstaculo',' m');
+  const n=document.createElement('div');
+  n.style.cssText='font-size:11.5px;color:var(--tx3);margin-top:10px';
+  n.textContent='3 m por piso do obstáculo quando não se mede (Manual SCE). A folha só entra em «protegido» se o obstáculo for alto e próximo.';
+  wrap.appendChild(n);
+}
 function renderObsAudio(wrap){
   // Proteção contra trocar de projeto (retomar, abrir da lista de recolhas, ou
   // começar de novo) sem recarregar a página: se o obsBlob em memória não é do
@@ -1796,6 +1840,44 @@ function renderObsAudio(wrap){
 
   wrap.innerHTML='';
   const form=document.createElement('div');form.style.cssText='display:flex;flex-direction:column;gap:12px';
+
+  /* OBSERVAÇÕES ESCRITAS, ALÉM DO ÁUDIO.
+     Só havia gravação de voz. Numa obra com ruído, ou quando é uma linha só
+     («contador no hall da escada»), escrever é mais rápido do que gravar. A
+     caixa de texto vai para D.obs, que já é o campo que o TXT lê; o áudio
+     continua a existir ao lado, e transcrito quando o há. */
+  {
+    const cx=document.createElement('div');
+    const rot=document.createElement('div');
+    rot.style.cssText='font-size:12px;color:var(--tx2);margin-bottom:5px';
+    rot.textContent='✍️ Escrever observações';
+    cx.appendChild(rot);
+    const ta=document.createElement('textarea');
+    ta.id='obs-texto';
+    ta.rows=4;
+    ta.placeholder='Ex.: contador no hall da escada · marquise fechada em 2015 · esquentador desligado';
+    ta.style.cssText='width:100%;box-sizing:border-box;border:1px solid var(--br);border-radius:10px;'+
+      'background:var(--bg3);color:var(--tx);font-size:15px;line-height:1.45;padding:10px 12px;'+
+      'font-family:inherit;resize:vertical;min-height:88px';
+    ta.value=D.obs||'';
+    // grava a cada paragem de escrita, não a cada tecla
+    let _tObs=null;
+    ta.addEventListener('input',()=>{
+      D.obs=ta.value;
+      clearTimeout(_tObs); _tObs=setTimeout(()=>{ try{ autoSave(); }catch(e){} },800);
+    });
+    ta.addEventListener('blur',()=>{ D.obs=ta.value; try{ autoSave(); }catch(e){} });
+    cx.appendChild(ta);
+    const nota=document.createElement('div');
+    nota.style.cssText='font-size:11px;color:var(--tx3);margin-top:4px';
+    nota.textContent='Vai para o TXT tal como está. Podes também gravar áudio em baixo — os dois ficam.';
+    cx.appendChild(nota);
+    form.appendChild(cx);
+    const sep=document.createElement('div');
+    sep.style.cssText='font-size:12px;color:var(--tx2);margin-top:4px';
+    sep.textContent='🎙️ Ou gravar áudio';
+    form.appendChild(sep);
+  }
 
   // estado e temporizador
   const statusEl=document.createElement('div');
@@ -4425,6 +4507,10 @@ function renderQ(){
     inlWrap.style.display='block';inlWrap.innerHTML='';
     document.getElementById('ans-box').style.display='none';
     renderDVInline(inlWrap);
+  } else if(q.isVentObstInline){
+    inlWrap.style.display='block';inlWrap.innerHTML='';
+    document.getElementById('ans-box').style.display='none';
+    renderVentObstInline(inlWrap);
   } else if(q.isObsInline){
     // observações — gravação áudio
     inlWrap.style.display='block';inlWrap.innerHTML='';
@@ -4978,6 +5064,11 @@ function saveToD(key,raw){
   else if(key==='pisoLocal'){D.pisoLocal=v;}
   else if(key==='levParedes'){D.levParedes=v;}
   else if(key==='ventTipo'){D.ventTipo=v;}
+  else if(key==='ventObstaculos'){
+    D.ventObstaculos=v;
+    // sem obstáculos, a altura e a distância deixam de fazer sentido
+    if(v!=='Sim'){ D.ventHObstaculo=''; D.ventDObstaculo=''; }
+  }
   else if(key==='obs'){D.obs=v;}
   else if(key==='ventCondutasIS'){D.ventCondutasIS=v;}
   else if(key==='ventCondutasISAbrang'){D.ventCondutasISAbrang=v;}
@@ -6867,12 +6958,51 @@ function buildSum(){
 // ═══════════════════════════════════════
 // EXPORT
 // ═══════════════════════════════════════
+/* PAINEL DE CUSTOS NO ECRÃ DE EXPORTAÇÃO.
+   Só o reconhecimento automático custa dinheiro. Aqui vê-se, por processo,
+   quantas leituras foram feitas, de que tipo, e quanto custaram — com as
+   repetições à parte, porque uma leitura que falhe e repita paga outra vez. */
+function mostrarPainelCustos(){
+  const scr=document.getElementById('scr-exp'); if(!scr) return;
+  const velho=document.getElementById('painel-custos'); if(velho) velho.remove();
+  const u=D.usoIA; if(!u||!u.chamadas) return;
+  const c=custoEstimadoIA(u); if(!c) return;
+  const cx=document.createElement('div');
+  cx.id='painel-custos';
+  cx.style.cssText='background:var(--bg2);border:1px solid var(--br);border-radius:11px;'+
+    'padding:11px 12px;margin-bottom:10px;font-size:12.5px;color:var(--tx2);line-height:1.5';
+  const NOME={documento:'caderneta / certidão',planta:'plantas',
+    'chapa unidade exterior':'chapas de unidades exteriores',etiqueta:'etiquetas de equipamento',
+    lareira:'fotos de lareira',campo:'fotos de campo'};
+  let linhas='';
+  Object.entries(u.porTipo||{}).sort((a,b)=>b[1].n-a[1].n).forEach(([k,v])=>{
+    linhas+='<div style="display:flex;justify-content:space-between"><span>'+
+      (NOME[k]||k)+' × '+v.n+'</span><span style="color:var(--tx3)">'+
+      ((v.entrada+v.saida)/1000).toFixed(1)+'k tokens</span></div>';
+  });
+  cx.innerHTML='<div style="color:var(--ac);font-weight:700;margin-bottom:6px">'+
+      'Reconhecimento automático neste processo</div>'+linhas+
+    '<div style="border-top:1px solid var(--br);margin-top:7px;padding-top:7px;'+
+      'display:flex;justify-content:space-between;font-weight:700;color:var(--tx)">'+
+      '<span>'+u.chamadas+' leitura(s) · '+((c.total)/1000).toFixed(1)+'k tokens</span>'+
+      '<span>≈ '+c.eur.toFixed(3).replace('.',',')+' €</span></div>'+
+    (u.repeticoes?'<div style="color:var(--am,#e8a33d);margin-top:5px">⚠ '+u.repeticoes+
+      ' repetição(ões) por falha — cada uma reenvia a imagem e paga outra vez.</div>':'')+
+    (u.reaproveitadas?'<div style="color:var(--ac);margin-top:5px">♻ '+u.reaproveitadas+
+      ' leitura(s) reaproveitada(s) — imagem repetida, não voltou a pagar.</div>':'')+
+    '<div style="color:var(--tx3);margin-top:6px;font-size:11.5px">Só a leitura de fotos e '+
+      'documentos custa. O resto da app — cálculos, TXT, ZIP, planta, revisão — e a cópia '+
+      'para o OneDrive não gastam nada disto.</div>';
+  const box=document.getElementById('exp-box');
+  if(box&&box.parentNode) box.parentNode.insertBefore(cx,box); else scr.appendChild(cx);
+}
 function goExp(){
   document.getElementById('exp-box').textContent=buildTxt();
   document.getElementById('copy-ok').style.display='none';
   show('scr-exp');
   try{renderFotosAlcadoThumbs();}catch(e){}
   try{avisarDVporPreencher();}catch(e){}
+  try{mostrarPainelCustos();}catch(e){}
 }
 /* AVISO NO ECRÃ DE EXPORTAÇÃO, COM ATALHO PARA A PERGUNTA.
    Descobrir no escritório que a DV ficou vazia obriga a reabrir o processo,
@@ -7044,14 +7174,31 @@ function agruparSistemasAC(D,tiposSemUE){
     // Se o grupo já tem modelo (veio da etiqueta interior), a chapa só é dele
     // quando o modelo coincide — senão duplicavam-se sistemas ao separar depois
     // por modelo.
-    let daMarca=g.marca?chapasUE.filter(d=>norm(d.marca)===norm(g.marca)):[];
+    /* Primeiro o que foi declarado em obra: uma chapa ligada a divisões deste
+       grupo é dele, independentemente do que o OCR leu na marca. Só depois se
+       recorre à marca. */
+    const chapasDecl=(D.unidadesExtFotos||[]).filter(f=>Array.isArray(f.divs)&&f.divs.some(d=>g.divs.includes(d)))
+      .map(f=>(f&&f.dados)||{}).filter(d=>Object.keys(d).length);
+    let daMarca=chapasDecl.length?chapasDecl:(g.marca?chapasUE.filter(d=>norm(d.marca)===norm(g.marca)):[]);
+    g.chapasDeclaradas=chapasDecl.length>0;
     if(g.modelo&&g.modeloFiavel&&daMarca.length){
       const doModelo=daMarca.filter(d=>norm(d.modelo)===norm(g.modelo));
       if(doModelo.length) daMarca=doModelo;
     }
-    // com um só grupo, as chapas sem marca legível são todas dele
-    g.chapasUE=daMarca.length?daMarca:(grupos.length===1?chapasUE:[]);
+    /* Com um só grupo, as chapas SEM marca legível são dele. As que têm marca
+       e CONTRADIZEM a do grupo, não: um Daikin ficava com o COP e o SCOP de um
+       Mitsubishi fotografado por engano (ou do vizinho), sem uma palavra. */
+    let contraditorias=[];
+    if(!daMarca.length&&grupos.length===1){
+      const semMarca=chapasUE.filter(d=>!norm(d.marca));
+      contraditorias=chapasUE.filter(d=>norm(d.marca)&&g.marca&&norm(d.marca)!==norm(g.marca));
+      g.chapasUE=g.marca?semMarca:chapasUE;
+    } else g.chapasUE=daMarca;
     g.temChapaUE=g.chapasUE.length>0;
+    g.avisoMarca=contraditorias.length
+      ?'chapa exterior de outra marca ('+[...new Set(contraditorias.map(d=>d.marca))].join(', ')+
+        ') fotografada, mas a divisão está marcada '+g.marca+' — NÃO foi usada. Confirma a marca.'
+      :null;
     g.tipoEscolhido=/multi-?split/i.test(g.tipos.join(' '));
 
     if(g.temChapaUE){
@@ -7079,6 +7226,13 @@ function agruparSistemasAC(D,tiposSemUE){
               ' divisões — é multi-split';
     if(!g.temChapaUE&&g.tipoEscolhido)
       g.aviso='multi-split sem foto da unidade exterior — sem a chapa da exterior não há potência nem COP para o cálculo';
+    if(g.avisoMarca) g.aviso=g.aviso?(g.aviso+' · '+g.avisoMarca):g.avisoMarca;
+    // divisões deste grupo marcadas como sem chapa acessível: explica-se, em vez de pedir a chapa
+    const naoAcess=(D.ueNaoAcessiveis||[]).filter(d=>g.divs.includes(d));
+    if(naoAcess.length&&!g.temChapaUE){
+      g.aviso=null;
+      g.notaAcesso='unidade exterior sem acesso em '+naoAcess.join(', ')+' — caracterizado pela etiqueta interior';
+    }
   });
 
   // ── Modelos diferentes na mesma marca são sistemas diferentes ──────────────
@@ -7090,7 +7244,7 @@ function agruparSistemasAC(D,tiposSemUE){
   const finais=[];
   grupos.forEach(g=>{
     const mods=[...new Set((g.chapasUE||[]).map(d=>norm(d.modelo)).filter(Boolean))];
-    if(!g.temChapaUE||g.multi||mods.length<2){finais.push(g);return;}
+    if(!g.temChapaUE||g.multi||mods.length<2||g.chapasDeclaradas){finais.push(g);return;}
     mods.forEach(mo=>{
       const chapas=g.chapasUE.filter(d=>norm(d.modelo)===mo);
       finais.push(Object.assign({},g,{
@@ -7438,11 +7592,27 @@ function isolamentoDasParedes(){
       :'sem isolamento'};
 }
 
+/* O material do isolamento DA COBERTURA: o respondido, ou o das paredes se se
+   disse «Igual às paredes» ou não se respondeu, ou desconhecido (λ 0,060). */
+function materialIsolCobertura(){
+  const v=String(D.isolCobMat||'').trim();
+  if(!v||/^igual/i.test(v)) return isolamentoDasParedes().mat||'Desconhecido';
+  if(/^n[ãa]o sei/i.test(v)) return 'Desconhecido';
+  const x=v.toLowerCase();
+  if(/\bxps\b|extrudid/.test(x)) return 'XPS';
+  if(/\beps\b|expandid|esferovite/.test(x)) return 'EPS';
+  if(/l[ãa]\s*(mineral|de rocha|de vidro)|rockwool/.test(x)) return 'Lã mineral';
+  if(/poliuretano|\bpur\b|\bpir\b/.test(x)) return 'Poliuretano';
+  return 'Desconhecido';
+}
 function uParedeComIsolamento(espCm,anoConstrucao,isolCm,material){
   const base=uParedePorDefeito(espCm,anoConstrucao);
   if(!base) return null;
   const e=parseFloat(String(isolCm||'').replace(',','.'));
-  const eM=(e>0)?(e>1?e/100:e):0.02;            // sem espessura: 2 cm do Guia SCE
+  /* «1» é 1 cm, não 1 metro. O limiar estava em e>1: uma resposta de 1 cm
+     virava um metro de isolamento e a parede saía com U = 0,04. Isolamento
+     em metros é sempre < 0,5; em centímetros é sempre ≥ 1. */
+  const eM=(e>0)?(e>=0.5?e/100:e):0.02;         // sem espessura: 2 cm do Guia SCE
   const lam=LAMBDA_ISOL[material]||LAMBDA_ISOL['Desconhecido'];
   const u=1/(1/base.u+eM/lam);
   return {...base,uSemIsol:base.u,u:+u.toFixed(2),
@@ -7456,18 +7626,48 @@ function uParedePorDefeito(espCm,anoConstrucao){
   const ano=parseInt(anoConstrucao)||0;
   const pedra=(ano>0&&ano<1960);
   const tab=pedra?U_PAREDE_PEDRA:U_PAREDE_SEM_ISOL;
-  let melhor=null;
-  tab.forEach(l=>{
-    const d=Math.abs(l.esp-m);
-    if(!melhor||d<melhor.d) melhor={...l,d};
-  });
-  if(!melhor||melhor.d>0.035) return null;      // mais de 3,5 cm de diferença: não arrisca
-  return {u:melhor.u,esp:melhor.esp,exacto:melhor.d<0.005,
-    material:pedra?'alvenaria de pedra':'tijolo',
-    desc:melhor.desc||'',
-    fonte:pedra
-      ? 'valor por defeito do Manual SCE para alvenaria de pedra anterior a 1960'
-      : 'valor por defeito do Manual SCE para paredes de tijolo posteriores a 1960'};
+  /* INTERPOLAÇÃO E EXTRAPOLAÇÃO SOBRE A RESISTÊNCIA, NÃO SOBRE O U.
+     O U não é linear na espessura; a resistência R = 1/U é. Entre duas linhas
+     da tabela interpola-se R. Para além da última linha extrapola-se R com a
+     condutibilidade do material do ITE50, Quadro I.5: tijolo furado, de 0,15
+     para 0,22 m a resistência sobe 0,17 → 0,024 (m².°C)/W por cm. Para a pedra
+     (granito, λ ≈ 2,8) são 0,0036 por cm. Uma parede de 40 cm de tijolo dos
+     anos 80 passa a ter U = 0,86 em vez de ficar sem valor.
+     Tudo o que não é linha exacta sai assinalado. */
+  const R_POR_CM=pedra?0.0036:0.0243;
+  const linhas=tab.slice().sort((a,b)=>a.esp-b.esp);
+  const exacta=linhas.find(l=>Math.abs(l.esp-m)<0.005);
+  const desc=(l)=>l&&l.desc||'';
+  if(exacta) return {u:exacta.u,esp:exacta.esp,exacto:true,aproximado:false,nota:'',
+    material:pedra?'alvenaria de pedra':'tijolo',desc:desc(exacta),
+    fonte:pedra?'valor por defeito do Manual SCE para alvenaria de pedra anterior a 1960'
+               :'valor por defeito do Manual SCE para paredes de tijolo posteriores a 1960'};
+  const cm=Math.round(m*100);
+  const abaixo=linhas.filter(l=>l.esp<m).pop(), acima=linhas.find(l=>l.esp>m);
+  let u,nota,fonte;
+  if(abaixo&&acima){
+    const f=(m-abaixo.esp)/(acima.esp-abaixo.esp);
+    const R=(1/abaixo.u)+f*((1/acima.u)-(1/abaixo.u));
+    u=1/R;
+    nota='espessura de '+cm+' cm — U interpolado entre as linhas de '+Math.round(abaixo.esp*100)+
+      ' cm ('+abaixo.u.toFixed(2).replace('.',',')+') e '+Math.round(acima.esp*100)+' cm ('+
+      acima.u.toFixed(2).replace('.',',')+')';
+    fonte='interpolação sobre a resistência entre valores por defeito do Manual SCE';
+  } else {
+    const ref=abaixo||acima;
+    const dcm=(m-ref.esp)*100;
+    if(Math.abs(dcm)>20.5) return null;          // mais de 20 cm fora da tabela: não arrisca (20,5 pela vírgula flutuante)
+    const R=(1/ref.u)+dcm*R_POR_CM;
+    if(!(R>0.2)) return null;
+    u=1/R;
+    nota='espessura de '+cm+' cm fora da tabela — U extrapolado a partir de '+Math.round(ref.esp*100)+
+      ' cm ('+ref.u.toFixed(2).replace('.',',')+') com '+(pedra?'λ do granito':'λ do tijolo furado')+
+      ' do ITE50 (Quadro I.5), a confirmar';
+    fonte='extrapolação sobre a resistência com o ITE50, Quadro I.5';
+  }
+  return {u:+u.toFixed(2),esp:m,exacto:false,aproximado:true,nota,
+    material:pedra?'alvenaria de pedra':'tijolo',desc:desc(abaixo||acima),fonte,
+  };
 }
 function textoParedePorDefeito(espCm,anoConstrucao){
   const r=uParedePorDefeito(espCm,anoConstrucao);
@@ -7486,7 +7686,7 @@ function textoParedePorDefeito(espCm,anoConstrucao){
   const corpo=(r.material==='alvenaria de pedra')
     ? 'constituída por alvenaria de pedra assente com argamassa'
     : pano;
-  return {u:r.u,exacto:r.exacto,
+  return {u:r.u,exacto:r.exacto,aproximado:!!r.aproximado,nota:r.nota||'',
     texto:'Parede exterior com espessura total de '+eTxt+' m, '+corpo+', '+
       'rebocada e pintada pelo exterior e rebocada, estucada e pintada pelo interior. '+
       'Não foi possível identificar a existência de isolamento térmico, nem a composição '+
@@ -7739,6 +7939,13 @@ function renderIsolInline(wrap){
   grupo('Tijolos da parede',ISOL_TIJOLOS,'isolParedeTijolos');
   grupo('Material do isolamento',ISOL_MAT,'isolParedeMat');
   grupo('Espessura na COBERTURA (cm)',ISOL_COB_ESP,'isolCobEsp',['Não tem','Não sei']);
+  /* A cobertura leva muitas vezes um isolante diferente do das paredes — lã
+     mineral no desvão sobre XPS nas fachadas é o mais corrente. Sem esta
+     pergunta a cobertura herdava o material das paredes e saía com o λ errado.
+     «Igual às paredes» é o atalho para o caso corrente; «Não sei» é aceite e
+     fica assinalado. */
+  if(D.isolCobEsp&&!/^(Não tem|Não sei)$/i.test(String(D.isolCobEsp)))
+    grupo('Material na COBERTURA',ISOL_MAT,'isolCobMat',['Igual às paredes','Não sei']);
 
   const n=document.createElement('div');
   n.style.cssText='font-size:12.5px;color:var(--tx2);margin-top:14px;'+
@@ -7973,11 +8180,26 @@ function dvMorada(){
     .replace(/[\s,\-–]+$/,'')          // traço ou vírgula largados no fim
     .replace(/^[\s,\-–]+/,'')
     .replace(/\s+,/g,',')
+    /* Vírgulas a dobrar, do sítio de onde se tirou o lote: «Clube Golfemar,,
+       Carvoeiro» saía assim no extrato da DV e tinha de se corrigir à mão. */
+    .replace(/,\s*,+/g,',')
     .trim();
   if(!out.porta&&out.nomeVia){
     // "Rua X, 60" — número solto no fim
     const n=out.nomeVia.match(/,\s*(\d+[\w-]*)$/);
     if(n){ out.porta=n[1]; out.nomeVia=out.nomeVia.slice(0,n.index).trim(); }
+  }
+  /* A LOCALIDADE NÃO É NOME DE VIA.
+     Nas moradas da caderneta a localidade aparece antes do código postal
+     («…Lote 12, Carvoeiro, 8400-550 Carvoeiro») e ficava colada ao nome da
+     via: «Clube Golfemar, Carvoeiro». Se o que está depois da última vírgula
+     é a localidade que já se conhece, sai. */
+  if(out.nomeVia){
+    const cand=[out.localidade,D.localidade,D.concelho].filter(Boolean)
+      .map(x=>String(x).trim().toLowerCase());
+    const p=out.nomeVia.split(',');
+    while(p.length>1&&cand.includes(p[p.length-1].trim().toLowerCase())) p.pop();
+    out.nomeVia=p.join(',').replace(/[\s,]+$/,'').trim();
   }
   return out;
 }
@@ -8315,6 +8537,7 @@ function buildTxt(){
   // ── DESCRIÇÃO SUCINTA DO FOGO ──
   t+=sep('DESCRIÇÃO SUCINTA DO FOGO');
   t+=ln('Tipologia',D.tipologia);
+  if(D.tipologiaDeDocumento) t+='  (tipologia lida na caderneta predial)\n';
   t+=ln('Tipo edifício',D.edificioTipo);
   if(D.edificioTipo==='Apartamento'){
     const plMap={'1':'Piso sobre cave/ENU','2':'Piso intermédio','3':'Último piso','4':'Piso térreo'};
@@ -8722,8 +8945,33 @@ function buildTxt(){
     const divsClima=climDivsAC.map(([d])=>d.toLowerCase());
     const nUI=climDivsAC.length;
     const nUE=(D.unidadesExtFotos||[]).length||null;
-    // dados OCR: prioridade às unidades exteriores, depois etiquetas interiores
-    const ocrUE=(D.unidadesExtFotos||[]).map(f=>f.dados||{}).filter(d=>Object.keys(d).length);
+    // dados OCR: prioridade às unidades exteriores, depois etiquetas interiores.
+    /* Uma chapa exterior cuja marca NÃO existe em nenhuma divisão fica de
+       fora: era a chapa do vizinho, ou uma foto por engano, e ia parar ao
+       texto do CE como se fosse deste imóvel. */
+    const _marcasDasDivs=new Set(marcasUnicas.map(m=>String(m).trim().toLowerCase()));
+    const ocrUE=(D.unidadesExtFotos||[]).map(f=>f.dados||{}).filter(d=>Object.keys(d).length)
+      .filter(d=>{ const m=String(d.marca||'').trim().toLowerCase(); return !m||!_marcasDasDivs.size||_marcasDasDivs.has(m); });
+    /* Os avisos do agrupamento (split marcado mas as chapas dizem multi,
+       chapa de outra marca, multi sem chapa exterior) saem AQUI, no TXT —
+       antes só apareciam quando havia texto-tipo escolhido à mão. */
+    try{
+      const _gAll=agruparSistemasAC(D,TIPOS_SEM_UE);
+      const _gAv=_gAll.filter(g=>g.aviso);
+      if(_gAv.length){
+        t+='\n⚠ AVISOS DO AGRUPAMENTO DOS SISTEMAS:\n';
+        _gAv.forEach(g=>{ t+='  · '+g.tipos.join('+')+' '+(g.marca||'')+' ('+g.divs.join(', ')+'): '+g.aviso+'\n'; });
+      }
+      const _liga=(D.unidadesExtFotos||[]).map((f,i)=>({i,divs:Array.isArray(f.divs)?f.divs:[]})).filter(x=>x.divs.length);
+      if(_liga.length){
+        t+='\nUNIDADES EXTERIORES E AS DIVISÕES QUE SERVEM (marcado em obra):\n';
+        _liga.forEach(x=>{ const d=(D.unidadesExtFotos[x.i]||{}).dados||{};
+          t+='  UE'+(x.i+1)+' '+(d.marca||'')+' '+(d.modelo||'')+' → '+x.divs.join(', ')+(x.divs.length>1?'  (multi-split)':'  (split)')+'\n'; });
+      }
+      if((D.ueNaoAcessiveis||[]).length)
+        t+='\nSEM ACESSO À UNIDADE EXTERIOR: '+D.ueNaoAcessiveis.join(', ')+' — caracterizar pela etiqueta interior.\n';
+      _gAll.filter(g=>g.notaAcesso).forEach(g=>{ t+='  · '+g.notaAcesso+'\n'; });
+    }catch(e){}
     const ocrInt=climDivsAC.map(([,cd])=>cd.dadosOCR).filter(Boolean);
     const ocr=ocrUE[0]||ocrInt[0]||{};
     const modeloStr=ocr.modelo||'«modelo»';
@@ -9356,6 +9604,7 @@ function buildTxt(){
         t+=su.texto+'\n\n';
         t+=ln('U sugerido',su.u.toFixed(2).replace('.',',')+' W/(m².°C)'+
           (su.exacto?'':'  (espessura aproximada à linha mais próxima)'));
+        if(su.aproximado&&su.nota) t+='⚠ '+su.nota+'.\n';
         t+=ln('Espessura medida',String(D.espParede||'—')+' cm');
         t+=ln('Ano de construção',String(D.anoConstrucao||'—'));
         t+='\n⚠ SUGESTÃO, não medição. Confirma contra a ficha técnica, o projeto ou o\n'+
@@ -9486,7 +9735,7 @@ function buildTxt(){
              escritos, depois do caso do isolParedeEsp. */
           const r=textoCoberturaPorDefeito(c,
             _cEsp!=null?String(_cEsp):'',
-            _cEsp!=null?(isolamentoDasParedes().mat||'Desconhecido'):'');
+            _cEsp!=null?materialIsolCobertura():'');
           if(r){
             t+='    '+r.texto.replace(/\n/g,'\n    ')+'\n';
             t+='    '+ln('U sugerido',r.u.toFixed(2).replace('.',',')+' W/(m².°C)').trim()+'\n';
@@ -10662,8 +10911,13 @@ function buildTxt(){
   }
 
 
-  if(obsBlob) t+=sep('OBSERVAÇÕES')+'[Áudio gravado — partilha separadamente]\n';
-  else if(D.obs) t+=sep('OBSERVAÇÕES')+D.obs+'\n';
+  /* Texto E áudio: se houver os dois, saem os dois. Antes, o áudio calava o
+     texto — quem escrevia e depois gravava perdia o que tinha escrito. */
+  if(D.obs||obsBlob||D.obsAudioKey){
+    t+=sep('OBSERVAÇÕES');
+    if(D.obs) t+=D.obs.trim()+'\n';
+    if(obsBlob||D.obsAudioKey) t+='[Áudio gravado — vai no pacote ZIP como observacoes_audio.webm]\n';
+  }
 
   // ── ÍNDICE DE FOTOS DE EQUIPAMENTO ──
   // Mapeia cada equipamento ao nome exacto do ficheiro da sua foto no pacote ZIP.
@@ -10708,6 +10962,18 @@ function buildTxt(){
   // Registo do que foi alterado durante o levantamento, com data/hora. Serve
   // para reconstituir o processo se o CE for contestado, e para perceber o que
   // mudou entre visitas ao mesmo imóvel.
+  if(D.usoIA&&D.usoIA.chamadas){
+    const c=custoEstimadoIA(D.usoIA);
+    t+=sep('RECONHECIMENTO AUTOMÁTICO — CONSUMO');
+    Object.entries(D.usoIA.porTipo||{}).forEach(([k,v])=>{
+      t+='  '+k+': '+v.n+' leitura(s), '+((v.entrada+v.saida)/1000).toFixed(1)+'k tokens\n';
+    });
+    t+='  TOTAL: '+D.usoIA.chamadas+' leitura(s), '+(c.total/1000).toFixed(1)+
+       'k tokens ≈ '+c.eur.toFixed(3).replace('.',',')+' €\n';
+    if(D.usoIA.repeticoes) t+='  ⚠ '+D.usoIA.repeticoes+' repetição(ões) por falha — pagas em dobro.\n';
+    t+='\n';
+  }
+
   if((D._hist&&D._hist.length)||(Array.isArray(D.docsLidosRevisao)&&D.docsLidosRevisao.length)){
     D._hist=D._hist||[];
     t+=sep('HISTÓRICO DE ALTERAÇÕES');
@@ -11584,7 +11850,30 @@ function showOk(){const el=document.getElementById('copy-ok');el.style.display='
 // guardamos as fotos de etiquetas para o relatório
 // ── EXPORTAR PACOTE COMPLETO — TXT + KMZ (com coordenadas) + fotos em ZIP ──
 // Estrutura: NomeProjeto/  ├─ NomeProjeto.txt  ├─ NomeProjeto_lat_lon.kmz  └─ fotos/
+/* Uma peça que falhe não pode levar o pacote atrás. Cada bloco corre aqui
+   dentro; o que falhar fica registado e sai num ficheiro de avisos, em vez de
+   desaparecer em silêncio ou matar a exportação. */
+let _pacoteFalhas=[];
+/* Bytes que o JSZip aceita de certeza.
+   Um Blob nem sempre é lido — depende de como foi criado e do motor — e um que
+   ele recuse rebenta o pacote INTEIRO no generateAsync, levando atrás tudo o
+   que foi adicionado a seguir. Foi o que aconteceu com o KMZ. Devolver um
+   ArrayBuffer é o formato mais universal: não depende do construtor de
+   Uint8Array de nenhum contexto. */
+async function _paraZip(x){
+  if(!x) throw new Error('sem conteúdo');
+  if(typeof x==='string') return x;
+  if(x instanceof ArrayBuffer) return x;
+  if(typeof x.arrayBuffer==='function') return await x.arrayBuffer();
+  if(x.buffer instanceof ArrayBuffer) return x.buffer.slice(x.byteOffset||0,(x.byteOffset||0)+x.byteLength);
+  return x;
+}
+async function _peca(nome,fn){
+  try{ return await fn(); }
+  catch(e){ _pacoteFalhas.push(nome+': '+(e&&e.message||e)); console.error(nome+' falhou:',e); return null; }
+}
 async function buildPacoteZipBlob(show){
+  _pacoteFalhas=[];
   try{registarExportacao();}catch(e){}
   show=show||(()=>{});
   if(typeof JSZip==='undefined') throw new Error('Biblioteca ZIP não carregou. Verifica ligação à internet.');
@@ -11601,19 +11890,32 @@ async function buildPacoteZipBlob(show){
   const txt=buildTxt();
   raiz.file(nome+'.txt',txt);
 
+  /* 1b. EXTRATO DA DECLARAÇÃO DE VISITA — ia só pelo botão próprio e ficava
+     de fora do pacote. Quem partilhava o ZIP e apagava o processo do
+     telemóvel ficava sem a DV. Entra sempre; se a data ou a hora estiverem
+     por preencher, o ficheiro sai na mesma com os campos marcados e o nome
+     avisa. */
+  try{
+    const faltam=(typeof faltasDV==='function')?faltasDV():[];
+    const dv=buildDV();
+    raiz.file(nome+'_DV'+(faltam.length?'_POR_PREENCHER':'')+'.txt',
+      (faltam.length?'⚠ POR PREENCHER: '+faltam.join(', ')+'\n\n':'')+dv);
+  }catch(e){ _pacoteFalhas.push('extrato da Declaração de Visita: '+(e.message||e)); console.error('extrato DV não gerado:',e.message); }
+
   // 1a. Backup integral do levantamento (JSON) — permite recuperar o projeto se o
   // IndexedDB/localStorage falhar, e reimportar com o botão "Importar levantamento".
   // As fotos ficam fora (estão no ZIP em fotos/); o D só guarda as chaves.
   try{
     raiz.file(nome+'_levantamento.json',JSON.stringify({app:APP_VERSION,exportado:new Date().toISOString(),D:D},null,1));
-  }catch(e){console.error('backup JSON não gerado:',e.message);}
+  }catch(e){ _pacoteFalhas.push('backup JSON do levantamento: '+(e.message||e)); console.error('backup JSON não gerado:',e.message); }
 
   // 1b. Esboço esquemático da planta (PDF) — opcional, não interrompe o pacote se falhar
   try{
     const pdfEsboco=gerarEsbocoPlantaPDF();
-    const pdfBlob=pdfEsboco.output('blob');
-    raiz.file(nome+'_esboco_planta.pdf',pdfBlob);
+    // arraybuffer em vez de blob, pela mesma razão do KMZ e das fotos
+    raiz.file(nome+'_esboco_planta.pdf',pdfEsboco.output('arraybuffer'),{binary:true});
   }catch(e){
+    _pacoteFalhas.push('esboço da planta (PDF): '+(e.message||e));
     console.error('Esboço da planta não gerado:',e.message);
   }
 
@@ -11653,10 +11955,27 @@ async function buildPacoteZipBlob(show){
     </Point>
   </Placemark>
 </kml>`;
-    const kmzZip=new JSZip();
-    kmzZip.file('doc.kml',kmlContent);
-    const kmzBlob=await kmzZip.generateAsync({type:'blob'});
-    raiz.file(kmzNome,kmzBlob);
+    /* O KMZ REBENTAVA O PACOTE INTEIRO.
+       Gerava-se com type:'blob' e metia-se esse blob no ZIP de fora. O JSZip
+       não relê um Blob que ele próprio produziu — «Can't read the data of …
+       .kmz» — e a exceção subia, matando buildPacoteZipBlob. Tudo o que vinha
+       DEPOIS do KMZ nunca chegava ao pacote: as fotos, os documentos, o
+       esboço da planta. O extrato da Declaração de Visita ia antes e por isso
+       aparecia; o resto não. Foi assim que o Renato deu por isto.
+       'uint8array' é o formato que o JSZip aceita de volta sem discussão.
+       E fica em try próprio: um KMZ que falhe não pode levar o pacote. */
+    try{
+      const kmzZip=new JSZip();
+      kmzZip.file('doc.kml',kmlContent);
+      const kmzBytes=await kmzZip.generateAsync({type:'arraybuffer'});
+      raiz.file(kmzNome,kmzBytes,{binary:true});
+    }catch(e){
+      _pacoteFalhas.push('KMZ da localização: '+(e.message||e));
+      console.error('KMZ não gerado:',e.message);
+      raiz.file(nome+'_localizacao.txt',
+        'Coordenadas: '+coords.lat+', '+coords.lon+'\nAltitude: '+altStr+
+        '\n(o ficheiro KMZ não pôde ser gerado: '+(e.message||e)+')\n');
+    }
   }else{
     raiz.file(kmzNome,'GPS não disponível no momento da exportação.');
   }
@@ -11757,13 +12076,19 @@ async function buildPacoteZipBlob(show){
       const blob=await(await fetch(url)).blob();
       let nome=nomeFicheiro;
       if(ehAudio){ const ext=(blob.type.split('/')[1]||'webm').split(';')[0]; nome=nomeFicheiro+'.'+ext; }
-      fotosFolder.file(nome,blob);
+      /* MESMO PROBLEMA DO KMZ: o JSZip não lê sempre um Blob — depende de como
+         foi criado e do motor. Um Blob que ele recuse rebenta o pacote INTEIRO
+         no generateAsync, e tudo o que veio a seguir desaparece. Converte-se
+         para bytes, que ele aceita sempre. É uma leitura a mais por foto e
+         poupa um pacote perdido. */
+      fotosFolder.file(nome,await _paraZip(blob),{binary:true});
       nFotos++;
       // e a cópia reduzida, para as que vão para o certificado
       if(!ehAudio&&ehPq){
         try{
           const pq=await reduzirFoto(blob);
-          if(pq){ fotosPqFolder.file(nome,pq); nPq++; }
+          // bytes, não Blob — ver a nota acima: um Blob recusado mata o pacote
+          if(pq){ fotosPqFolder.file(nome,await _paraZip(pq),{binary:true}); nPq++; }
         }catch(e){ console.error('não consegui reduzir',nome,e); }
       }
     }catch(e){
@@ -11821,7 +12146,7 @@ async function buildPacoteZipBlob(show){
             console.warn(`${nomeFicheiro}: PDF com ${(blob.size/1048576).toFixed(1)}MB — acima de 1MB, mantido intacto para não corromper.`);
           }
         }
-        docsFolder.file(nomeFicheiro,blob);
+        docsFolder.file(nomeFicheiro,await _paraZip(blob),{binary:true});
       }catch(e){
         nDocsFalhas++;
         console.error('Documento ignorado (falha ao ler):',d.nome,e.name,e.message);
@@ -11837,12 +12162,23 @@ async function buildPacoteZipBlob(show){
     }
   }
 
+  /* O QUE FICOU DE FORA FICA ESCRITO NO PRÓPRIO PACOTE.
+     Antes as falhas iam só para a consola do telemóvel, que ninguém vê: o
+     ficheiro simplesmente não estava lá e não havia como saber porquê. */
+  if(_pacoteFalhas.length){
+    raiz.file('_AVISOS_do_pacote.txt',
+      'Estas peças NÃO puderam ser geradas ao montar o pacote:\n\n  · '+
+      _pacoteFalhas.join('\n  · ')+
+      '\n\nO resto do pacote está completo. Se faltar alguma coisa que precises,'+
+      '\nvolta a exportar com ligação à internet e com o processo aberto.\n');
+  }
   const avisoFalhas=(nFalhas||nDocsFalhas)?` — ⚠️ ${nFalhas+nDocsFalhas} ficheiro(s) não puderam ser lidos e foram ignorados`:'';
   show(`A gerar ZIP (${nFotos} foto${nFotos!==1?'s':''}${nPq?' + '+nPq+' reduzida'+(nPq!==1?'s':''):''}${docsList.length?' + '+(docsList.length-nDocsFalhas)+' doc.':''})…${avisoFalhas}`);
   const zipBlob=await zip.generateAsync({type:'blob'});
   const zipNome=nome+'_completo.zip';
   return {zipBlob,zipNome,nome,nFotos,nPq,
-    docsCount:docsList.length-nDocsFalhas,nFalhas:nFalhas+nDocsFalhas};
+    docsCount:docsList.length-nDocsFalhas,nFalhas:nFalhas+nDocsFalhas,
+    pecasFalhadas:_pacoteFalhas.slice()};
 }
 
 // ── NOME DO PACOTE DE EXPORTAÇÃO: a rua ──
@@ -12391,16 +12727,98 @@ async function limparFotosOrfas(){
 // elas — cobre a maioria das quebras momentâneas de sinal de campo sem incomodar o
 // utilizador. Usado no OCR (documentos, chapa de características) e no upload por
 // blocos do OneDrive. NÃO repete erros que não são de rede (ex: 401 do proxy).
+/* ══════════════════════════════════════════════════════════════════
+   CONTADOR DE CHAMADAS E TOKENS
+   ══════════════════════════════════════════════════════════════════
+   O reconhecimento automático (caderneta, chapas, etiquetas, plantas, fotos
+   de campo) é a única coisa na app que custa dinheiro: cada leitura envia a
+   imagem para o modelo. Tudo o resto — questionário, cálculos, TXT, ZIP,
+   planta, revisão — corre no telemóvel e não custa nada. A cópia para o
+   OneDrive também não: vai para a Microsoft e gasta dados, não tokens.
+
+   Aqui regista-se cada chamada com os tokens que a API devolveu (`usage`),
+   e as REPETIÇÕES ficam separadas — uma leitura que falhe e repita paga 2 ou
+   3 vezes, e é bom que isso se veja. */
+const CUSTO_ENTRADA_POR_MTOK=3.00, CUSTO_SAIDA_POR_MTOK=15.00;   // USD/milhão, Sonnet
+function _registarUsoIA(o){
+  D.usoIA=D.usoIA||{chamadas:0,repeticoes:0,entrada:0,saida:0,porTipo:{}};
+  const u=D.usoIA;
+  if(o.cache){ u.reaproveitadas=(u.reaproveitadas||0)+1; return; }   // não custou nada
+  u.chamadas++;
+  if(o.repeticao) u.repeticoes++;
+  u.entrada+=(o.entrada||0); u.saida+=(o.saida||0);
+  const k=o.tipo||'outro';
+  u.porTipo[k]=u.porTipo[k]||{n:0,entrada:0,saida:0};
+  u.porTipo[k].n++; u.porTipo[k].entrada+=(o.entrada||0); u.porTipo[k].saida+=(o.saida||0);
+  try{ autoSave(); }catch(e){}
+}
+function custoEstimadoIA(u){
+  u=u||D.usoIA; if(!u) return null;
+  const usd=(u.entrada/1e6)*CUSTO_ENTRADA_POR_MTOK+(u.saida/1e6)*CUSTO_SAIDA_POR_MTOK;
+  return {usd,eur:usd*0.92,total:u.entrada+u.saida};
+}
+/* Envolve um pedido à API: conta os tokens do `usage` da resposta e, quando o
+   servidor não os devolver, estima pelo tamanho do que foi enviado (uma imagem
+   custa ~ largura×altura/750 tokens; sem dimensões, pelo base64). */
+/* NÃO PAGAR DUAS VEZES PELA MESMA IMAGEM.
+   Anexar o mesmo documento outra vez, ou repetir uma leitura que já correu,
+   pagava tudo de novo. Guarda-se o resultado por impressão digital do conteúdo
+   enviado; se voltar exactamente o mesmo, devolve-se o que já se sabe. Fica só
+   nesta sessão — não é para poupar entre processos, é para não pagar duas
+   vezes o mesmo toque. */
+const _cacheIA=new Map();
+function _impressaoPedido(body){
+  let h=0;
+  const txt=JSON.stringify(body);
+  for(let i=0;i<txt.length;i++){ h=((h<<5)-h+txt.charCodeAt(i))|0; }
+  return txt.length+':'+h;
+}
+async function _pedidoIA(tipo,body,repeticao){
+  const chave=_impressaoPedido(body);
+  if(_cacheIA.has(chave)){
+    try{ _registarUsoIA({tipo,entrada:0,saida:0,repeticao:false,cache:true}); }catch(e){}
+    return _cacheIA.get(chave);
+  }
+  const resp=await fetch(ANTHROPIC_PROXY_URL,{
+    method:'POST',headers:{'Content-Type':'application/json','X-App-Secret':APP_SHARED_SECRET},
+    body:JSON.stringify(body)});
+  if(resp.status===401) throw new Error('proxy recusou o pedido (401) — o segredo da app não corresponde ao APP_SHARED_SECRET configurado no Cloudflare Worker');
+  if(!resp.ok) throw new Error('HTTP '+resp.status);
+  const data=await resp.json();
+  try{
+    const us=data.usage||{};
+    let ent=us.input_tokens, sai=us.output_tokens;
+    if(ent==null){
+      // estimativa: o base64 de cada imagem ≈ 0,75 bytes por byte real
+      let b=0;
+      (body.messages||[]).forEach(m=>(m.content||[]).forEach(c=>{
+        if(c.source&&c.source.data) b+=c.source.data.length;
+        if(c.text) b+=c.text.length/4;
+      }));
+      ent=Math.round(b/900);
+    }
+    if(sai==null) sai=Math.round((JSON.stringify(data.content||'').length)/4);
+    _registarUsoIA({tipo,entrada:ent,saida:sai,repeticao:!!repeticao});
+  }catch(e){}
+  try{ _cacheIA.set(chave,data); }catch(e){}
+  return data;
+}
 async function comRetry(fn,tentativas=3,atrasoMs=1200){
   let ultimoErro;
   for(let i=0;i<tentativas;i++){
     try{
-      return await fn();
+      // i>0 é uma repetição: a imagem vai outra vez e paga-se outra vez
+      return await fn(i>0);
     }catch(e){
       ultimoErro=e;
       const msg=(e&&e.message)||'';
-      // erros que não vão desaparecer ao repetir — falha já na 1ª tentativa
+      /* Erros que não desaparecem ao repetir — e cada repetição reenvia a
+         imagem inteira e paga outra vez. Além do 401, também o 400 (a imagem
+         não foi aceite), o 413 (grande demais) e um JSON que o modelo devolveu
+         mal formado: repetir dá o mesmo e custa o dobro. */
       if(msg.includes('401')||msg.includes('APP_SHARED_SECRET')) throw e;
+      if(msg.includes('400')||msg.includes('413')) throw e;
+      if(/resposta n[ãa]o veio em JSON|JSON inv[áa]lido/i.test(msg)) throw e;
       if(i<tentativas-1) await new Promise(r=>setTimeout(r,atrasoMs));
     }
   }
@@ -12914,6 +13332,16 @@ const PDF_DOC_TAMANHO_ALVO=1024*1024; // ~1MB
 const COMPRESSAO_PERFIS={
   normal:{maxLado:2200,tamanhoAlvo:1024*1024,qualidadeInicial:0.85,qualidadeMin:0.5},
   precisa:{maxLado:2600,tamanhoAlvo:1.5*1024*1024,qualidadeInicial:0.90,qualidadeMin:0.65},
+  /* PARA O RECONHECIMENTO AUTOMÁTICO, E SÓ PARA ELE.
+     A API cobra por PÍXEL — cerca de (largura × altura) / 750 tokens — e acima
+     de 1568 px de lado reduz a imagem no servidor antes de a ler. Enviar 2600
+     px era pagar 6760 tokens por uma imagem que o modelo via a 1568: mais de
+     metade do custo ia para píxeis que ninguém lê.
+     1568 é o limite exacto: mais não acrescenta nada, menos perde detalhe em
+     chapas com letra pequena.
+     A foto GUARDADA continua na resolução alta — isto é só a cópia que se
+     envia para ser lida. */
+  ocr:{maxLado:1568,tamanhoAlvo:700*1024,qualidadeInicial:0.85,qualidadeMin:0.6},
 };
 function comprimirFotoGenerica(dataURL,perfil='normal'){
   const cfg=COMPRESSAO_PERFIS[perfil]||COMPRESSAO_PERFIS.normal;
@@ -12975,33 +13403,9 @@ async function imagemParaPdfDataURL(dataURL,fmt){
 // Rasteriza uma página de PDF a partir de um dataURL, devolve JPEG base64.
 // Usa pdf.js no browser: garante qualidade independente do tipo de PDF
 // (nativo, scan, fotocópia, qualquer resolução original).
-async function rasterizarPaginaPDF(dataURL, numeroPagina, dpi){
-  if(!window.pdfjsLib) throw new Error('pdf.js não disponível');
-  const b64=dataURL.split(',')[1];
-  const binary=atob(b64);
-  const bytes=new Uint8Array(binary.length);
-  for(let i=0;i<binary.length;i++) bytes[i]=binary.charCodeAt(i);
-  const loadingTask=window.pdfjsLib.getDocument({data:bytes});
-  const pdfDoc=await loadingTask.promise;
-  const page=await pdfDoc.getPage(numeroPagina);
-  const SCALE=dpi/72;
-  const viewport=page.getViewport({scale:SCALE});
-  const canvas=document.createElement('canvas');
-  canvas.width=viewport.width;
-  canvas.height=viewport.height;
-  const ctx=canvas.getContext('2d');
-  await page.render({canvasContext:ctx,viewport}).promise;
-  return {
-    jpegDataURL:canvas.toDataURL('image/jpeg',0.92),
-    nPaginas:pdfDoc.numPages,
-    largura:canvas.width,
-    altura:canvas.height,
-  };
-}
-
-// Rasteriza uma página de PDF com pdf.js (250 DPI) e devolve JPEG base64.
-// Funciona com qualquer PDF — nativo, scan, fotocópia — independentemente
-// de ter ou não camada de texto.
+/* Havia AQUI uma primeira definição de rasterizarPaginaPDF, apagada pela de
+   baixo ao carregar a página — a terceira duplicação encontrada, depois de
+   _chamarOCRDocumento e do prompt do OCR. Fica uma. */
 async function rasterizarPaginaPDF(dataURL,numeroPagina,dpi){
   if(!window.pdfjsLib) throw new Error('pdf.js nao disponivel');
   const b64=dataURL.split(',')[1];
@@ -13018,60 +13422,99 @@ async function rasterizarPaginaPDF(dataURL,numeroPagina,dpi){
   return {jpegDataURL:canvas.toDataURL('image/jpeg',0.92),nPaginas:pdfDoc.numPages};
 }
 
-async function identificarDocumentoOficial(dataURL,mediaType){
+/* Primeiro o topo; só se faltar o essencial é que se paga a página inteira. */
+async function identificarDocumentoOficial(dataURL,mediaType,nomeFicheiro){
+  /* Se o nome do ficheiro diz «certidão», vai só o topo da 1ª página — é lá que
+     estão os dois únicos campos que a app usa de uma certidão. Se a leitura
+     vier sem eles, a rede de segurança abaixo repete com tudo. */
+  const perfil=pareceCertidao(nomeFicheiro)?'certidao':null;
+  const r1=await _identificarDoc(dataURL,mediaType,false,perfil);
+  /* O nome do ficheiro nem sempre diz o que é — «doc1.pdf», «scan.pdf». Mas a
+     PRIMEIRA leitura diz: se o documento se identificou como certidão e já
+     trouxe o número, não vale a pena mandar mais páginas. Sem isto, uma
+     certidão com nome anónimo continuava a enviar 2 páginas para trazer dois
+     números que já estavam na primeira. */
+  if(r1&&r1.tipo_documento==='certidao_permanente'&&
+     (r1.numero_descricao_predial||r1.numero_certidao_permanente)) return r1;
+  if(_ocrTemEssencial(r1)) return r1;
+  console.warn('OCR do topo não trouxe o essencial — a repetir com a página inteira');
+  try{
+    const r2=await _identificarDoc(dataURL,mediaType,true);
+    // fica o melhor dos dois: o que a 2ª leitura encontrou, sem apagar o resto
+    return Object.assign({},r1||{},Object.fromEntries(
+      Object.entries(r2||{}).filter(([,v])=>v!==null&&v!=='')));
+  }catch(e){ return r1; }
+}
+async function _identificarDoc(dataURL,mediaType,inteiro,perfil){
   const b64=dataURL.split(',')[1];
   if(mediaType==='application/pdf'){
     try{
       // Rasterizar com pdf.js: o modelo recebe imagens nitidas em vez de um
       // PDF raster comprimido — funciona mesmo com scans de baixa qualidade
-      const pg1=await rasterizarPaginaPDF(dataURL,1,250);
-      const nPag=Math.min(pg1.nPaginas,3);
-      const blocos=[{type:'image',source:{type:'base64',media_type:'image/jpeg',data:pg1.jpegDataURL.split(',')[1]}}];
-      for(let p=2;p<=nPag;p++){
-        const pgi=await rasterizarPaginaPDF(dataURL,p,250);
-        blocos.push({type:'image',source:{type:'base64',media_type:'image/jpeg',data:pgi.jpegDataURL.split(',')[1]}});
-      }
-      return await _chamarOCRDocumento(blocos);
+      /* Este era o caminho que corria de facto para os PDF, com 250 DPI e 3
+         páginas — 24 mil tokens por caderneta. _blocosParaModelo já faz isto
+         com os valores certos (150 DPI, 2 páginas). Usa-se essa, em vez de
+         manter duas rasterizações a divergir. */
+      return await _chamarOCRDocumento(await _blocosParaModelo(dataURL,mediaType,inteiro,perfil),perfil);
     }catch(e){
       console.warn('Rasterizacao pdf.js falhou, a tentar com PDF directo:',e.message);
     }
   }
+  let b64img=b64, tipoImg=mediaType;
+  if(mediaType!=='application/pdf'&&!inteiro){
+    try{ const r=await recortarTopo(dataURL); b64img=r.split(',')[1]; tipoImg='image/jpeg'; }catch(e){}
+  }
   const blocoFicheiro=(mediaType==='application/pdf')
     ?{type:'document',source:{type:'base64',media_type:'application/pdf',data:b64}}
-    :{type:'image',source:{type:'base64',media_type:mediaType,data:b64}};
+    :{type:'image',source:{type:'base64',media_type:tipoImg,data:b64img}};
   return await _chamarOCRDocumento([blocoFicheiro]);
 }
 
-async function _chamarOCRDocumento(blocosFicheiro){
-  return comRetry(async()=>{
-    const resp=await fetch(ANTHROPIC_PROXY_URL,{
-      method:'POST',headers:{'Content-Type':'application/json','X-App-Secret':APP_SHARED_SECRET},
-      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:600,
-        messages:[{role:'user',content:[
-          ...blocosFicheiro,
-          {type:'text',text:'Este documento e, provavelmente, uma Caderneta Predial Urbana ou uma Certidao Permanente de Portugal. Extrai em JSON (usa null nos campos que nao encontrares ou nao se apliquem): tipo_documento ("caderneta_predial"|"certidao_permanente"|"outro"), numero_matriz, numero_fracao, morada_completa, localidade, freguesia, concelho, ano_inscricao_matriz, numero_pisos_predio, numero_descricao_predial (canto superior direito, formato "3291/20080724" -> extrai so "3291", nunca a data), numero_certidao_permanente (formato XXXX-XXXX-XXXX). Responde APENAS com JSON valido, sem texto adicional e sem blocos de codigo.'}
-        ]}]})
+/* Havia AQUI uma segunda definição de _chamarOCRDocumento, com um prompt sem
+   acentos e sem os campos novos. A de baixo apagava-a ao carregar, por isso
+   nunca correu — mas manter duas versões do mesmo pedido é como o caso do
+   isolamento: mais cedo ou mais tarde divergem e usa-se a errada. Fica uma. */
+/* PEDIDO CURTO PARA A CERTIDÃO.
+   De uma certidão a app só usa DOIS campos, e ambos estão no cabeçalho. Pedir
+   os quinze da caderneta obriga o modelo a varrer o documento à procura de
+   coisas que lá não estão e a escrever quinze linhas de null. Um pedido curto
+   lê mais depressa, acerta mais, e a resposta cabe em 120 tokens em vez de 600. */
+const PROMPT_CERTIDAO='Esta imagem é o CABEÇALHO de uma Certidão Permanente do registo predial '+
+  'português. Só preciso de dois números, ambos no topo: o NÚMERO DE DESCRIÇÃO PREDIAL, '+
+  'no canto superior direito (formato "3291/20080724" — devolve só "3291", nunca a data), '+
+  'e o CÓDIGO DE ACESSO da certidão (formato XXXX-XXXX-XXXX), que é diferente do anterior. '+
+  'Se vires também a conservatória, a freguesia ou o concelho, inclui-os. Ignora tudo o resto. '+
+  'Responde APENAS com JSON válido, sem texto à volta e sem blocos de código: '+
+  '{"tipo_documento":"certidao_permanente","numero_descricao_predial":null,'+
+  '"numero_certidao_permanente":null,"freguesia":null,"concelho":null}';
+async function _chamarOCRDocumento(blocosFicheiro,perfil){
+  if(perfil==='certidao'){
+    return comRetry(async(rep)=>{
+      const data=await _pedidoIA('certidão',{model:'claude-sonnet-4-6',max_tokens:150,
+        messages:[{role:'user',content:[...blocosFicheiro,{type:'text',text:PROMPT_CERTIDAO}]}]},rep);
+      const raw=(data.content.find(c=>c.type==='text')||{}).text||'';
+      return parseJsonIA(raw);
     });
-    if(resp.status===401) throw new Error('proxy recusou o pedido (401)');
-    if(!resp.ok) throw new Error('HTTP '+resp.status);
-    const data=await resp.json();
-    const raw=(data.content.find(c=>c.type==='text')||{}).text||'';
-    return parseJsonIA(raw);
-  });
+  }
+  return _chamarOCRCompleto(blocosFicheiro);
 }
-
-
-async function _chamarOCRDocumento(blocosFicheiro){
-  const PROMPT_OCR='Este documento é, provavelmente, uma Caderneta Predial Urbana ou uma Certidão Permanente de Portugal. Extrai em JSON (usa null nos campos que não encontrares ou não se apliquem): tipo_documento ("caderneta_predial"|"certidao_permanente"|"outro"), numero_matriz (número de matriz predial urbana, só o número/código, ex: "1234"), numero_fracao (letra ou número de identificação da fração autónoma, ex: "A" ou "12"), morada_completa (morada do prédio/fração tal como consta no documento: rua, número de polícia, andar se aplicável, código postal e localidade, tudo numa só linha), localidade (apenas o nome da localidade/cidade/vila onde se situa o imóvel, ex: "Portimão"), freguesia (nome da freguesia tal como consta no documento), concelho (nome do concelho/município, ex: "Portimão"), ano_inscricao_matriz (ano em que o prédio foi inscrito na matriz predial, só o ano, ex: "1995"), numero_pisos_predio (nº total de pisos do EDIFÍCIO/prédio — este valor serve APENAS para a descrição do prédio; null se não constar), numero_pisos_fracao (nº de pisos da FRAÇÃO/moradia em si, ou seja quantos pisos tem a habitação que está a ser certificada — numa moradia unifamiliar coincide com os pisos do prédio; num apartamento é normalmente 1, ou 2 se for duplex; null se não constar explicitamente), numero_descricao_predial (número de descrição predial — canto superior direito, formato "3291/20080724" → extrai só "3291", nunca a data), numero_certidao_permanente (código de acesso da certidão permanente, formato XXXX-XXXX-XXXX, DIFERENTE do número de descrição predial). Responde APENAS com JSON válido, sem texto adicional e sem blocos de código.';
-  return comRetry(async()=>{
-    const resp=await fetch(ANTHROPIC_PROXY_URL,{
-      method:'POST',headers:{'Content-Type':'application/json','X-App-Secret':APP_SHARED_SECRET},
-      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:600,
-        messages:[{role:'user',content:[...blocosFicheiro,{type:'text',text:PROMPT_OCR}]}]})
-    });
-    if(resp.status===401) throw new Error('proxy recusou o pedido (401) — o segredo da app não corresponde ao APP_SHARED_SECRET configurado no Cloudflare Worker. Atualiza o código e a variável do Worker.');
-    if(!resp.ok) throw new Error('HTTP '+resp.status);
-    const data=await resp.json();
+async function _chamarOCRCompleto(blocosFicheiro){
+  /* DIZER ONDE PROCURAR ACERTA MAIS À PRIMEIRA — e acertar à primeira evita a
+     segunda leitura com a página inteira, que custa o dobro. Os dois documentos
+     têm layout fixo: vale a pena apontar. */
+  const PROMPT_OCR='Este documento é, provavelmente, uma Caderneta Predial Urbana ou uma Certidão Permanente de Portugal. '+
+    'ONDE PROCURAR: numa CADERNETA, o artigo matricial e a freguesia estão no cabeçalho, no topo; a morada e a '+
+    'identificação da fração logo abaixo; as áreas e o andar no quadro da fração; o ano de inscrição na matriz junto ao '+
+    'valor patrimonial. Numa CERTIDÃO PERMANENTE, o número de descrição predial está no CANTO SUPERIOR DIREITO (formato '+
+    '"3291/20080724") e o código de acesso da certidão no cabeçalho (formato XXXX-XXXX-XXXX); a conservatória e a '+
+    'freguesia vêm no topo, a composição do prédio a seguir. Ignora titulares, quotas, inscrições, ónus e hipotecas — '+
+    'não são precisos. A imagem pode estar cortada em baixo: se um campo não aparecer, devolve null em vez de o inventar. '+
+    'Extrai em JSON (usa null nos campos que não encontrares ou não se apliquem): tipo_documento ("caderneta_predial"|"certidao_permanente"|"outro"), numero_matriz (número de matriz predial urbana, só o número/código, ex: "1234"), numero_fracao (letra ou número de identificação da fração autónoma, ex: "A" ou "12"), morada_completa (morada do prédio/fração tal como consta no documento: rua, número de polícia, andar se aplicável, código postal e localidade, tudo numa só linha), localidade (apenas o nome da localidade/cidade/vila onde se situa o imóvel, ex: "Portimão"), freguesia (nome da freguesia tal como consta no documento), concelho (nome do concelho/município, ex: "Portimão"), ano_inscricao_matriz (ano em que o prédio foi inscrito na matriz predial, só o ano, ex: "1995"), numero_pisos_predio (nº total de pisos do EDIFÍCIO/prédio — este valor serve APENAS para a descrição do prédio; null se não constar), numero_pisos_fracao (nº de pisos da FRAÇÃO/moradia em si, ou seja quantos pisos tem a habitação que está a ser certificada — numa moradia unifamiliar coincide com os pisos do prédio; num apartamento é normalmente 1, ou 2 se for duplex; null se não constar explicitamente), numero_descricao_predial (número de descrição predial — canto superior direito, formato "3291/20080724" → extrai só "3291", nunca a data), numero_certidao_permanente (código de acesso da certidão permanente, formato XXXX-XXXX-XXXX, DIFERENTE do número de descrição predial), tipologia (SÓ se o documento a disser de forma explícita — «T2», «tipologia T3», «tipo T1», na descrição da fração ou nas divisões; devolve no formato \"T2\"; null se não constar ou se for preciso deduzir do número de quartos), area_bruta_privativa_m2 (área bruta privativa em m², só o número; null se não constar), area_bruta_dependente_m2 (área bruta dependente em m², só o número; null se não constar). Responde APENAS com JSON válido, sem texto adicional e sem blocos de código.';
+  return comRetry(async(rep)=>{
+    const data=await _pedidoIA('documento',{model:'claude-sonnet-4-6',max_tokens:600,
+      messages:[{role:'user',content:[...blocosFicheiro,{type:'text',text:PROMPT_OCR}]}]},rep);
+    // esta linha perdeu-se numa edição anterior: `raw` ficava por definir e a
+    // leitura da CADERNETA rebentava com «raw is not defined»
     const raw=(data.content.find(c=>c.type==='text')||{}).text||'';
     return parseJsonIA(raw);
   });
@@ -13093,17 +13536,85 @@ async function _reduzirParaJpeg(dataURL,maxLado){
   cv.getContext('2d').drawImage(img,0,0,cv.width,cv.height);
   return cv.toDataURL('image/jpeg',0.9);
 }
-async function _blocosParaModelo(dataURL,mediaType){
-  const tipo=(mediaType||'').toLowerCase();
-  if(tipo==='application/pdf'||/^data:application\/pdf/i.test(dataURL)){
-    // rasterizar a 1ª página (e no máximo 3) — o modelo lê melhor imagem nítida
+/* Um PDF a 250 DPI dá uma A4 com 2066×2924 px — cerca de 8000 tokens. TRÊS
+   páginas assim são 24 mil tokens num único documento, e a API reduz cada uma
+   a 1568 px antes de a ler. 150 DPI dá 1240×1754, que já é acima do que o
+   modelo vê depois de reduzir, e custa um terço.
+   E DUAS páginas, não três: a caderneta tem a matriz, a morada e o ano na
+   primeira; a segunda apanha a continuação das frações. A terceira é quase
+   sempre o quadro de avaliação, que não se usa. Se faltar alguma coisa, a
+   revisão no escritório lê o documento inteiro. */
+const OCR_PDF_DPI=150, OCR_PDF_MAX_PAGINAS=2;
+/* De uma CERTIDÃO PERMANENTE a app só usa dois números — o de descrição
+   predial e o código de acesso — e ambos estão no cabeçalho da 1ª página. Vai
+   só o terço de cima dessa página: um quarto do que ia antes. */
+const OCR_RECORTE_CERTIDAO=0.34;
+function pareceCertidao(nome){
+  return /certid|predial\s*online|registo\s*predial|conservat/i.test(String(nome||''));
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   RECORTAR O QUE NÃO SE LÊ
+   ══════════════════════════════════════════════════════════════════
+   Numa CADERNETA PREDIAL o que interessa está no terço de cima e no meio:
+   artigo matricial, freguesia, morada, fração, áreas, ano de inscrição. O
+   terço de baixo são titulares, quotas e histórico — nada disso vai para o
+   certificado.
+   Numa CERTIDÃO PERMANENTE o número de descrição predial está no canto
+   superior direito e a composição do prédio no topo; a metade de baixo são
+   inscrições, ónus e hipotecas.
+   Enviar 65% da altura poupa 35% dos tokens sem perder um único campo dos que
+   a app pede. E vai com rede: se a leitura vier sem os campos essenciais,
+   repete-se com a página inteira — melhor gastar mais numa caderneta de
+   formato invulgar do que ficar sem a matriz. */
+const OCR_RECORTE_TOPO=0.65;
+function recortarTopo(dataURL,fracao){
+  return new Promise(resolve=>{
     try{
-      const pg1=await rasterizarPaginaPDF(dataURL,1,250);
-      const n=Math.min(pg1.nPaginas,3);
-      const blocos=[{type:'image',source:{type:'base64',media_type:'image/jpeg',data:pg1.jpegDataURL.split(',')[1]}}];
+      const img=new Image();
+      img.onload=()=>{
+        try{
+          const w=img.naturalWidth||img.width, h=img.naturalHeight||img.height;
+          if(!w||!h){ resolve(dataURL); return; }
+          // só vale a pena em páginas verticais: numa foto ao baixo cortaria dados
+          if(h<w*1.15){ resolve(dataURL); return; }
+          const hFinal=Math.round(h*(fracao||OCR_RECORTE_TOPO));
+          const c=document.createElement('canvas');
+          c.width=w; c.height=hFinal;
+          c.getContext('2d').drawImage(img,0,0,w,hFinal,0,0,w,hFinal);
+          resolve(c.toDataURL('image/jpeg',0.85));
+        }catch(e){ resolve(dataURL); }
+      };
+      img.onerror=()=>resolve(dataURL);
+      img.src=dataURL;
+    }catch(e){ resolve(dataURL); }
+  });
+}
+// os campos sem os quais não vale a pena ter lido o documento
+function _ocrTemEssencial(o){
+  if(!o||typeof o!=='object') return false;
+  // uma certidão basta-se com um dos seus dois números — não tem matriz nem áreas
+  if(o&&o.tipo_documento==='certidao_permanente')
+    return !!(o.numero_descricao_predial||o.numero_certidao_permanente);
+  return !!(o.numero_matriz||o.numero_descricao_predial||o.numero_certidao_permanente||
+            (o.morada_completa&&o.concelho));
+}
+async function _blocosParaModelo(dataURL,mediaType,inteiro,perfil){
+  const tipo=(mediaType||'').toLowerCase();
+  /* Uma certidão vai com UMA página e um recorte mais curto: os dois números
+     que dela se usam estão no cabeçalho. A caderneta mantém 2 páginas. */
+  const soTopo=(perfil==='certidao')&&!inteiro;
+  if(tipo==='application/pdf'||/^data:application\/pdf/i.test(dataURL)){
+    try{
+      const pg1=await rasterizarPaginaPDF(dataURL,1,OCR_PDF_DPI);
+      const n=soTopo?1:Math.min(pg1.nPaginas,OCR_PDF_MAX_PAGINAS);
+      const rec=async du=>(inteiro?du:await recortarTopo(du,soTopo?OCR_RECORTE_CERTIDAO:undefined));
+      const blocos=[{type:'image',source:{type:'base64',media_type:'image/jpeg',
+        data:(await rec(pg1.jpegDataURL)).split(',')[1]}}];
       for(let p=2;p<=n;p++){
-        const pg=await rasterizarPaginaPDF(dataURL,p,250);
-        blocos.push({type:'image',source:{type:'base64',media_type:'image/jpeg',data:pg.jpegDataURL.split(',')[1]}});
+        const pg=await rasterizarPaginaPDF(dataURL,p,OCR_PDF_DPI);
+        blocos.push({type:'image',source:{type:'base64',media_type:'image/jpeg',
+          data:(await rec(pg.jpegDataURL)).split(',')[1]}});
       }
       return blocos;
     }catch(e){
@@ -13160,24 +13671,11 @@ function orientsDaDivisao(paredes,norteGraus){
 
 async function identificarAreasPlanta(dataURL,mediaType){
   const blocosFicheiro=await _blocosParaModelo(dataURL,mediaType);
-  const resp=await fetch(ANTHROPIC_PROXY_URL,{
-    method:'POST',headers:{'Content-Type':'application/json','X-App-Secret':APP_SHARED_SECRET},
-    body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:1000,
+  const data=await _pedidoIA('planta',{model:'claude-sonnet-4-6',max_tokens:1000,
       messages:[{role:'user',content:[
         ...blocosFicheiro,
         {type:'text',text:'Esta imagem é uma planta/esboço técnico de um imóvel (moradia ou apartamento), com os nomes dos compartimentos e as respetivas áreas escritas dentro ou perto de cada divisão (normalmente em m² ou m2). Lê CUIDADOSAMENTE cada compartimento desenhado e a área anotada.\n\nIDENTIFICA O PISO desta planta. Procura no título, na legenda ou na etiqueta do desenho: PISO 0, PISO 1, R/CHÃO, RÉS-DO-CHÃO, 1º ANDAR, CAVE, SÓTÃO. Devolve-o no campo piso, numa destas formas exactas: Cave, R/C, 1º andar, 2º andar, 3º andar. PISO 0 e R/CHÃO são R/C; PISO 1 é 1º andar. Se não identificares, devolve piso vazio.\n\nMUITO IMPORTANTE: em Portugal, plantas e cadernetas distinguem frequentemente "área bruta" (inclui paredes/elementos estruturais, medida ao eixo ou pelo perímetro exterior) de "área útil" (só o espaço interior utilizável, excluindo paredes — é o que interessa para o certificado energético). NUNCA presumas que um valor é área útil só porque não tem etiqueta — verifica se a planta indica explicitamente "bruta"/"Ab" ou "útil"/"Au" junto a cada valor ou num total. Só classifica como "util" quando a planta o disser explicitamente (rótulo "útil", "Au", ou side explicitamente distinto de "bruta"). Caso não haja qualquer indicação de bruta/útil, classifica como "indefinido" — NUNCA assumas "util" por defeito.\n\nResponde APENAS com JSON no formato: {"piso": "Cave"|"R/C"|"1º andar"|"2º andar"|"3º andar"|"" (o piso desta planta, lido do título ou da legenda; vazio se não identificares), "cotas_exteriores": {"cima":{"total":valor da cota TOTAL desse lado do contorno, em metros, ou null,"parciais":[lista das cotas parciais desse lado, na ordem em que aparecem, em metros]},"baixo":{...},"esquerda":{...},"direita":{...}} — lê as linhas de cota desenhadas nas MARGENS da planta, fora do contorno do edifício. A cota total é a maior, normalmente na linha mais afastada; as parciais são as da linha mais próxima do edifício e somam a total. Se um lado não tiver cotas, devolve {"total":null,"parciais":[]}, "norte_graus": ângulo em graus para onde aponta a seta do NORTE na planta, medido no sentido dos ponteiros do relógio a partir de CIMA da imagem (0 = norte para cima, 90 = norte para a direita, 180 = norte para baixo, 270 = norte para a esquerda); null se não houver seta ou rosa-dos-ventos, "tipo_geral": "util"|"bruta"|"indefinido"|"misto" (indica se a planta, no seu conjunto, rotula as áreas como brutas, úteis, não indica de todo, ou tem uma mistura dos dois), "divisoes":[{"nome":"nome do compartimento tal como está escrito, ex: Sala, Quarto 1, Cozinha, WC","area":valor numérico em m² (só o número, ex: 18.5),"tipo":"util"|"bruta"|"indefinido" (classificação individual desta área, seguindo a mesma regra),"paredes_exteriores":[lista dos lados deste compartimento que dão para o EXTERIOR do edifício, cada um como "cima"|"baixo"|"esquerda"|"direita" conforme aparecem NA IMAGEM. Um lado que confine com outro compartimento, com escadas ou com espaço interior NÃO entra. Lista vazia se o compartimento for totalmente interior]}], "area_total_indicada": valor numérico se a planta já mostrar um total geral escrito explicitamente, ou null se não houver, "area_total_tipo": "util"|"bruta"|"indefinido" (classificação do total, se existir)}. Inclui TODOS os compartimentos com área legível, incluindo arrumos/despensas/varandas/marquises se tiverem área indicada. Se a área de algum compartimento estiver ilegível ou não numérica, não o incluas na lista. Não inventes valores. Responde apenas com JSON, sem texto adicional nem blocos de código.'}
-      ]}]})
-  });
-  if(resp.status===401) throw new Error('proxy recusou o pedido (401) — o segredo da app não corresponde ao APP_SHARED_SECRET configurado no Cloudflare Worker. Atualiza o código e a variável do Worker.');
-  if(!resp.ok){
-    let det='';
-    try{ const e=await resp.json(); det=(e&&e.error&&e.error.message)||''; }catch(_){}
-    if(resp.status===400) throw new Error('a planta não foi aceite (400)'+(det?': '+det:'')+
-      '. Tenta uma fotografia ou um PDF de uma só página, ou tira captura de ecrã e anexa como imagem.');
-    if(resp.status===413) throw new Error('a planta é grande demais — reduz a fotografia e tenta outra vez.');
-    throw new Error('HTTP '+resp.status+(det?' — '+det:''));
-  }
-  const data=await resp.json();
+      ]}]});
   const raw=(data.content.find(c=>c.type==='text')||{}).text||'';
   return parseJsonIA(raw);
 }
@@ -14479,8 +14977,14 @@ function adicionarDocumento(){
   // multiple: permite escolher caderneta + certidão + ficha técnica de uma vez, em vez
   // de repetir o botão para cada documento — processados um a um por baixo, na mesma ordem.
   input.accept='image/*,application/pdf';input.multiple=true;
-  input.onchange=async()=>{
-    const files=Array.from(input.files||[]);
+  input.onchange=()=>processarFicheirosDocumento(Array.from(input.files||[]));
+  input.click();
+}
+/* O mesmo caminho para tudo o que chega: seletor do Android, câmara, ou os
+   ficheiros descarregados do OneDrive pelo navegador da app. */
+async function processarFicheirosDocumento(files){
+  const st=document.getElementById('docs-status');
+  {
     if(!files.length)return;
     let guardados=0,comErro=0;
     for(let i=0;i<files.length;i++){
@@ -14498,15 +15002,20 @@ function adicionarDocumento(){
         }catch(e){
           console.error('Falha ao comprimir documento, OCR e guardar vão usar a foto em bruto:',e);
         }
-        // OCR corre sobre a versão já comprimida (mais rápido a enviar em sinal fraco;
-        // a mesma compressão já é usada para o PDF final, por isso não perde nada)
-        const dataURLParaOcr=paginaProcessada?paginaProcessada.jpegDataURL:dataURL;
+        /* DUAS RESOLUÇÕES: uma para GUARDAR, outra para LER.
+           O PDF que fica no processo mantém-se a 2200 px, que é o que se quer
+           para o arquivar e imprimir. Mas a cópia que vai ao modelo sai a 1568,
+           porque acima disso a API reduz a imagem no servidor: pagavam-se 4840
+           tokens por uma caderneta que era lida a 1568. Metade do custo ia para
+           píxeis que ninguém via. */
+        let dataURLParaOcr=paginaProcessada?paginaProcessada.jpegDataURL:dataURL;
+        try{ dataURLParaOcr=await comprimirFotoGenerica(dataURLParaOcr,'ocr'); }catch(e){}
         const mediaTypeParaOcr=paginaProcessada?'image/jpeg':file.type;
         // OCR EM SEGUNDO PLANO: a promessa arranca aqui mas não se espera por
         // ela. O documento é guardado já e a leitura da caderneta continua a
         // correr atrás, preenchendo os campos quando terminar. Antes ficava-se
         // parado à porta do imóvel à espera da rede, documento a documento.
-        promessaOcr=identificarDocumentoOficial(dataURLParaOcr,mediaTypeParaOcr)
+        promessaOcr=identificarDocumentoOficial(dataURLParaOcr,mediaTypeParaOcr,file.name)
           .catch(e=>{console.error('OCR de identificação matricial falhou:',e);return {__erro:(e.name||'Erro')+': '+e.message};});
         st.textContent='A converter foto para PDF…';
         try{
@@ -14521,7 +15030,7 @@ function adicionarDocumento(){
         // PDFs também passam pela identificação automática — antes eram saltados em
         // silêncio: "Documento guardado" sem tentar ler nada, parecendo que a app
         // tinha ignorado a caderneta/certidão anexada como PDF.
-        promessaOcr=identificarDocumentoOficial(dataURL,'application/pdf')
+        promessaOcr=identificarDocumentoOficial(dataURL,'application/pdf',file.name)
           .catch(e=>{console.error('Identificação matricial de PDF falhou:',e);return {__erro:(e.name||'Erro')+': '+e.message};});
       }
 
@@ -14615,6 +15124,25 @@ function adicionarDocumento(){
           }
           if(ocr.numero_certidao_permanente){D.certidaoPermanenteNumero=String(ocr.numero_certidao_permanente);}
 
+          /* TIPOLOGIA EXPLÍCITA NA CADERNETA. Só quando o documento a diz —
+             «T3» escrito. Nunca deduzida do número de quartos. Preenche a
+             pergunta da tipologia se ainda estiver vazia; se já foi respondida
+             em obra e for diferente, não a substitui: assinala. */
+          try{
+            const tipDoc=String((ocr&&ocr.tipologia)||'').toUpperCase().replace(/\s+/g,'');
+            if(/^T[0-9]$/.test(tipDoc)){
+              if(!D.tipologia){
+                D.tipologia=tipDoc; D.tipologiaDeDocumento=true;
+                const iT=qList.findIndex(q=>q&&q.key==='tipologia');
+                if(iT>=0&&!answers[iT]) answers[iT]=tipDoc;
+                achados.push('tipologia '+tipDoc+' (da caderneta)');
+              } else if(D.tipologia!==tipDoc){
+                achados.push('⚠ caderneta diz '+tipDoc+' mas o levantamento tem '+D.tipologia);
+              }
+            }
+            if(ocr&&ocr.area_bruta_privativa_m2){ D.areaBrutaPrivativa=String(ocr.area_bruta_privativa_m2); achados.push('ABP '+D.areaBrutaPrivativa+' m²'); }
+            if(ocr&&ocr.area_bruta_dependente_m2){ D.areaBrutaDependente=String(ocr.area_bruta_dependente_m2); achados.push('ABD '+D.areaBrutaDependente+' m²'); }
+          }catch(e){}
           if(achados.length){
             autoSave();
             st.style.color='var(--ac)';
@@ -14642,8 +15170,7 @@ function adicionarDocumento(){
       st.style.color=comErro?'var(--red)':'var(--ac)';
       st.textContent=`✅ ${guardados} documento(s) guardado(s)`+(comErro?` — ⚠️ ${comErro} falhou/falharam`:'');
     }
-  };
-  input.click();
+  }
 }
 
 // ── FOTO ANEXADA A UM CAMPO GERAL (vidros, espessura parede, pé-direito) ──
@@ -14664,7 +15191,7 @@ function anexarFotoCampo(campo,wrap){
     const file=input.files[0];if(!file)return;
     try{
       const dataURLOrig=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=rej;r.readAsDataURL(file);});
-      const dataURL=await comprimirFotoGenerica(dataURLOrig,'precisa');
+      const dataURL=await comprimirFotoGenerica(dataURLOrig,'ocr');
       const idbKey=novaFotoKey('campo_'+campo);
       await fotoDbSet(idbKey,dataURL);
       if(!D.fotosCampos) D.fotosCampos={};
@@ -14725,7 +15252,7 @@ function anexarFotoMultiCampo(campo,wrap,minFotos){
     const file=input.files[0];if(!file) return;
     try{
       const dataURLOrig=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=rej;r.readAsDataURL(file);});
-      const dataURL=await comprimirFotoGenerica(dataURLOrig,'precisa');
+      const dataURL=await comprimirFotoGenerica(dataURLOrig,'ocr');
       const idbKey=novaFotoKey('campo_'+campo+'_'+Date.now());
       await fotoDbSet(idbKey,dataURL);
       if(!D.fotosCampos) D.fotosCampos={};
@@ -14808,6 +15335,11 @@ async function analisarFotoLareira(campo,dataURL,wrap){
            '"não identificado" com confiança baixa.'}
         ]}]})});
     const j=await r.json();
+    /* Esta chamada vai directa à API — as outras passam pelo proxy. Conta na
+       mesma, senão o painel de custos mente por defeito. */
+    try{ const us=j.usage||{}; _registarUsoIA({tipo:'lareira',
+      entrada:us.input_tokens||Math.round(b64.length/900),
+      saida:us.output_tokens||100}); }catch(e){}
     const txt=(j.content||[]).filter(x=>x.type==='text').map(x=>x.text).join('');
     const d=JSON.parse(txt.replace(/```json|```/g,'').trim());
     if(!D.lareiraFotoDados) D.lareiraFotoDados={};
@@ -15313,7 +15845,57 @@ function renderUnidExt(wrap){
       del.onclick=()=>{if(f.idbKey)fotoDbDelete(f.idbKey).catch(()=>{});D.unidadesExtFotos.splice(idx,1);renderUnidExt(wrap);};
       row.appendChild(img);row.appendChild(meta);row.appendChild(del);
       wrap.appendChild(row);
+      /* QUE DIVISÕES SERVE ESTA UNIDADE EXTERIOR.
+         O TXT pedia «confirmar que divisões servem cada um» porque a app não
+         sabia. Agora pergunta-se aqui, ao pé da foto, com as divisões que têm
+         AC como chips — toca nas que esta unidade serve. Uma chapa com uma
+         divisão é split; com várias é multi-split. */
+      const divsAC=Object.entries(D.climaDivisoes||{}).filter(([,cd])=>cd&&(cd.tipos||[cd.tipo]).some(t=>/split|bomba de calor/i.test(t||''))).map(([d])=>d);
+      if(divsAC.length){
+        const sv=document.createElement('div');
+        sv.style.cssText='margin:-2px 0 10px 64px;display:flex;flex-wrap:wrap;gap:5px;align-items:center';
+        const rot=document.createElement('span'); rot.style.cssText='font-size:11.5px;color:var(--tx3);margin-right:2px'; rot.textContent='serve:';
+        sv.appendChild(rot);
+        f.divs=Array.isArray(f.divs)?f.divs:[];
+        divsAC.forEach(d=>{
+          const c=document.createElement('div'); c.className='chip'+(f.divs.includes(d)?' sel':'');
+          c.style.cssText='font-size:12px;padding:5px 9px;min-height:0';
+          c.textContent=d;
+          c.onclick=()=>{ f.divs=f.divs.includes(d)?f.divs.filter(x=>x!==d):f.divs.concat(d); autoSave(); renderUnidExt(wrap); };
+          sv.appendChild(c);
+        });
+        wrap.appendChild(sv);
+      }
     });
+
+    /* DIVISÕES COM AC E SEM CHAPA ACESSÍVEL.
+       É corrente: a unidade da sala está na varanda e fotografa-se; a do quarto
+       está numa cobertura sem acesso. Sem isto a resposta era Sim ou Não para
+       todas, e o TXT pedia a chapa que não existe. Marca-se aqui quais não se
+       alcançam — o TXT diz que essas ficam pela etiqueta interior. */
+    {
+      const divsAC=Object.entries(D.climaDivisoes||{}).filter(([,cd])=>cd&&(cd.tipos||[cd.tipo]).some(t=>/split|bomba de calor/i.test(t||''))).map(([d])=>d);
+      const servidas=new Set((D.unidadesExtFotos||[]).flatMap(f=>Array.isArray(f.divs)?f.divs:[]));
+      const porServir=divsAC.filter(d=>!servidas.has(d));
+      if(porServir.length){
+        const cx=document.createElement('div');
+        cx.style.cssText='margin:8px 0 10px;padding:9px 11px;background:var(--bg2);border:1px solid var(--br);border-radius:9px';
+        const r=document.createElement('div'); r.style.cssText='font-size:12px;color:var(--tx2);margin-bottom:6px';
+        r.textContent='Divisões com AC ainda sem chapa exterior atribuída — toca nas que NÃO têm a unidade exterior acessível:';
+        cx.appendChild(r);
+        const row=document.createElement('div'); row.style.cssText='display:flex;flex-wrap:wrap;gap:5px';
+        D.ueNaoAcessiveis=Array.isArray(D.ueNaoAcessiveis)?D.ueNaoAcessiveis:[];
+        porServir.forEach(d=>{
+          const c=document.createElement('div'); c.className='chip'+(D.ueNaoAcessiveis.includes(d)?' sel':'');
+          c.style.cssText='font-size:12px;padding:5px 9px;min-height:0';
+          c.textContent=(D.ueNaoAcessiveis.includes(d)?'🚫 ':'')+d;
+          c.onclick=()=>{ D.ueNaoAcessiveis=D.ueNaoAcessiveis.includes(d)?D.ueNaoAcessiveis.filter(x=>x!==d):D.ueNaoAcessiveis.concat(d); autoSave(); renderUnidExt(wrap); };
+          row.appendChild(c);
+        });
+        cx.appendChild(row);
+        wrap.appendChild(cx);
+      }
+    }
 
     const st=document.createElement('div');
     st.id='unidext-status';
@@ -15341,20 +15923,14 @@ async function fotografarUnidadeExt(wrap){
     let dataURL;
     try{
       const dataURLOrig=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=rej;r.readAsDataURL(file);});
-      dataURL=await comprimirFotoGenerica(dataURLOrig,'precisa');
+      dataURL=await comprimirFotoGenerica(dataURLOrig,'ocr');
       const b64=dataURL.split(',')[1];
-      const obj=await comRetry(async()=>{
-        const resp=await fetch(ANTHROPIC_PROXY_URL,{
-          method:'POST',headers:{'Content-Type':'application/json','X-App-Secret':APP_SHARED_SECRET},
-          body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:600,
+      const obj=await comRetry(async(rep)=>{
+        const data=await _pedidoIA('chapa unidade exterior',{model:'claude-sonnet-4-6',max_tokens:600,
             messages:[{role:'user',content:[
               {type:'image',source:{type:'base64',media_type:'image/jpeg',data:b64}},
               {type:'text',text:'Lê esta chapa de características de unidade exterior de AC (split/multi-split/bomba de calor) ou painel solar. Extrai em JSON (null nos ausentes): marca, modelo, potencia_aquecimento_kw, potencia_arrefecimento_kw, potencia_absorvida_aquecimento_kw, potencia_absorvida_arrefecimento_kw, cop, eer, scop, seer, refrigerante, ano_fabrico. Responde APENAS com JSON sem backticks.'}
-            ]}]})
-        });
-        if(resp.status===401) throw new Error('proxy recusou (401) — segredo da app não corresponde ao APP_SHARED_SECRET do Worker.');
-        if(!resp.ok) throw new Error('HTTP '+resp.status);
-        const data=await resp.json();
+            ]}]},rep);
         return parseJsonIA(data.content[0].text);
       });
       if(!obj.cop&&obj.potencia_aquecimento_kw&&obj.potencia_absorvida_aquecimento_kw)
@@ -15454,19 +16030,13 @@ function lerEtiquetaEquipamento(div, statusElId, tipo){
       thumbInicial.src=dataURL;
 
       // OCR via API — extração completa com potências e cálculo de rendimentos
-      const resp=await fetch(ANTHROPIC_PROXY_URL,{
-        method:'POST',headers:{'Content-Type':'application/json','X-App-Secret':APP_SHARED_SECRET},
-        body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:600,
+      const data=await _pedidoIA('etiqueta',{model:'claude-sonnet-4-6',max_tokens:600,
           messages:[{role:'user',content:[
             // a foto foi comprimida para JPEG acima — declarar o tipo do ficheiro
             // original (HEIC do iPhone, por exemplo) fazia a API recusar com 400
             {type:'image',source:{type:'base64',media_type:'image/jpeg',data:b64}},
             {type:'text',text:'Lê esta etiqueta/chapa de características de equipamento (esquentador, termoacumulador, bomba de calor, split/multi-split AC, painel solar). Extrai em JSON (null nos ausentes): marca, modelo, potencia_aquecimento_kw (heating capacity), potencia_arrefecimento_kw (cooling capacity), potencia_absorvida_aquecimento_kw (power input heating), potencia_absorvida_arrefecimento_kw (power input cooling), cop, eer, scop, seer, potencia_kw (potência genérica se só houver uma), capacidade_l, rendimento, refrigerante, ano_fabrico. Se a etiqueta tiver potência de saída e potência absorvida mas não COP/EER, NÃO calcules — deixa null, eu calculo. Responde APENAS com JSON sem backticks.'}
-          ]}]})
-      });
-      if(resp.status===401) throw new Error('proxy recusou (401) — segredo da app não corresponde ao APP_SHARED_SECRET do Worker.');
-      if(!resp.ok) throw new Error('HTTP '+resp.status);
-      const data=await resp.json();
+          ]}]});
       const obj=parseJsonIA(data.content[0].text);
       // calcular COP/EER a partir das potências quando não vêm na etiqueta
       if(!obj.cop&&obj.potencia_aquecimento_kw&&obj.potencia_absorvida_aquecimento_kw){
@@ -17108,6 +17678,103 @@ setInterval(()=>{ copiaAutomaticaOneDrive(false); },AUTOSAVE_OD_INTERVALO);
 document.addEventListener('visibilitychange',()=>{
   if(document.visibilityState==='hidden') copiaAutomaticaOneDrive(false);
 });
+
+/* ══════════════════════════════════════════════════════════════════
+   ESCOLHER DOCUMENTOS DIRECTAMENTE DO ONEDRIVE, VÁRIOS DE UMA VEZ
+   ══════════════════════════════════════════════════════════════════
+   O seletor do Android não deixa escolher vários no Google Drive e não se
+   consegue mandá-lo abrir numa pasta. Este navegador corre dentro da app,
+   com a sessão OneDrive que já existe: abre na pasta dos certificados,
+   mostra caixas de selecção, e descarrega os escolhidos pelo Graph — que
+   seguem pelo mesmo caminho de OCR dos outros documentos. */
+const OD_PASTA_DOCS_KEY='ce_od_pasta_docs';
+let _odCaminhoAtual='';
+async function escolherDoOneDrive(){
+  const box=document.getElementById('od-browser'); if(!box) return;
+  box.style.display='block';
+  box.innerHTML='<div style="font-size:13px;color:var(--tx2);padding:8px">A ligar ao OneDrive…</div>';
+  try{
+    const token=await oneDriveGetToken();
+    const inicio=localStorage.getItem(OD_PASTA_DOCS_KEY)||ONEDRIVE_PASTA_BASE;
+    await _odListar(token,inicio);
+  }catch(e){
+    box.innerHTML='<div style="font-size:13px;color:var(--red);padding:8px">Não consegui abrir o OneDrive: '+
+      String(e.message||e).replace(/</g,'&lt;')+'</div>';
+  }
+}
+async function _odListar(token,caminho){
+  const box=document.getElementById('od-browser');
+  _odCaminhoAtual=caminho||'';
+  const url=caminho
+    ? 'https://graph.microsoft.com/v1.0/me/drive/root:/'+caminho.split('/').map(encodeURIComponent).join('/')+':/children?$top=200&$select=id,name,folder,file,size,lastModifiedDateTime'
+    : 'https://graph.microsoft.com/v1.0/me/drive/root/children?$top=200&$select=id,name,folder,file,size,lastModifiedDateTime';
+  box.innerHTML='<div style="font-size:13px;color:var(--tx2);padding:8px">A abrir '+(caminho||'raiz').replace(/</g,'&lt;')+'…</div>';
+  const r=await fetch(url,{headers:{Authorization:'Bearer '+token}});
+  if(r.status===404&&caminho){ return _odListar(token,''); }   // a pasta não existe: cai na raiz
+  if(!r.ok) throw new Error('Graph '+r.status);
+  const j=await r.json();
+  const itens=(j.value||[]);
+  const pastas=itens.filter(x=>x.folder).sort((a,b)=>a.name.localeCompare(b.name));
+  const fich=itens.filter(x=>x.file&&/\.(pdf|jpe?g|png|heic|webp)$/i.test(x.name))
+    .sort((a,b)=>(b.lastModifiedDateTime||'').localeCompare(a.lastModifiedDateTime||''));
+  box.innerHTML='';
+  const cab=document.createElement('div');
+  cab.style.cssText='display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--tx2);margin-bottom:8px;flex-wrap:wrap';
+  const partes=(caminho||'').split('/').filter(Boolean);
+  const bt=(txt,alvo)=>{ const b=document.createElement('button'); b.textContent=txt;
+    b.style.cssText='background:var(--bg3);color:var(--tx);border:1px solid var(--br);border-radius:8px;padding:6px 10px;font-size:12px';
+    b.onclick=()=>_odListar(token,alvo); return b; };
+  cab.appendChild(bt('OneDrive',''));
+  partes.forEach((pp,i)=>{ const sp=document.createElement('span'); sp.textContent='›'; cab.appendChild(sp); cab.appendChild(bt(pp,partes.slice(0,i+1).join('/'))); });
+  box.appendChild(cab);
+  const lembrar=document.createElement('button');
+  lembrar.textContent='📌 Abrir sempre aqui';
+  lembrar.style.cssText='background:none;color:var(--ac);border:1px dashed var(--ac);border-radius:8px;padding:6px 10px;font-size:12px;margin-bottom:8px';
+  lembrar.onclick=()=>{ localStorage.setItem(OD_PASTA_DOCS_KEY,_odCaminhoAtual); lembrar.textContent='📌 Guardado — abre aqui da próxima vez'; };
+  box.appendChild(lembrar);
+  const lista=document.createElement('div'); lista.style.cssText='display:flex;flex-direction:column;gap:5px;max-height:46vh;overflow-y:auto';
+  pastas.forEach(pf=>{
+    const d=document.createElement('div');
+    d.style.cssText='display:flex;align-items:center;gap:8px;padding:9px 10px;background:var(--bg3);border-radius:8px;cursor:pointer;font-size:13.5px';
+    d.innerHTML='📁 <span style="flex:1">'+pf.name.replace(/</g,'&lt;')+'</span><span style="color:var(--tx3)">›</span>';
+    d.onclick=()=>_odListar(token,(caminho?caminho+'/':'')+pf.name);
+    lista.appendChild(d);
+  });
+  const sel=new Set();
+  fich.forEach(f=>{
+    const d=document.createElement('label');
+    d.style.cssText='display:flex;align-items:center;gap:10px;padding:9px 10px;background:var(--bg2);border:1px solid var(--br);border-radius:8px;font-size:13px;cursor:pointer';
+    const cb=document.createElement('input'); cb.type='checkbox'; cb.style.cssText='width:20px;height:20px';
+    cb.onchange=()=>{ if(cb.checked) sel.add(f); else sel.delete(f); btOk.textContent='⬇ Anexar '+sel.size+' ficheiro(s)'; btOk.disabled=!sel.size; };
+    const nm=document.createElement('span'); nm.style.flex='1'; nm.textContent=f.name;
+    const tam=document.createElement('span'); tam.style.cssText='color:var(--tx3);font-size:11.5px'; tam.textContent=(f.size/1048576).toFixed(1)+' MB';
+    d.appendChild(cb); d.appendChild(nm); d.appendChild(tam); lista.appendChild(d);
+  });
+  if(!pastas.length&&!fich.length){ const v=document.createElement('div'); v.style.cssText='font-size:12.5px;color:var(--tx3);padding:8px'; v.textContent='Pasta vazia (só se mostram PDF e imagens).'; lista.appendChild(v); }
+  box.appendChild(lista);
+  const rodape=document.createElement('div'); rodape.style.cssText='display:flex;gap:8px;margin-top:10px';
+  const btOk=document.createElement('button'); btOk.className='btn-next'; btOk.textContent='⬇ Anexar 0 ficheiro(s)'; btOk.disabled=true; btOk.style.flex='1';
+  btOk.onclick=async()=>{
+    btOk.disabled=true;
+    const ficheiros=[];
+    let n=0;
+    for(const f of sel){
+      n++; btOk.textContent='A descarregar '+n+' de '+sel.size+'…';
+      try{
+        const rr=await fetch('https://graph.microsoft.com/v1.0/me/drive/items/'+f.id+'/content',{headers:{Authorization:'Bearer '+token}});
+        if(!rr.ok) throw new Error('Graph '+rr.status);
+        const blob=await rr.blob();
+        const tipo=f.file&&f.file.mimeType||blob.type||(/\.pdf$/i.test(f.name)?'application/pdf':'image/jpeg');
+        ficheiros.push(new File([blob],f.name,{type:tipo}));
+      }catch(e){ alert('Não consegui descarregar «'+f.name+'»: '+(e.message||e)); }
+    }
+    box.style.display='none';
+    if(ficheiros.length) await processarFicheirosDocumento(ficheiros);
+  };
+  const btX=document.createElement('button'); btX.textContent='Fechar'; btX.style.cssText='background:var(--bg3);color:var(--tx);border:1px solid var(--br);border-radius:10px;padding:10px 14px';
+  btX.onclick=()=>{ box.style.display='none'; };
+  rodape.appendChild(btOk); rodape.appendChild(btX); box.appendChild(rodape);
+}
 
 function atualizarBotaoOneDrive(){
   const btn=document.getElementById('btn-onedrive');
