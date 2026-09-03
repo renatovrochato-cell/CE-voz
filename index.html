@@ -561,7 +561,7 @@ const DIVS_BASE=[
 // VERSÃO — fonte única (selo no ecrã inicial + cabeçalho do TXT exportado).
 // Subir aqui a cada alteração ao ficheiro.
 // ═══════════════════════════════════════
-const APP_VERSION='v2026.09.03-FIX242';
+const APP_VERSION='v2026.09.03-FIX244';
 
 /* ══════════════════════════════════════════════════════════════════
    A APP INSTALADA FICAVA PRESA NUMA VERSÃO ANTIGA
@@ -3578,6 +3578,36 @@ function renderVaosInline(div,n){
     const vi=i;
     const card=document.createElement('div');
     card.className='ve-card';
+    // marca o cartão, para o encadeamento do laser saber onde acaba este vão
+    card.dataset.veIdx=String(vi);
+    card.dataset.veId=ve.id||('VE'+(vi+1));
+
+    /* UM VÃO DE CADA VEZ, ATÉ ESTAR COMPLETO.
+       O laser já pára no fim de cada vão, mas nada dizia que o vão anterior
+       tinha ficado a meio: os cartões estavam todos abertos ao mesmo tempo e
+       media-se em cima do que estava por preencher. Cada cartão passa a
+       mostrar o que lhe falta, e o cartão seguinte fica recolhido enquanto o
+       anterior não estiver completo — abre-se com um toque, sem bloquear
+       ninguém que queira trabalhar por outra ordem. */
+    const _faltaNoVao=v=>{
+      const f=[];
+      if(!(parseFloat(String(v.larg).replace(',','.'))>0)) f.push('largura');
+      if(!(parseFloat(String(v.alt).replace(',','.'))>0)) f.push('altura');
+      if(!v.orient) f.push('orientação');
+      if(!v.tipo) f.push('vidro');
+      if(!v.sombAquec) f.push('sombreamento');
+      return f;
+    };
+    const _faltaAnterior=vi>0?_faltaNoVao(D.divisoesDados[div].vaos[vi-1]||{}):[];
+    const _incompletoAtras=_faltaAnterior.length>0;
+    /* «Em branco» é não ter medidas nem vidro. A orientação vem pré-preenchida
+       quando a divisão só tem uma parede exterior, e o sombreamento pode vir de
+       um perfil — contá-los fazia com que nenhum vão fosse considerado por
+       começar, e o recolhimento nunca acontecia. */
+    const _porComecar=v=>!(parseFloat(String(v.larg).replace(',','.'))>0)&&
+                         !(parseFloat(String(v.alt).replace(',','.'))>0)&&!v.tipo;
+    const _recolhido=_incompletoAtras&&_porComecar(ve);
+    if(_recolhido) card.dataset.recolhido='1';
 
     // título + botão de copiar para seguintes
     const titleRow=document.createElement('div');
@@ -3614,6 +3644,74 @@ function renderVaosInline(div,n){
     }
     card.appendChild(titleRow);
 
+    /* IGUALAR AO VÃO ANTERIOR — MEDIDAS INCLUÍDAS.
+       Num prédio, os vãos repetem-se: quatro janelas iguais numa fachada, dois
+       vãos de sacada iguais. Medir os quatro com o laser é perder tempo, e o
+       botão de «copiar características» de propósito NÃO copia as medidas —
+       porque copiar medidas para um vão que ninguém mediu é inventar área.
+       A diferença aqui é quem decide: este botão está no cartão do vão que se
+       vai preencher, aparece só quando o anterior JÁ está medido, e diz as
+       medidas que vai copiar. Quem toca está a afirmar que o vão é igual, não
+       a deixar a app adivinhar. Fica registado em vaoIgualadoA, para o TXT
+       poder dizer quais foram medidos e quais foram igualados. */
+    if(vi>0){
+      const veAnt=D.divisoesDados[div].vaos[vi-1]||{};
+      const lAnt=parseFloat(String(veAnt.larg||'').replace(',','.'));
+      const aAnt=parseFloat(String(veAnt.alt||'').replace(',','.'));
+      const anteriorMedido=lAnt>0&&aAnt>0;
+      const jaMedido=parseFloat(String(ve.larg||'').replace(',','.'))>0&&
+                     parseFloat(String(ve.alt||'').replace(',','.'))>0;
+      if(anteriorMedido&&!jaMedido){
+        /* DUAS OPÇÕES, PORQUE SÃO DOIS CASOS DIFERENTES.
+           Quatro janelas iguais na mesma fachada: as medidas repetem-se e vale
+           copiar tudo. Uma janela e uma porta de sacada com o mesmo vidro e a
+           mesma persiana: as características são as mesmas, as medidas não —
+           copiar medidas aí seria inventar área.
+           Quem está em obra sabe qual dos dois casos tem à frente; a app não
+           adivinha. Só as medidas copiadas ficam registadas em vaoIgualadoA,
+           porque essas é que entram no cálculo do CE. */
+        const CARACT=['orient','tipo','caixMat','corteTerm','abertura','prot',
+          'caixCor','caixEstore','portadaPermeab','protInt','sombAquec','sombArref','caixAr'];
+        const idAnt=veAnt.id||('VE'+vi);
+        const idEste=ve.id||('VE'+(vi+1));
+        const dimTxt=lAnt.toFixed(2).replace('.',',')+' × '+aAnt.toFixed(2).replace('.',',')+' m';
+        const _copiar=(comMedidas)=>{
+          const campos=comMedidas?['larg','alt'].concat(CARACT):CARACT;
+          campos.forEach(c=>{ if(veAnt[c]!==undefined&&veAnt[c]!=='') ve[c]=veAnt[c]; });
+          if(comMedidas) ve.vaoIgualadoA=idAnt; else delete ve.vaoIgualadoA;
+          saveVaosToD(div);
+          renderVaosInline(div,n);
+          mostrarToastLaser(comMedidas
+            ? '⧉ '+idEste+' igualado ao '+idAnt+' — '+dimTxt+'. Confirma ou corrige o que for diferente.'
+            : '⧉ Características do '+idAnt+' copiadas para '+idEste+'. Falta medir a largura e a altura.',
+            6000);
+        };
+        const linha=document.createElement('div');
+        linha.style.cssText='display:flex;flex-direction:column;gap:5px;margin:2px 0 8px';
+        const _bt=(html,fn,forte)=>{
+          const b=document.createElement('button'); b.type='button'; b.innerHTML=html;
+          b.style.cssText='width:100%;padding:9px 10px;border-radius:9px;font-size:13px;'+
+            'cursor:pointer;text-align:left;border:1px '+(forte?'solid':'dashed')+' var(--ac);'+
+            'background:'+(forte?'var(--ac)':'none')+';color:'+(forte?'#04120c':'var(--ac)');
+          b.onclick=(e)=>{ e.stopPropagation(); fn(); };
+          return b;
+        };
+        linha.appendChild(_bt('⧉ Igual ao '+idAnt+
+          ' <span style="opacity:.75">— medidas ('+dimTxt+') + características</span>',
+          ()=>_copiar(true),true));
+        linha.appendChild(_bt('⧉ Só as características do '+idAnt+
+          ' <span style="opacity:.75">— medidas ficam por medir</span>',
+          ()=>_copiar(false),false));
+        card.appendChild(linha);
+      } else if(ve.vaoIgualadoA){
+        // já foi igualado: fica dito, para não parecer medido com o laser
+        const nota=document.createElement('div');
+        nota.style.cssText='font-size:11.5px;color:var(--tx3);margin:0 0 6px';
+        nota.textContent='⧉ medidas iguais ao '+ve.vaoIgualadoA+' (não medido com laser)';
+        card.appendChild(nota);
+      }
+    }
+
     // orientação — rosa dos ventos
     const orientDiv=document.createElement('div');
     const orientLbl=document.createElement('div');orientLbl.style.cssText='font-size:11px;color:var(--tx2);margin-bottom:6px';orientLbl.textContent='Orientação';
@@ -3639,14 +3737,14 @@ function renderVaosInline(div,n){
     const dimRow=document.createElement('div');
     dimRow.className='ve-row';
     const lInp=document.createElement('input');
-    lInp.className='ve-inp';lInp.placeholder='Larg.';lInp.type='number';lInp.step='0.01';lInp.inputMode='decimal';lInp.value=ve.larg||'';
+    lInp.className='ve-inp';lInp.placeholder='Larg.';lInp.type='number';lInp.dataset.veDim='larg';lInp.step='0.01';lInp.inputMode='decimal';lInp.value=ve.larg||'';
     lInp.oninput=()=>{ve.larg=lInp.value;saveVaosToD(div);};
     lInp.onfocus=()=>{if(laserAtivo){campoLaserActivo=lInp;lInp.style.outline='2px solid var(--ac)';}};
     lInp.onblur=()=>{lInp.style.outline='';};
     const xSpan=document.createElement('span');
     xSpan.textContent='×';xSpan.style.color='var(--tx2)';
     const aInp=document.createElement('input');
-    aInp.className='ve-inp';aInp.placeholder='Alt.';aInp.type='number';aInp.step='0.01';aInp.inputMode='decimal';aInp.value=ve.alt||'';
+    aInp.className='ve-inp';aInp.placeholder='Alt.';aInp.type='number';aInp.dataset.veDim='alt';aInp.step='0.01';aInp.inputMode='decimal';aInp.value=ve.alt||'';
     aInp.oninput=()=>{ve.alt=aInp.value;saveVaosToD(div);};
     aInp.onfocus=()=>{if(laserAtivo){campoLaserActivo=aInp;aInp.style.outline='2px solid var(--ac)';}};
     aInp.onblur=()=>{aInp.style.outline='';};
@@ -3654,6 +3752,54 @@ function renderVaosInline(div,n){
     const lDimClr=document.createElement('button');lDimClr.textContent='✕';lDimClr.className='laser-field-btn laser-clear-btn';lDimClr.title='Apagar Larg./Alt.';lDimClr.style.cssText='border:1px solid var(--red);background:none;color:var(--red);border-radius:6px;padding:5px 8px;font-size:16px;font-weight:700;cursor:pointer;display:'+(laserAtivo?'block':'none');lDimClr.onclick=(e)=>{e.preventDefault();lInp.value='';aInp.value='';ve.larg='';ve.alt='';saveVaosToD(div);};
     dimRow.appendChild(lInp);dimRow.appendChild(xSpan);dimRow.appendChild(aInp);dimRow.appendChild(lDimBtn);dimRow.appendChild(lDimClr);
     dimDiv.appendChild(dimRow);
+
+    /* IGUALAR AS MEDIDAS AO VÃO ANTERIOR — ANTES DE MEDIR.
+       Numa fachada, os vãos repetem-se: três janelas iguais, duas portadas
+       iguais. O «Igual a um vão já registado» de baixo copia as
+       características mas nunca as medidas, e com razão: um vão dado como
+       medido sem nunca ter sido medido é pior do que um vão vazio.
+       Só que quando as medidas SÃO as mesmas, obrigar a medir três vezes o
+       mesmo vão é perder tempo em obra. Aqui a cópia é explícita: aparece só
+       nos vãos ainda sem medidas, diz de onde vêm as medidas, e fica
+       registado que foram igualadas e não medidas — o TXT diz isso. */
+    if(vi>0&&!ve.larg&&!ve.alt){
+      const arrV=D.divisoesDados[div].vaos;
+      // o vão anterior com medidas, não necessariamente o imediatamente antes
+      let ref=null, refIdx=-1;
+      for(let k=vi-1;k>=0;k--){
+        const c=arrV[k];
+        if(c&&parseFloat(String(c.larg).replace(',','.'))>0&&parseFloat(String(c.alt).replace(',','.'))>0){ ref=c; refIdx=k; break; }
+      }
+      if(ref){
+        const igDiv=document.createElement('div');
+        igDiv.style.cssText='margin:6px 0 2px';
+        const b=document.createElement('button');
+        b.type='button';
+        b.textContent='⧉ Medidas iguais ao '+(ref.id||('VE'+(refIdx+1)))+
+          ' ('+String(ref.larg).replace('.',',')+' × '+String(ref.alt).replace('.',',')+' m)';
+        b.style.cssText='width:100%;border:1px dashed var(--ac);border-radius:9px;background:none;'+
+          'color:var(--ac);font-size:13px;padding:9px 10px;cursor:pointer';
+        b.onclick=()=>{
+          ve.larg=ref.larg; ve.alt=ref.alt;
+          ve.medidasIguaisA=ref.id||('VE'+(refIdx+1));
+          saveVaosToD(div);
+          renderVaosInline(div,D.divisoesDados[div].vaos.length);
+        };
+        igDiv.appendChild(b);
+        const nota=document.createElement('div');
+        nota.style.cssText='font-size:11px;color:var(--tx3);margin-top:3px';
+        nota.textContent='Só as medidas. As características escolhem-se em baixo — podem ser diferentes.';
+        igDiv.appendChild(nota);
+        dimDiv.appendChild(igDiv);
+      }
+    }
+    // se as medidas foram igualadas, dizer de onde vieram
+    if(ve.medidasIguaisA&&ve.larg&&ve.alt){
+      const av=document.createElement('div');
+      av.style.cssText='font-size:11px;color:var(--am,#e8a33d);margin-top:3px';
+      av.textContent='⧉ medidas igualadas ao '+ve.medidasIguaisA+' (não medidas neste vão)';
+      dimDiv.appendChild(av);
+    }
     card.appendChild(dimDiv);
 
     // ── COPIAR CARACTERÍSTICAS — grupos VE já existentes no projecto ──
@@ -3931,6 +4077,40 @@ function renderVaosInline(div,n){
     card.addEventListener('click',()=>setTimeout(atualizarUwLive,0));
     card.addEventListener('input',()=>setTimeout(atualizarUwLive,0));
 
+    /* O QUE FALTA NESTE VÃO, NO PRÓPRIO CARTÃO.
+       Antes só se sabia no fim, no verificador. Quem mede em obra precisa de
+       saber ali. */
+    {
+      const falta=_faltaNoVao(ve);
+      const est=document.createElement('div');
+      est.style.cssText='font-size:11.5px;margin-top:6px;padding-top:6px;border-top:1px solid var(--br)';
+      if(falta.length){
+        est.style.color='var(--am,#e8a33d)';
+        est.textContent='⚠ falta: '+falta.join(', ');
+      } else {
+        est.style.color='var(--ac)';
+        est.textContent='✓ '+(ve.id||('VE'+(vi+1)))+' completo';
+      }
+      card.appendChild(est);
+    }
+    if(_recolhido){
+      /* Cartão seguinte recolhido enquanto o anterior está a meio: um toque
+         abre-o. Não bloqueia — só evita medir por cima do que ficou por fazer. */
+      const filhos=Array.from(card.children);
+      filhos.forEach(c=>{ if(c!==titleRow) c.style.display='none'; });
+      card.style.opacity='0.55';
+      const abrir=document.createElement('div');
+      abrir.style.cssText='font-size:12px;color:var(--tx2);padding:6px 2px 2px;cursor:pointer';
+      abrir.textContent='⏵ '+(ve.id||('VE'+(vi+1)))+' — acaba o '+
+        (D.divisoesDados[div].vaos[vi-1].id||('VE'+vi))+' primeiro (falta '+
+        _faltaAnterior.join(', ')+'). Toca para abrir mesmo assim.';
+      abrir.onclick=()=>{
+        filhos.forEach(c=>{ c.style.display=''; });
+        card.style.opacity=''; abrir.remove();
+        delete card.dataset.recolhido;
+      };
+      card.appendChild(abrir);
+    }
     wrap.appendChild(card);
   }
 
@@ -10304,15 +10484,35 @@ function buildTxt(){
     totVaosArea+=area;
     // com proteção exterior → só Uwdn; sem proteção → só Uw
     const valStr=(r&&r.uwdn!==null)?r.uwdn.toFixed(2)+' (Uwdn)':(r&&r.uw!==null?r.uw.toFixed(2)+' (Uw)':' — ');
-    t+=`J${String(j).padEnd(4)} ${veGrupo.padEnd(5)} ${div.padEnd(14)} ${(area.toFixed(2)+'m²').padEnd(8)} ${(ve.orient||'—').padEnd(8)} ${valStr} W/m².ºC\n`;
+    t+=`J${String(j).padEnd(4)} ${veGrupo.padEnd(5)} ${div.padEnd(14)} ${(_m2(area)||'—').padEnd(10)} ${(ve.orient||'—').padEnd(8)} ${valStr} W/m².ºC\n`;
   });
   /* Número em português e espaço antes da unidade: saía «Total: 0.00m²». E se
      não há vãos nenhuns, não se escreve uma tabela vazia com um total a zero —
      diz-se o que falta. */
+  /* Vãos igualados a outro, em vez de medidos: fica dito no TXT. Quem revê o
+     levantamento no escritório tem de saber que aquelas medidas não vieram do
+     laser — se o vão não era igual, é ali que está o erro. */
+  const _igualados=[];
+  (D.divisoes||[]).forEach(dv=>{
+    ((D.divisoesDados[dv]||{}).vaos||[]).forEach(v=>{
+      if(v&&v.vaoIgualadoA) _igualados.push((v.id||'?')+' ('+dv+') = '+v.vaoIgualadoA);
+    });
+  });
   if(totVaosArea>0)
-    t+=`${'─'.repeat(60)}\nTotal: ${totVaosArea.toFixed(2).replace('.',',')} m²\n`;
+    t+=`${'─'.repeat(60)}\nTotal: ${_m2(totVaosArea)}\n`;
+  if(_igualados.length)
+    t+='⧉ Medidas igualadas a outro vão (não medidas com laser): '+_igualados.join(' · ')+'\n';
   else
     t+=`${'─'.repeat(60)}\n(sem vãos envidraçados levantados)\n`;
+  /* Vãos cujas medidas foram IGUALADAS a outro, não medidas. Fica escrito: quem
+     revê o certificado tem de saber quais os vãos que ninguém mediu. */
+  const _igu=[];
+  vaosAgrupados.forEach(({div,ve,veGrupo})=>{
+    if(ve.medidasIguaisA) _igu.push(veGrupo+' ('+div+') = '+ve.medidasIguaisA);
+  });
+  if(_igu.length)
+    t+='\n⧉ MEDIDAS IGUALADAS (não medidas no próprio vão): '+_igu.join(' · ')+
+       '\n   Confirmar em obra se algum destes vãos tiver dimensão diferente.\n';
 
   // ── SOMBREAMENTO POR VÃO (estação de aquecimento e de arrefecimento) ──
   // Tabela 52 do Manual SCE (pág. 86): Xj por orientação — fator de orientação
@@ -19879,6 +20079,17 @@ function atualizarBarraSequencia(){
 
 function injectMedicaoLaser(metros,hex,nbytes){
   const hexInfo=hex?`  |  BLE[${nbytes}]: ${hex}`:'';
+  /* Não se mede num vão recolhido: é o vão seguinte, que só abre depois de o
+     anterior estar caracterizado. Sem isto, uma medição perdida ia para um
+     campo escondido e ninguém dava por ela. */
+  if(campoLaserActivo){
+    const c=campoLaserActivo.closest?campoLaserActivo.closest('.ve-card[data-recolhido]'):null;
+    if(c){
+      mostrarToastLaser('📏 '+metros+'m não guardado — o '+(c.dataset.veId||'vão')+
+        ' ainda está fechado. Acaba o vão anterior, ou abre-o com um toque.',7000);
+      return;
+    }
+  }
   // injectar no campo activo ou no último input focado
   if(campoLaserActivo&&document.body.contains(campoLaserActivo)){
     campoLaserActivo.value=metros;
@@ -19891,14 +20102,44 @@ function injectMedicaoLaser(metros,hex,nbytes){
       avancarSequenciaMedicao();
       return;
     }
-    // mover foco para o próximo campo numérico (largura → altura, etc.)
-    const allInp=Array.from(document.querySelectorAll('input[type=number]'));
+    /* O SALTO PÁRA NO FIM DE CADA VÃO.
+       O avanço era pela ordem de TODOS os campos numéricos do ecrã: media-se a
+       largura do vão 1, saltava para a altura; media-se a altura, e saltava
+       logo para a largura do vão 2 — antes de o vão 1 estar caracterizado.
+       Quem estava a medir seguia o laser e chegava ao fim com as medidas todas
+       e nenhuma característica preenchida.
+       Agora o encadeamento vale DENTRO de um vão (largura → altura) e pára
+       aí, para se preencher o vidro, a proteção, a caixa e o sombreamento. */
+    const cartaoAtual=campoLaserActivo.closest?campoLaserActivo.closest('.ve-card[data-ve-idx]'):null;
+    const ambito=cartaoAtual||document;
+    /* Dentro de um cartão de vão, o encadeamento é SÓ largura → altura. Os
+       outros campos numéricos do cartão (caixa de ar, por exemplo) não são
+       medidas de laser: se entrassem na lista, medir a altura passava o foco
+       para a caixa de ar e a medição seguinte ia para o campo errado. */
+    const allInp=cartaoAtual
+      ? Array.from(cartaoAtual.querySelectorAll('input[type=number][data-ve-dim]'))
+      : Array.from(ambito.querySelectorAll('input[type=number]'));
     const idx=allInp.indexOf(campoLaserActivo);
     if(idx>-1&&idx<allInp.length-1){
       allInp[idx+1].focus();
       campoLaserActivo=allInp[idx+1];
+      mostrarToastLaser('📏 '+metros+'m → campo preenchido'+hexInfo,6000);
+    } else if(cartaoAtual){
+      /* Último campo deste vão: pára aqui e diz o que falta NESTE vão, pelo
+         nome. Dizia só «preenche as características», e quem estava a medir
+         não sabia quais. */
+      campoLaserActivo.style.outline='';
+      campoLaserActivo=null;
+      const nVe=cartaoAtual.dataset.veId||'este vão';
+      const est=cartaoAtual.textContent||'';
+      const m=est.match(/⚠ falta: ([^\n]+)/);
+      const falta=m?m[1].replace(/largura,?\s*/,'').replace(/altura,?\s*/,'').replace(/^,\s*/,'').trim():'';
+      mostrarToastLaser('📏 '+metros+'m — '+nVe+' medido.'+
+        (falta?(' Falta '+falta+'.'):' Está completo.')+
+        ' Preenche antes de passar ao vão seguinte.',7000);
+    } else {
+      mostrarToastLaser('📏 '+metros+'m → campo preenchido'+hexInfo,6000);
     }
-    mostrarToastLaser('📏 '+metros+'m → campo preenchido'+hexInfo,6000);
   } else {
     mostrarToastLaser('📏 '+metros+'m — toca num campo primeiro'+hexInfo,6000);
   }
