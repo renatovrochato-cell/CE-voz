@@ -581,7 +581,7 @@ Ver tudo</button>
   window.addEventListener('online',aviso);
 })();
 "use strict";
-const PLANTA_VERSAO='v1.49.0 (2026-08-31)';
+const PLANTA_VERSAO='v1.50.0 (2026-09-03)';
 /* ══════════════════════════════════════════════════════════════════
    CE Voz · motor de planta interativa
    Fonte de verdade: o levantamento (D). A planta é uma camada de
@@ -3553,9 +3553,28 @@ function fecharPoli(){
   poli=null; poliPrev=null;
   const aLev=parseM(dadosDiv(div).areaUtil);
   const aDes=L.blocos.filter(b=>b.div===div).reduce((s,b)=>s+areaBloco(b),0);
-  document.getElementById('dica').textContent=div+': '+fmt(aDes)+' m² em '+rects.length+
-    ' bloco'+(rects.length>1?'s':'')+(aLev?(' · levantamento '+fmt(aLev)+' m²'+
-    (Math.abs(aDes-aLev)<=Math.max(.1,aLev*.02)?' ✓':' — diferença de '+fmt(Math.abs(aDes-aLev))+' m²')):'');
+  /* RIGOR NA CONFERÊNCIA COM O LEVANTAMENTO.
+     Dizia só «diferença de 1,4 m²» — sem dizer para que lado, nem quanto isso
+     é em percentagem, nem o que fazer. Uma diferença de 1,4 m² numa sala de 30
+     é ruído de desenho; numa despensa de 3 é um erro de medição.
+     A tolerância era 2% ou 10 cm²: 2% de uma sala de 40 m² são 0,8 m², que já
+     é meia parede. Passa a 1,5% com um mínimo de 0,15 m², e o aviso diz o
+     sentido e a grandeza. */
+  const _d=document.getElementById('dica');
+  let msg=div+': '+fmt(aDes)+' m² em '+rects.length+' bloco'+(rects.length>1?'s':'');
+  _d.style.color='';
+  if(aLev){
+    const dif=aDes-aLev, absd=Math.abs(dif), pct=aLev>0?absd/aLev*100:0;
+    const tol=Math.max(0.15,aLev*0.015);
+    msg+=' · levantamento '+fmt(aLev)+' m²';
+    if(absd<=tol) msg+=' ✓';
+    else {
+      msg+=' — desenho '+(dif>0?'MAIOR':'MENOR')+' '+fmt(absd)+' m² ('+pct.toFixed(1).replace('.',',')+'%)';
+      if(pct>15) { msg+=' ⚠ confere as medidas'; _d.style.color='#ef5350'; }
+      else _d.style.color='#e8a33d';
+    }
+  }
+  _d.textContent=msg;
   repintarTudo();
 }
 function cancelarPoli(){ poli=null; poliPrev=null; dicaPoli(); pintar(); }

@@ -561,7 +561,7 @@ const DIVS_BASE=[
 // VERSÃO — fonte única (selo no ecrã inicial + cabeçalho do TXT exportado).
 // Subir aqui a cada alteração ao ficheiro.
 // ═══════════════════════════════════════
-const APP_VERSION='v2026.09.02-FIX238';
+const APP_VERSION='v2026.09.03-FIX242';
 
 /* ══════════════════════════════════════════════════════════════════
    A APP INSTALADA FICAVA PRESA NUMA VERSÃO ANTIGA
@@ -650,9 +650,21 @@ function mostrarFaixaVersaoNova(v){
 window.addEventListener('load',()=>{ setTimeout(verificarVersaoNoServidor,1500); });
 
 // ═══════════════════════════════════════
+/* O QUE SOBREVIVE A UM LEVANTAMENTO NOVO.
+   Só o que é da APP, nunca do imóvel. Tudo o que não estiver aqui é apagado
+   quando se começa outro levantamento — incluindo campos que ainda não existem
+   hoje. Ao acrescentar um campo, a pergunta é «isto é do imóvel?»: se for, não
+   entra nesta lista. */
+const D_MANTER=new Set([
+  'nome','morada',            // definidos logo a seguir, no arranque
+  '_sessao',                  // identificador de sessão, regenerado no arranque
+  'usoIA',                    // contador de tokens: é da app, não do imóvel
+  'dvRequerente','dvTecnico', // quem faz a visita não muda de obra para obra
+]);
+
 // ESTADO
 // ═══════════════════════════════════════
-const D={
+const D_INICIAL={
   nome:'',morada:'',tipologia:'',pisos:1,peDireitos:{},coberturaInclinada:'',peDireitoMax:'',peDireitoMin:'',divisoes:[],
   climaSistemas:[],
   aqsTipo:'',aqsMarca:'',aqsModelo:'',aqsRendimento:'',aqsPotencia:'',aqsCaudal:'',aqsPotenciaOrigem:'',aqsCapacidade:'',aqsIdadeEquip:'',aqsFatorIdade:null,aqsAnoFabrico:'',aqsManutencao:'',solar:'',solDet:'',solN:'',solArea:'',solMarca:'',
@@ -670,6 +682,13 @@ const D={
   divisoesDados:{}
   // divisoesDados[div] = { comprimentos:{Norte:'3.15 m',...}, vaos:[{id:'VE1',larg:'',alt:'',tipo:'',prot:''}] }
 };
+
+/* O ESTADO DE ARRANQUE, GUARDADO PARA O RESET.
+   D_INICIAL é a declaração de cima: a lista completa dos campos com os valores
+   por defeito — incluindo os que NÃO são vazios, como zonaClimatica 'I1-V3' e
+   inerciaTermica 'Forte'. O reset repõe isto em vez de inventar uma lista à
+   parte, que era o que fazia os defeitos desaparecerem. */
+const D=JSON.parse(JSON.stringify(D_INICIAL));
 
 let qList=[],curQ=0,answers={};
 let climaTemp=[];
@@ -1404,8 +1423,20 @@ async function iniciar(_restoreCurQ, _restoreAnswers){
   if(!D._sessao) D._sessao=Date.now().toString(36)+Math.random().toString(36).slice(2,8);
   if(!isRestore) D._sessao=Date.now().toString(36)+Math.random().toString(36).slice(2,8);
   if(!isRestore){
-    // reset completo só em início novo
-    Object.assign(D,{tipologia:'',pisos:1,peDireitos:{},coberturaInclinada:'',peDireitoMax:'',peDireitoMin:'',divisoes:[],climaSistemas:[],aqsTipo:'',aqsMarcas:[],aqsMarca:'',aqsModelo:'',aqsRendimento:'',aqsPotencia:'',aqsCapacidade:'',aqsIdadeEquip:'',aqsFatorIdade:null,aqsAnoFabrico:'',aqsManutencao:'',solar:'',solDet:'',solN:'',solArea:'',solMarca:'',edificioTipo:'',pisoLocal:'',levParedes:'sim',ventTipo:'',ventCondutasIS:'',ventCondutasISAbrang:'',ventCondutasISDetalhe:'',ventCondutasISWCs:[],ventTaxaRenovacao:'',obs:'',obsAudioKey:null,climaDivisoes:{},enuYN:'',enuMedida:'',enuTipos:{},enuVaosYN:'',enuVaosLoc:[],enuVaosDim:'',enuVaosDimLarg:'',enuVaosDimAlt:'',espParede:'',espVidros:'',caixaArGlobal:6,fotoEtiquetas:[],unidadesExtFotos:[],unidExtAcessiveis:'',fotosAlcado:[],gpsCoords:null,ordemDivisoes:'',ordemDivisoesTemp:null,localidade:'',freguesia:'',concelho:'',zonaClimatica:'I1-V3',zonaClimaticaAuto:true,anoConstrucao:'',inerciaTermica:'Forte',nPisosEdificio:'',pisosDeDocumento:false,divisoesDados:{},numeroMatriz:'',numeroFracao:'',moradaCaderneta:'',certidaoPermanenteNumero:'',concelhoCaderneta:'',anoInscricaoMatriz:'',fotosCampos:{},numeroDescricaoPredial:'',areasPlanta:[],areaUtilPlantaTotal:null,_hist:[],_sessao:D._sessao});
+    const guardados={}; D_MANTER.forEach(k=>{ if(D[k]!==undefined) guardados[k]=D[k]; });
+    /* RESET DE UM LEVANTAMENTO NOVO — POR EXCLUSÃO, NÃO POR LISTA.
+       Isto era uma lista de campos a apagar. Cada campo novo que entrava na app
+       tinha de ser acrescentado à mão, e esquecia-se: tipologiaDeDocumento,
+       areaBrutaPrivativa, ueNaoAcessiveis, ventObstaculos, isolCobMat e mais
+       uma dúzia não estavam lá. Resultado: começava-se um levantamento novo na
+       mesma sessão e ficavam dados do imóvel anterior colados ao novo — a
+       tipologia lida na caderneta antiga, as áreas, as unidades sem acesso.
+       Passou a ser ao contrário: apaga-se TUDO menos o que é da app. Um campo
+       novo é limpo por omissão, que é o comportamento seguro. */
+    Object.keys(D).forEach(k=>{ if(!D_MANTER.has(k)) delete D[k]; });
+    // repor o estado de arranque, com os valores por defeito que não são vazios
+    Object.assign(D,JSON.parse(JSON.stringify(D_INICIAL)));
+    D_MANTER.forEach(k=>{ if(guardados[k]!==undefined) D[k]=guardados[k]; });
     // aplicar perfil de edifício se seleccionado
     if(window._perfilPendente){aplicarPerfil(window._perfilPendente);window._perfilPendente=null;}
     // já não é preciso limpar a IndexedDB aqui: os documentos ficam sempre associados
@@ -3260,18 +3291,72 @@ function renderCompInputs(q){
   const areaLbl=document.createElement('div');
   areaLbl.style.cssText='font-size:15px;color:var(--tx2);font-weight:600';
   areaLbl.textContent='📐 Área do compartimento (opcional)';
+  const _slugArea=String(q.div||'d').replace(/[^a-zA-Z0-9]/g,'_');
   const areaTotal=document.createElement('div');
   areaTotal.style.cssText='font-size:16px;color:var(--ac);font-weight:700';
   areaHdr.appendChild(areaLbl);areaHdr.appendChild(areaTotal);
   areaSec.appendChild(areaHdr);
 
+  /* ÁREA POR RECTÂNGULOS — COM RIGOR.
+     Uma sala em L ou com recuos leva três ou quatro rectângulos. Só se via o
+     TOTAL: com 12,4 m² a dar 9,8, não havia como saber qual das linhas estava
+     mal. Pior, uma linha com só um dos lados preenchido contava ZERO em
+     silêncio — perdia-se um pedaço da sala sem aviso nenhum.
+     Agora cada linha mostra a sua área, as incompletas ficam assinaladas, e
+     valores fora do plausível são apontados sem impedir nada. */
+  function _validarRect(r){
+    const c=parseFloat(String(r.c||'').replace(',','.')),
+          l=parseFloat(String(r.l||'').replace(',','.'));
+    const temC=isFinite(c)&&c>0, temL=isFinite(l)&&l>0;
+    if(!temC&&!temL) return {estado:'vazio',area:0};
+    if(temC!==temL) return {estado:'incompleto',area:0,
+      falta:temC?'a largura':'o comprimento'};
+    const area=c*l;
+    const suspeito=(c<0.5||l<0.5)?'medida abaixo de 0,50 m'
+                 :(c>25||l>25)?'medida acima de 25 m'
+                 :(area>200)?'mais de 200 m² num só rectângulo':null;
+    return {estado:suspeito?'suspeito':'ok',area,nota:suspeito};
+  }
   function calcAreaTotal(){
-    const total=dd.areaRect.reduce((s,r)=>{
-      const c=parseFloat(r.c)||0,l=parseFloat(r.l)||0;
-      return s+c*l;
-    },0);
-    areaTotal.textContent=total>0?total.toFixed(2)+' m²':'';
+    let total=0, incompletos=0, suspeitos=0, contados=0;
+    dd.areaRect.forEach(r=>{
+      const v=_validarRect(r);
+      if(v.estado==='incompleto') incompletos++;
+      if(v.estado==='suspeito') suspeitos++;
+      if(v.area>0){ total+=v.area; contados++; }
+    });
+    let txt=total>0?total.toFixed(2)+' m²':'';
+    if(contados>1) txt+=' ('+contados+' rect.)';
+    areaTotal.textContent=txt;
+    areaTotal.style.color=incompletos?'var(--red)':(suspeitos?'var(--am,#e8a33d)':'var(--ac)');
     dd.areaUtil=total>0?total.toFixed(2):'';
+    // aviso por baixo do total, só quando há alguma coisa a dizer
+    let av=areaSec.querySelector('#area-aviso-'+_slugArea);
+    if(!av){ av=document.createElement('div'); av.id='area-aviso-'+_slugArea;
+      av.style.cssText='font-size:12px;line-height:1.4;margin-top:4px';
+      areaHdr.parentNode.insertBefore(av,areaHdr.nextSibling); }
+    if(incompletos){
+      av.style.color='var(--red)';
+      av.textContent='⚠ '+incompletos+' rectângulo(s) só com um lado — não contam para a área. '+
+        'Preenche os dois lados ou apaga a linha.';
+    } else if(suspeitos){
+      av.style.color='var(--am,#e8a33d)';
+      av.textContent='⚠ '+suspeitos+' medida(s) fora do habitual — confirma antes de seguir.';
+    } else av.textContent='';
+    renderAreaParciais();
+  }
+  // a área de cada linha, ao lado dela: é assim que se descobre qual está errada
+  function renderAreaParciais(){
+    dd.areaRect.forEach((r,i)=>{
+      const el=areaSec.querySelector('#area-parc-'+_slugArea+'-'+i);
+      if(!el) return;
+      const v=_validarRect(r);
+      if(v.estado==='incompleto'){ el.textContent='falta '+v.falta; el.style.color='var(--red)'; }
+      else if(v.area>0){ el.textContent=v.area.toFixed(2)+' m²';
+        el.style.color=v.estado==='suspeito'?'var(--am,#e8a33d)':'var(--tx3)';
+        el.title=v.nota||''; }
+      else { el.textContent=''; }
+    });
   }
 
   function renderAreaRects(){
@@ -3295,6 +3380,10 @@ function renderCompInputs(q){
       lInp2.onblur=()=>{lInp2.style.outline='';};
       const mS=document.createElement('span');mS.textContent='m';mS.style.cssText='font-size:11px;color:var(--tx3)';
       row.appendChild(cInp);row.appendChild(xS);row.appendChild(lInp2);row.appendChild(mS);
+      const parc=document.createElement('span');
+      parc.id='area-parc-'+_slugArea+'-'+idx;
+      parc.style.cssText='font-size:12px;color:var(--tx3);min-width:64px;text-align:right';
+      row.appendChild(parc);
       // laser: activa comprimento; após medição o foco salta para largura automaticamente
       const lzr=document.createElement('button');
       lzr.className='laser-field-btn';lzr.textContent='📏';
@@ -3332,6 +3421,11 @@ function renderCompInputs(q){
     calcAreaTotal();
   }
   renderAreaRects();
+  /* calcAreaTotal outra vez, DEPOIS de as linhas existirem: as áreas parciais
+     escrevem-se em caixas criadas por renderAreaRects, e na primeira pintura
+     ainda não existiam — abria-se o painel e as parciais estavam vazias até
+     se tocar num campo. */
+  calcAreaTotal();
   wrap.appendChild(areaSec);
 }
 
@@ -7302,6 +7396,41 @@ const ORDEM_SECCOES_TXT=[
   'ÍNDICE DE FOTOS DE EQUIPAMENTO (para anexar no ITeCons)',
   'HISTÓRICO DE ALTERAÇÕES',
 ];
+/* SECÇÕES SEM CONTEÚDO DIZEM-NO.
+   «# ESPAÇOS NÃO ÚTEIS» seguido de nada, «# AQS» seguido de nada. Quem lê o
+   TXT não sabe se não há espaços não úteis, se a pergunta foi saltada, ou se a
+   app se enganou. As secções são escritas sempre; em vez de as suprimir — o
+   que esconderia o que falta — escreve-se lá o que se passa. */
+/* NÚMEROS DO TXT EM PORTUGUÊS, COM ESPAÇO ANTES DA UNIDADE.
+   Saía «17.99m²» e «U da base: 1.1» — ponto decimal e colado à unidade, em
+   tabelas que se copiam para o certificado. Uma função só, para não voltar a
+   divergir de sítio para sítio. */
+function _m2(v,casas){
+  const n=typeof v==='number'?v:parseFloat(String(v==null?'':v).replace(',','.'));
+  if(!isFinite(n)||n===0) return '';
+  return n.toFixed(casas==null?2:casas).replace('.',',')+' m²';
+}
+function _nm(v,casas){
+  const n=typeof v==='number'?v:parseFloat(String(v==null?'':v).replace(',','.'));
+  if(!isFinite(n)) return '';
+  return n.toFixed(casas==null?2:casas).replace('.',',');
+}
+function marcarSeccoesVazias(t){
+  const L=String(t||'').split('\n');
+  const eTitulo=i=>/^═{10,}$/.test(L[i]||'')&&/^#\s/.test(L[i+1]||'')&&/^═{10,}$/.test(L[i+2]||'');
+  const out=[];
+  for(let i=0;i<L.length;i++){
+    out.push(L[i]);
+    if(!eTitulo(i)) continue;
+    out.push(L[i+1],L[i+2]);
+    // olhar em frente: há alguma coisa antes do próximo título?
+    let j=i+3, vazia=true;
+    while(j<L.length&&!eTitulo(j)){ if(L[j].trim()){ vazia=false; break; } j++; }
+    if(vazia) out.push('(não levantado — nada a registar nesta secção)');
+    i+=2;
+  }
+  return out.join('\n');
+}
 function reordenarSeccoesTxt(txt){
   const LINHA='═'.repeat(50);
   const marca='\n'+LINHA+'\n# ';
@@ -8664,10 +8793,10 @@ function buildTxt(){
         if(_ehENUdiv(dv)) return;
         const pe=resolverPeDireitoDivisao(dv,pisoLabel);
         const peStr=pe?String(pe).replace(/m$/,'')+'m':'—';
-        t+=`${nomeDiv.padEnd(colDiv)} | ${(area?area+'m²':'—').padEnd(10)} | ${peStr}\n`;
+        t+=`${nomeDiv.padEnd(colDiv)} | ${(area?_m2(area):'—').padEnd(11)} | ${peStr}\n`;
       });
       t+=`${'─'.repeat(colDiv+2)}┼${'─'.repeat(12)}┼${'─'.repeat(16)}\n`;
-      t+=`${'TOTAL (área útil)'.padEnd(colDiv)} | ${(areaTotalDiv>0?areaTotalDiv.toFixed(2)+'m²':'—').padEnd(10)} |\n`;
+      t+=`${'TOTAL (área útil)'.padEnd(colDiv)} | ${(areaTotalDiv>0?_m2(areaTotalDiv):'—').padEnd(10)} |\n`;
       /* COERÊNCIA COM A PLANTA
          A área lida da planta e a soma das divisões são o MESMO número visto de
          duas maneiras. Se divergirem, há divisões por atribuir — e o TXT trazia
@@ -8754,7 +8883,20 @@ function buildTxt(){
     } else {
       condutasTxt='sem condutas nas instalações sanitárias';
     }
-    const rphTxt=D.ventTaxaRenovacao?String(D.ventTaxaRenovacao).replace('.',','):'«taxa de renovação de ar»';
+  /* O MARCADOR IA PARAR AO TEXTO DO CERTIFICADO.
+     Sem a taxa respondida, o texto para o CE saía com «taxa de renovação de
+     ar» entre aspas — um marcador por substituir, colado num parágrafo que se
+     copia directamente para o certificado. Passa a ficar em MAIÚSCULAS e com o
+     aviso ao lado, que ninguém copia por distração. E o Rph do ITeCons, que a
+     app já calcula, é sugerido logo ali. */
+    let rphTxt;
+    if(D.ventTaxaRenovacao) rphTxt=String(D.ventTaxaRenovacao).replace('.',',');
+    else {
+      let sug=null;
+      try{ const v=ventResumoITeCons(); sug=v&&v.rph?Number(v.rph):null; }catch(e){}
+      rphTxt=sug?('___ (POR PREENCHER — o cálculo desta app dá '+sug.toFixed(2).replace('.',',')+')')
+                :'___ (POR PREENCHER)';
+    }
     const textoVent=`Principais compartimentos com ventilação natural por intermédio dos vãos de fachada, ${condutasTxt}. S/ abertura especiais de admissão de ar natural nas fachadas. Os vãos permitem arrefecimento nocturno. Taxa de renovação de ar ${rphTxt}(h-1).`;
     t+='\nTexto para CE (ventilação):\n'+textoVent+'\n';
   }
@@ -9144,7 +9286,7 @@ function buildTxt(){
   t+=ln('Solar térmico',D.solar);
   if((D.solar||'').toLowerCase().includes('sim')){
     t+=ln('Coletores (nº)',D.solN);
-    t+=ln('Área coletores',D.solArea?D.solArea+'m²':'');
+    t+=ln('Área coletores',D.solArea?_m2(D.solArea):'');
     t+=ln('Marca solar',D.solMarca);
   }
   if(D.aqsTextoBase){
@@ -9360,7 +9502,7 @@ function buildTxt(){
         const pdEnu=resolverPeDireitoPiso('__enu_global__','R/C');
         if(pdEnu>0) areaNum=compNum*pdEnu;
       }
-      const areaStr=areaNum?' → '+areaNum.toFixed(2).replace('.',',')+'m²':'';
+      const areaStr=areaNum?' → '+_m2(areaNum):'';
       t+=`  ${tipo}: ${compStr} de parede em contacto${areaStr}\n`;
     });
     // PTL interior (Tabela 34, Ψ=0,70) desta declaração global — para além da
@@ -9416,7 +9558,7 @@ function buildTxt(){
         const vals=trocos.map(v=>parseFloat(v)||0).filter(v=>v>0);
         const detalhe=vals.length>1?' ('+vals.map(v=>v+'m').join(' + ')+')':'';
         const area=pdVal>0?(parseFloat(comp)||0)*pdVal:0;
-        t+=`  ${orient}: ${comp}${detalhe}${area>0?' → '+area.toFixed(2)+'m²':''}\n`;
+        t+=`  ${orient}: ${comp}${detalhe}${area>0?' → '+_m2(area):''}\n`;
       });
     }
   }
@@ -9566,7 +9708,7 @@ function buildTxt(){
         if(_b&&_b.desc){
           t+=sep('PAREDE EXTERIOR — DESCRIÇÃO (BASE 2025)');
           t+=_b.desc+'\n\n';
-          t+=ln('U da base',String(_b.u||'—')+' W/(m².°C)');
+          t+=ln('U da base',(_nm(_b.u)||'—')+' W/(m².°C)');
           if(_b.isol) t+=ln('Solução',_b.isol);
           /* A base tem entradas de 0,15 · 0,20 · 0,28 · 0,30 · 0,35 m. Uma
              parede de 33 cm cai na de 30 — para baixo, que é o lado seguro:
@@ -9827,10 +9969,10 @@ function buildTxt(){
     _allO.forEach(orient=>{
       const aP=_pOrient[orient]||0;const aV=_vOrient[orient]||0;
       totP+=aP;totV+=aV;
-      t+=`${orient.padEnd(10)} | ${(aP>0?aP.toFixed(2)+'m²':'—').padEnd(12)} | ${aV>0?aV.toFixed(2)+'m²':'—'}\n`;
+      t+=`${orient.padEnd(10)} | ${(aP>0?_m2(aP):'—').padEnd(13)} | ${aV>0?_m2(aV):'—'}\n`;
     });
     t+=`${'─'.repeat(40)}\n`;
-    t+=`${'TOTAL'.padEnd(10)} | ${(totP>0?totP.toFixed(2)+'m²':'—').padEnd(12)} | ${totV.toFixed(2)}m²\n`;
+    t+=`${'TOTAL'.padEnd(10)} | ${(totP>0?_m2(totP):'—').padEnd(13)} | ${_m2(totV)||'—'}\n`;
   }
 
   // ── ENVOLVENTES INTERIORES — contacto com zonas comuns/adjacentes ──
@@ -9867,7 +10009,7 @@ function buildTxt(){
       const area=pdValTipo>0?totalComp*pdValTipo:0;
       const isAdj=tipo==='Edifício adjacente';
       t+=`${tipo}: ${vals.map(v=>v.toFixed(2)).join('+')} = ${totalComp.toFixed(2)}m`;
-      if(area>0) t+=` → ${area.toFixed(2)}m²`;
+      if(area>0) t+=` → ${_m2(area)}`;
       if(isAdj) t+=' [excluído do cálculo térmico]';
       t+='\n';
       if(isAdj){compAdjacente+=totalComp;areaAdjacente+=area;}
@@ -10164,7 +10306,13 @@ function buildTxt(){
     const valStr=(r&&r.uwdn!==null)?r.uwdn.toFixed(2)+' (Uwdn)':(r&&r.uw!==null?r.uw.toFixed(2)+' (Uw)':' — ');
     t+=`J${String(j).padEnd(4)} ${veGrupo.padEnd(5)} ${div.padEnd(14)} ${(area.toFixed(2)+'m²').padEnd(8)} ${(ve.orient||'—').padEnd(8)} ${valStr} W/m².ºC\n`;
   });
-  t+=`${'─'.repeat(60)}\nTotal: ${totVaosArea.toFixed(2)}m²\n`;
+  /* Número em português e espaço antes da unidade: saía «Total: 0.00m²». E se
+     não há vãos nenhuns, não se escreve uma tabela vazia com um total a zero —
+     diz-se o que falta. */
+  if(totVaosArea>0)
+    t+=`${'─'.repeat(60)}\nTotal: ${totVaosArea.toFixed(2).replace('.',',')} m²\n`;
+  else
+    t+=`${'─'.repeat(60)}\n(sem vãos envidraçados levantados)\n`;
 
   // ── SOMBREAMENTO POR VÃO (estação de aquecimento e de arrefecimento) ──
   // Tabela 52 do Manual SCE (pág. 86): Xj por orientação — fator de orientação
@@ -11014,7 +11162,7 @@ function buildTxt(){
   }
 
 
-  return reordenarSeccoesTxt(t);
+  return marcarSeccoesVazias(reordenarSeccoesTxt(t));
 }
 
 function copyTxt(){doCopy(document.getElementById('exp-box').textContent);}
@@ -11597,11 +11745,23 @@ function gerarDescricaoSucinta(){
   // ═══ DADOS BASE ═══
   const tipStr=D.tipologia||'«tipologia»';
   const apavTotal=calcApavTotal();
-  const apavStr=apavTotal>0?fmtPT(apavTotal,2)+'m2':'«área útil de pavimento»';
-  const localidade=D.localidade||'«localidade»';
-  const freguesia=D.freguesia||'«freguesia»';
-  const concelho=D.concelho||'«concelho»';
-  const zona=D.zonaClimatica||'«zona climática»';
+  /* Segundo marcador a chegar ao texto do certificado, depois do da taxa de
+     renovação. Aqui é pior: a descrição sucinta é o parágrafo que se copia
+     directamente para o portal. Fica em maiúsculas e com a razão ao lado.
+     E «m2» passa a «m²», com espaço — é o mesmo parágrafo. */
+  const apavStr=apavTotal>0
+    ? fmtPT(apavTotal,2)+' m²'
+    : '___ m² (POR PREENCHER — nenhuma divisão tem área medida)';
+  /* MARCADORES POR PREENCHER NA DESCRIÇÃO SUCINTA.
+     Este parágrafo copia-se directamente para o portal SCE. Sete campos saíam
+     entre aspas angulares — «localidade», «zona climática» — que passam
+     despercebidas num texto corrido e vão parar ao certificado. Passam a estar
+     em maiúsculas, que ninguém copia por distração. */
+  const POR=x=>'___ ('+x.toUpperCase()+' POR PREENCHER)';
+  const localidade=D.localidade||POR('localidade');
+  const freguesia=D.freguesia||POR('freguesia');
+  const concelho=D.concelho||POR('concelho');
+  const zona=D.zonaClimatica||POR('zona climática');
   const inercia=(D.inerciaTermica||'Forte').toLowerCase();
 
   // orientações predominantes
@@ -11624,7 +11784,7 @@ function gerarDescricaoSucinta(){
   // altitude via GPS
   const altStr=(D.gpsCoords&&D.gpsCoords.alt!==null&&D.gpsCoords.alt!==undefined)
     ?Math.round(D.gpsCoords.alt)+''
-    :'«altitude»';
+    :POR('altitude');
 
   // região costeira
   const regiao=determinarRegiaoCosta();
@@ -11637,7 +11797,7 @@ function gerarDescricaoSucinta(){
   const _dMar=distanciaAoMarDetalhe();
   if(regiao==='B') distCostaStr='inferior a 5km (região B)';
   else if(regiao==='A') distCostaStr='superior a 5km (região A)';
-  else distCostaStr='«distância à costa a confirmar» (região «A/B»)';
+  else distCostaStr=POR('distância à costa')+' — região A ou B por confirmar';
   // quando há GPS, indica-se a distância medida — evita afirmações sem base
   if(_dMar!=null){
     // A medição é à COSTA ABERTA. Estuários e rias (Tejo, Sado, Ria de Aveiro,
@@ -11658,7 +11818,11 @@ function gerarDescricaoSucinta(){
   // erradas — "unidades pavimento radiante" (não é uma unidade), lareira debaixo
   // de "aquecimento E arrefecimento" (só aquece), e tudo misturado numa lista só.
   const climDivs=Object.entries(D.climaDivisoes||{}).filter(([,v])=>v&&(((v.tipos||[]).filter(t=>t&&t!=='Sem sistema')).length||(v.tipo&&v.tipo!==''&&v.tipo!=='Sem sistema')));
-  let climaFrase='O sistema de aquecimento e arrefecimento ambiente é composto por «sistema de climatização».';
+  /* Os dois últimos marcadores da descrição sucinta. Como os outros, ficam
+     visíveis em vez de disfarçados de texto — este parágrafo copia-se
+     directamente para o portal e ninguém repara em aspas angulares. */
+  let climaFrase='O sistema de aquecimento e arrefecimento ambiente é composto por '+
+    '___ (POR PREENCHER — nenhum sistema de climatização registado).';
   if(climDivs.length){
     const TIPOS_SEM_UE3=['pavimento radiante','lareira/recuperador','radiadores elétricos'];
     const temPavRad=climDivs.some(([,cd])=>(cd.tipos||[cd.tipo]).some(t=>(t||'').toLowerCase()==='pavimento radiante'));
@@ -11690,7 +11854,7 @@ function gerarDescricaoSucinta(){
   }
 
   // AQS — descrição curta
-  let aqsDesc='«sistema de produção de AQS»';
+  let aqsDesc='___ (POR PREENCHER — nenhum sistema de AQS registado)';
   if(D.aqsTipo&&!D.aqsTipo.toLowerCase().includes('sem sistema')){
     const aqsL=D.aqsTipo.toLowerCase();
     if(aqsL.includes('caldeira')) aqsDesc='uma caldeira';
@@ -11747,8 +11911,9 @@ function gerarDescricaoSucinta(){
   const pisoPrincipal=pisosOrdem[0]||'R/C';
   const plMap={'4':'RC (piso térreo)','1':'1º andar (piso sobre cave/ENU)','2':'piso intermédio','3':'último piso'};
   const pisoDesc=D.pisoLocal&&plMap[D.pisoLocal]?plMap[D.pisoLocal]:(pisoPrincipal==='R/C'?'RC (piso térreo)':pisoPrincipal);
-  const nPisosEd=D.nPisosEdificio||'«nº pisos do edifício»';
-  const nPisosEdStr=D.nPisosEdificio?pisoSingularPlural(D.nPisosEdificio):'«nº pisos do edifício»';
+  const _POR2=x=>'___ ('+x.toUpperCase()+' POR PREENCHER)';
+  const nPisosEd=D.nPisosEdificio||_POR2('nº de pisos do edifício');
+  const nPisosEdStr=D.nPisosEdificio?pisoSingularPlural(D.nPisosEdificio):_POR2('nº de pisos do edifício');
 
   let composicaoStr='';
   if(pisosOrdem.length===1){
@@ -11885,10 +12050,23 @@ async function buildPacoteZipBlob(show){
   const nome=nomePacoteExportacao();
   // pasta raiz com o mesmo nome
   const raiz=zip.folder(nome);
+  /* DENTRO DA PASTA, AS PASTAS PRIMEIRO.
+     O gestor de ficheiros ordena por nome: «documentos» e «fotos» apareciam
+     no meio dos TXT. Um espaço à frente põe-nas em cima, que é onde se procura
+     primeiro — e depois os ficheiros soltos por ordem.
+     E o nome do ficheiro deixa de repetir a morada inteira: a pasta já a diz.
+     «Urb. Clube Golfemar, Lt. 12, Carvoeiro/Urb. Clube Golfemar, Lt. 12,
+     Carvoeiro_levantamento.json» são 80 caracteres para dizer duas vezes o
+     mesmo, e no OneDrive isso soma-se ao caminho até rebentar o limite. */
+  const _nomeCurto=(()=>{
+    // primeiro pedaço da morada, sem a localidade: chega para distinguir
+    const p=nome.split(',')[0].trim();
+    return (p.length>=6?p:nome).slice(0,28).replace(/[\s,.;:-]+$/,'')||'CE';
+  })();
 
   // 1. TXT do relatório
   const txt=buildTxt();
-  raiz.file(nome+'.txt',txt);
+  raiz.file('1_'+_nomeCurto+'.txt',txt);
 
   /* 1b. EXTRATO DA DECLARAÇÃO DE VISITA — ia só pelo botão próprio e ficava
      de fora do pacote. Quem partilhava o ZIP e apagava o processo do
@@ -11898,7 +12076,7 @@ async function buildPacoteZipBlob(show){
   try{
     const faltam=(typeof faltasDV==='function')?faltasDV():[];
     const dv=buildDV();
-    raiz.file(nome+'_DV'+(faltam.length?'_POR_PREENCHER':'')+'.txt',
+    raiz.file('3_'+_nomeCurto+'_DV'+(faltam.length?'_POR_PREENCHER':'')+'.txt',
       (faltam.length?'⚠ POR PREENCHER: '+faltam.join(', ')+'\n\n':'')+dv);
   }catch(e){ _pacoteFalhas.push('extrato da Declaração de Visita: '+(e.message||e)); console.error('extrato DV não gerado:',e.message); }
 
@@ -11906,14 +12084,14 @@ async function buildPacoteZipBlob(show){
   // IndexedDB/localStorage falhar, e reimportar com o botão "Importar levantamento".
   // As fotos ficam fora (estão no ZIP em fotos/); o D só guarda as chaves.
   try{
-    raiz.file(nome+'_levantamento.json',JSON.stringify({app:APP_VERSION,exportado:new Date().toISOString(),D:D},null,1));
+    raiz.file('2_'+_nomeCurto+'_levantamento.json',JSON.stringify({app:APP_VERSION,exportado:new Date().toISOString(),D:D},null,1));
   }catch(e){ _pacoteFalhas.push('backup JSON do levantamento: '+(e.message||e)); console.error('backup JSON não gerado:',e.message); }
 
   // 1b. Esboço esquemático da planta (PDF) — opcional, não interrompe o pacote se falhar
   try{
     const pdfEsboco=gerarEsbocoPlantaPDF();
     // arraybuffer em vez de blob, pela mesma razão do KMZ e das fotos
-    raiz.file(nome+'_esboco_planta.pdf',pdfEsboco.output('arraybuffer'),{binary:true});
+    raiz.file('6_'+_nomeCurto+'_esboco_planta.pdf',pdfEsboco.output('arraybuffer'),{binary:true});
   }catch(e){
     _pacoteFalhas.push('esboço da planta (PDF): '+(e.message||e));
     console.error('Esboço da planta não gerado:',e.message);
@@ -11939,11 +12117,11 @@ async function buildPacoteZipBlob(show){
       D.gpsCoords=coords;
     }
   }
-  let kmzNome='sem_localizacao.txt';
+  let kmzNome='4_sem_localizacao.txt';
   if(coords){
     const{lat,lon,alt}=coords;
     const altStr=alt!==null&&alt!==undefined?Math.round(alt)+'m':'s_altitude';
-    kmzNome=`${nome}_${lat.toFixed(6)}_${lon.toFixed(6)}.kmz`;
+    kmzNome=`4_${_nomeCurto}_${lat.toFixed(6)}_${lon.toFixed(6)}.kmz`;
     const kmlContent=`<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2">
   <Placemark>
@@ -11972,7 +12150,7 @@ async function buildPacoteZipBlob(show){
     }catch(e){
       _pacoteFalhas.push('KMZ da localização: '+(e.message||e));
       console.error('KMZ não gerado:',e.message);
-      raiz.file(nome+'_localizacao.txt',
+      raiz.file('5_'+_nomeCurto+'_localizacao.txt',
         'Coordenadas: '+coords.lat+', '+coords.lon+'\nAltitude: '+altStr+
         '\n(o ficheiro KMZ não pôde ser gerado: '+(e.message||e)+')\n');
     }
@@ -11981,7 +12159,7 @@ async function buildPacoteZipBlob(show){
   }
 
   // 3. Todas as fotos — alçados, etiquetas, unidades exteriores, e por divisão
-  const fotosFolder=raiz.folder('fotos');
+  const fotosFolder=raiz.folder(' fotos');
   /* ══════════ FOTOS PEQUENAS ══════════
      Uma cópia reduzida das fotos que vão para o certificado — alçados,
      climatização e AQS — com um tecto de 150 KB. As originais ficam intactas em
@@ -12127,7 +12305,7 @@ async function buildPacoteZipBlob(show){
   try{docsList=await dbGetAllDocsDoProjeto();}catch(e){docsList=window._docsAnexos||[];}
   let nDocsFalhas=0;
   if(docsList.length){
-    const docsFolder=raiz.folder('documentos');
+    const docsFolder=raiz.folder(' documentos');
     // Limite de 1 MB por documento — mantém o pacote leve para partilhar/enviar
     // para a nuvem. Imagens acima disso são recomprimidas; PDFs são mantidos
     // intactos (recomprimir um PDF corromperia o ficheiro) mas assinalados.
@@ -12339,16 +12517,55 @@ function areaUtilDivisao(div){
   return null;
 }
 
+/* ABREVIATURAS NOS NOMES DE PASTA E FICHEIRO.
+   «Urbanização Clube Golfemar, Lote 12, Carvoeiro» dá um nome de pasta que no
+   telemóvel aparece cortado a meio e no Windows soma-se ao caminho do OneDrive
+   até rebentar o limite. As abreviaturas são as correntes nos endereços
+   portugueses — as mesmas que os CTT usam. Só se abrevia a palavra inteira, no
+   princípio de palavra: «Avenida» vira «Av.», mas «Avenidas Novas» não. */
+const ABREV_MORADA=[
+  [/\bUrbaniza[çc][ãa]o\b/gi,'Urb.'],   [/\bAvenida\b/gi,'Av.'],
+  [/\bRua\b/gi,'R.'],                   [/\bPra[çc]eta\b/gi,'Pct.'],
+  [/\bPra[çc]a\b/gi,'Pç.'],             [/\bEstrada\b/gi,'Estr.'],
+  [/\bTravessa\b/gi,'Tv.'],             [/\bLargo\b/gi,'Lg.'],
+  [/\bCaminho\b/gi,'Cam.'],             [/\bBeco\b/gi,'Bc.'],
+  [/\bEdif[íi]cio\b/gi,'Ed.'],          [/\bBloco\b/gi,'Bl.'],
+  [/\bLoteamento\b/gi,'Lot.'],          [/\bLote\b/gi,'Lt.'],
+  [/\bFrac[çc][ãa]o\b/gi,'Fr.'],        [/\bAndar\b/gi,'And.'],
+  [/\bEngenheiro\b/gi,'Eng.'],          [/\bArquitecto\b|\bArquiteto\b/gi,'Arq.'],
+  [/\bDoutor\b/gi,'Dr.'],               [/\bDoutora\b/gi,'Dra.'],
+  [/\bProfessor\b/gi,'Prof.'],          [/\bGeneral\b/gi,'Gen.'],
+  [/\bComandante\b/gi,'Cmdt.'],         [/\bPresidente\b/gi,'Pres.'],
+  [/\bS[ãa]o\b/gi,'S.'],                [/\bSanta\b/gi,'Sta.'],
+  [/\bSanto\b/gi,'Sto.'],               [/\bNossa Senhora\b/gi,'N. Sra.'],
+  [/\bQuinta\b/gi,'Qta.'],              [/\bJardim\b/gi,'Jd.'],
+  [/\bParque\b/gi,'Pq.'],               [/\bCondom[íi]nio\b/gi,'Cond.'],
+  [/\bMoradia\b/gi,'Mor.'],             [/\brés[- ]do[- ]ch[ãa]o\b/gi,'R\/C'],
+];
+function abreviarMorada(t){
+  let x=String(t||'');
+  ABREV_MORADA.forEach(([re,ab])=>{ x=x.replace(re,ab); });
+  return x.replace(/\s{2,}/g,' ').trim();
+}
 function nomePacoteExportacao(){
   const bruta=(D.moradaCaderneta||D.morada||D.nome||'CE').trim();
   // tirar código postal e o que vem depois — o nome fica mais curto e legível
   let n=bruta.split(/\s\d{4}-\d{3}/)[0];
+  n=abreviarMorada(n);
   n=n.replace(/[\\/:*?"<>|]/g,' ')          // caracteres inválidos em nomes de ficheiro
      .replace(/[^a-zA-Z0-9À-ú ,ºª._-]/g,' ')
      .replace(/\s+/g,' ')
      .trim()
-     .slice(0,70)
-     .replace(/[\s,.;:-]+$/,'');   // tirar pontuação/vírgula pendurada no fim
+     /* 45 em vez de 70: o nome repete-se na pasta, no TXT, no JSON, no KMZ e no
+        ZIP, e ainda se soma ao caminho do OneDrive. Corta-se por vírgula ou
+        espaço, para não ficar uma palavra partida a meio. */
+     .replace(/[\s,.;:-]+$/,'');
+  if(n.length>45){
+    const corte=n.slice(0,46);
+    const p=Math.max(corte.lastIndexOf(','),corte.lastIndexOf(' '));
+    n=(p>20?corte.slice(0,p):corte.slice(0,45));
+  }
+  n=n.replace(/[\s,.;:-]+$/,'');
   n=n||'CE';
   // a partir da 2ª versão o nome do ficheiro identifica-a, para não se
   // confundir o que foi levantado no local com o que foi revisto em casa
@@ -13991,6 +14208,26 @@ async function dbGetAllDocsDoProjeto(){
   const chave=recolhaKey(D.nome);
   return todos.filter(d=>d.projetoKey===chave);
 }
+/* OS DADOS DE UM DOCUMENTO SAEM COM ELE.
+   Apagava-se a caderneta e a matriz, a fração, a tipologia e as áreas que ela
+   tinha dado ficavam no levantamento. Quem apagava a caderneta era justamente
+   quem tinha percebido que era a errada — e ficava com os dados dela colados
+   ao imóvel certo. Só se limpa o que veio de documentos; o que foi respondido
+   em obra fica. */
+const CAMPOS_DE_DOCUMENTO=['numeroMatriz','numeroFracao','numeroDescricaoPredial',
+  'certidaoPermanenteNumero','moradaCaderneta','concelhoCaderneta','anoInscricaoMatriz',
+  'areaBrutaPrivativa','areaBrutaDependente','permilagem','dvAndar','dvCodPostal',
+  'dvCodDistrito','dvCodConcelho','dvCodFreguesia'];
+function limparDadosDeDocumentos(){
+  const tirados=[];
+  CAMPOS_DE_DOCUMENTO.forEach(k=>{ if(D[k]){ tirados.push(k); delete D[k]; } });
+  // a tipologia e os pisos só saem se tiverem vindo do documento
+  if(D.tipologiaDeDocumento){ D.tipologia=''; delete D.tipologiaDeDocumento; tirados.push('tipologia'); }
+  if(D.pisosDeDocumento){ delete D.pisosDeDocumento; tirados.push('nº de pisos'); }
+  D.docsLidosRevisao=[];
+  try{ autoSave(); }catch(e){}
+  return tirados;
+}
 // Apaga só os documentos do projeto atual — dbClearDocs() apagava a base toda.
 async function dbClearDocsDoProjeto(){
   const chave=recolhaKey(D.nome);
@@ -14949,7 +15186,21 @@ function renderDocsThumbs(){
     const del=document.createElement('button');del.textContent='✕';
     del.style.cssText='position:absolute;top:-6px;right:-6px;border:none;background:var(--red);color:#fff;border-radius:50%;width:22px;height:22px;font-size:12px;cursor:pointer;line-height:1';
     del.onclick=async()=>{
-      try{await dbDeleteDoc(d.id);window._docsAnexos=window._docsAnexos.filter(x=>x.id!==d.id);renderDocsThumbs();}
+      try{
+        await dbDeleteDoc(d.id);
+        window._docsAnexos=window._docsAnexos.filter(x=>x.id!==d.id);
+        /* Se saiu o último documento, saem também os dados que os documentos
+           deram: matriz, fração, tipologia, áreas. Senão ficavam colados ao
+           imóvel os dados do documento errado — que é justamente o que se
+           estava a corrigir ao apagá-lo. */
+        if(!window._docsAnexos.length){
+          const t=limparDadosDeDocumentos();
+          if(t.length) alert('Documento apagado.\n\nComo já não há documentos anexados, '+
+            'apaguei também o que deles tinha sido lido: '+t.join(', ')+'.');
+        }
+        renderDocsThumbs();
+        try{ renderQ(); }catch(e){}
+      }
       catch(e){alert('Erro ao apagar: '+e.message);}
     };
     wrap.appendChild(del);
@@ -18206,6 +18457,36 @@ function _mostrarEstadoGravacao(ok,msg){
     }
   }catch(e){}
 }
+/* LIMPEZA DE EMERGÊNCIA — a partir do banner, sem sair do levantamento.
+   Com o armazenamento cheio a app não grava, e a pessoa está a meio de um
+   levantamento: mandá-la ao menu procurar o que apagar é pedir demais nesse
+   momento. Isto apaga o que NÃO é levantamento — chaves de versões antigas,
+   preferências, caches — nomeando tudo antes, e nunca toca num ce_proj_ nem
+   no processo aberto. */
+function limpezaEmergencia(){
+  let o; try{ o=ocupacaoArmazenamento(); }catch(e){ return false; }
+  const atual=(D&&D.nome)?recolhaKey(D.nome):null;
+  const lixo=o.itens.filter(x=>
+    !x.chave.startsWith('ce_proj_') && x.chave!==atual &&
+    x.chave!=='ce_ultimo' && x.bytes>1024);
+  if(!lixo.length){
+    alert('Não encontrei nada seguro para apagar automaticamente.\n\n'+
+      'O que ocupa mais são os próprios levantamentos. Vai a ☰ → Recolhas '+
+      'guardadas e apaga os que já exportaste.');
+    return false;
+  }
+  const total=lixo.reduce((a,x)=>a+x.bytes,0);
+  const lista=lixo.slice(0,8).map(x=>'  · '+x.rotulo+' ('+_mbTxt(x.bytes)+')').join('\n');
+  if(!confirm('Apagar isto? Liberta '+_mbTxt(total)+':\n\n'+lista+
+    (lixo.length>8?'\n  · e mais '+(lixo.length-8)+'…':'')+
+    '\n\nNENHUM levantamento é apagado — só isto.')) return false;
+  let n=0;
+  lixo.forEach(x=>{ try{ localStorage.removeItem(x.chave); n++; }catch(e){} });
+  const gravou=(function(){ try{ return autoSave(); }catch(e){ return false; } })();
+  alert(n+' entrada(s) apagada(s), '+_mbTxt(total)+' libertados.\n\n'+
+    (gravou?'A gravação voltou a funcionar.':'Ainda não grava — exporta já e apaga levantamentos antigos em ☰ → Recolhas guardadas.'));
+  return gravou;
+}
 function _avisarFalhaGravacao(msg){
   _mostrarEstadoGravacao(false,msg);
   try{
@@ -18216,9 +18497,13 @@ function _avisarFalhaGravacao(msg){
   if(_falhaGravacaoAvisada) return;
   _falhaGravacaoAvisada=true;
   try{
-    alert('⚠️ NÃO CONSIGO GRAVAR NO TELEMÓVEL\n\n'+msg+'\n\n'+
+    const querLimpar=confirm('⚠️ NÃO CONSIGO GRAVAR NO TELEMÓVEL\n\n'+msg+'\n\n'+
       'O levantamento está só na memória: se fechares a app, PERDE-SE.\n\n'+
-      'Exporta AGORA (ecrã Exportar → Partilhar) antes de continuares.\n\n'+
+      'Queres que tente libertar espaço agora? Não apago levantamentos — só '+
+      'restos de versões antigas e caches.\n\n'+
+      'OK = tentar libertar · Cancelar = exportar já, à mão.');
+    if(querLimpar){ if(limpezaEmergencia()) _falhaGravacaoAvisada=false; }
+    else alert('Exporta AGORA (ecrã Exportar → Partilhar) antes de continuares.\n\n'+
       'A faixa vermelha no cabeçalho fica lá enquanto isto não se resolver.');
   }catch(e){}
 }
@@ -18232,8 +18517,18 @@ function _chavesLS(){
   return ks.filter(Boolean);
 }
 function _tamanhoLS(k){ try{ return (localStorage.getItem(k)||'').length*2; }catch(e){ return 0; } }
+const _NOMES_LS={ce_ultimo:'atalho do último processo',ce_ultimo_cheio:'cópia extra antiga',
+  ce_perfis:'perfis de recolha guardados',ceVozEquipLib:'biblioteca de equipamentos',
+  ce_vis_planta:'preferência do painel da planta',ce_modo_duplo:'preferência de ecrã',
+  ce_larg_app:'largura do painel',ce_od_pasta_docs:'pasta do OneDrive',ce_sw_limpo:'marca de arranque'};
+function _rotuloLS(k){
+  if(k.startsWith('ce_proj_')) return 'processo «'+k.slice(8).replace(/_/g,' ')+'»';
+  if(k.startsWith('ce_arquivo_')) return 'cópia arquivada';
+  return _NOMES_LS[k]||('«'+k+'» — chave desconhecida, provavelmente de uma versão antiga da app');
+}
 function ocupacaoArmazenamento(){
-  const itens=_chavesLS().map(k=>({chave:k,bytes:_tamanhoLS(k)}));
+  const itens=_chavesLS().map(k=>({chave:k,bytes:_tamanhoLS(k),rotulo:_rotuloLS(k)}))
+    .sort((a,b)=>b.bytes-a.bytes);
   const total=itens.reduce((a,x)=>a+x.bytes,0);
   const porTipo={processos:0,arquivos:0,copia:0,outros:0};
   itens.forEach(x=>{
@@ -18242,7 +18537,30 @@ function ocupacaoArmazenamento(){
     else if(x.chave==='ce_ultimo'||x.chave==='ce_ultimo_cheio') porTipo.copia+=x.bytes;
     else porTipo.outros+=x.bytes;
   });
-  return {itens,total,porTipo,limite:5*1024*1024};
+  /* O limite não é sempre 5 MB: o Chrome dá 10 MB por origem há já uns anos.
+     Estimar por baixo fazia a barra dizer «98%» com metade do espaço livre. */
+  const limite=Math.max(5*1024*1024,Math.ceil(total/1048576)*1048576);
+  return {itens,total,porTipo,limite,
+    // o que ocupa mais, seja o que for — é para aqui que a pessoa deve olhar
+    maiores:itens.filter(x=>x.bytes>50*1024).slice(0,4)};
+}
+/* A MENSAGEM TEM DE APONTAR PARA O SÍTIO CERTO.
+   Dizia sempre «apaga os processos já exportados», mesmo quando os processos
+   ocupavam 0,20 MB de 9,98 MB. Mandava limpar onde não havia nada que limpar,
+   e o que estava a encher ficava escondido. Agora nomeia o que ocupa mais. */
+function _diagnosticoEspaco(){
+  try{
+    const o=ocupacaoArmazenamento();
+    if(!o.maiores.length)
+      return ' Ocupado: '+_mbTxt(o.total)+' em '+o.itens.length+' entradas pequenas.';
+    const lista=o.maiores.map(x=>x.rotulo+' ('+_mbTxt(x.bytes)+')').join(', ');
+    const desconhecidas=o.itens.filter(x=>/desconhecida/.test(x.rotulo));
+    const bytesDesc=desconhecidas.reduce((a,x)=>a+x.bytes,0);
+    return ' Ocupado: '+_mbTxt(o.total)+'. O que ocupa mais: '+lista+'.'+
+      (bytesDesc>200*1024
+        ? ' ⚠ '+_mbTxt(bytesDesc)+' está em chaves que a app já não usa — vê em ☰ → Recolhas guardadas.'
+        : ' Vê em ☰ → Recolhas guardadas.');
+  }catch(e){ return ''; }
 }
 function _libertarEspaco(){
   /* Por ordem de dor: primeiro o que não custa nada perder.
@@ -18797,29 +19115,11 @@ function autoSave(){
         'para não o destruir, o que estás a fazer agora não está a ser gravado.');
       return false;
     }
-    {
-      let det='';
-      try{
-        const o=ocupacaoArmazenamento();
-        const nProc=o.itens.filter(x=>x.chave.startsWith('ce_proj_')).length;
-        det=' Ocupado: '+_mbTxt(o.total)+' — '+nProc+' processo(s) guardado(s) ('+_mbTxt(o.porTipo.processos)+
-          ')'+(o.porTipo.arquivos?', arquivos '+_mbTxt(o.porTipo.arquivos):'')+
-          '. Apaga processos já exportados em ☰ → Recolhas guardadas.';
-      }catch(e){}
-      _avisarFalhaGravacao('O armazenamento do navegador está cheio.'+det);
-    }
+    _avisarFalhaGravacao('O armazenamento do navegador está cheio.'+_diagnosticoEspaco());
     return false;
   }catch(e){
-    if(String(e&&e.name).indexOf('Quota')>=0||/quota|exceeded|full/i.test(String(e&&e.message))){
-      let det='';
-      try{
-        const o=ocupacaoArmazenamento();
-        const nProc=o.itens.filter(x=>x.chave.startsWith('ce_proj_')).length;
-        det=' Ocupado: '+_mbTxt(o.total)+' — '+nProc+' processo(s) ('+_mbTxt(o.porTipo.processos)+'). '+
-          'Apaga os já exportados em ☰ → Recolhas guardadas.';
-      }catch(e2){}
-      _avisarFalhaGravacao('O armazenamento do navegador está CHEIO.'+det);
-    }
+    if(String(e&&e.name).indexOf('Quota')>=0||/quota|exceeded|full/i.test(String(e&&e.message)))
+      _avisarFalhaGravacao('O armazenamento do navegador está CHEIO.'+_diagnosticoEspaco());
     else _avisarFalhaGravacao('Erro ao gravar: '+(e&&e.message||e));
     return false;
   }
@@ -18873,10 +19173,44 @@ function listRecolhas(){
       const o=ocupacaoArmazenamento();
       const pct=Math.min(100,Math.round(o.total/o.limite*100));
       medidor.innerHTML='<div style="display:flex;justify-content:space-between"><span>Armazenamento: '+
-        _mbTxt(o.total)+' de ~5 MB ('+pct+'%)</span><span>'+projKeys.length+' processo(s)</span></div>'+
+        _mbTxt(o.total)+' ('+pct+'%)</span><span>'+projKeys.length+' processo(s) · '+_mbTxt(o.porTipo.processos)+'</span></div>'+
         '<div style="height:6px;background:var(--bg3);border-radius:3px;margin-top:4px;overflow:hidden">'+
-        '<div style="height:100%;width:'+pct+'%;background:'+(pct>85?'#ef5350':pct>60?'var(--am,#e8a33d)':'var(--ac)')+'"></div></div>'+
-        (pct>85?'<div style="color:#ff8a80;margin-top:4px">Quase cheio — apaga processos já exportados (✅) para a gravação não falhar.</div>':'');
+        '<div style="height:100%;width:'+pct+'%;background:'+(pct>85?'#ef5350':pct>60?'var(--am,#e8a33d)':'var(--ac)')+'"></div></div>';
+      /* O QUE OCUPA, SEJA O QUE FOR.
+         O medidor dizia só quantos processos havia. Com 13 processos a ocupar
+         0,20 MB de 9,98 MB, a pessoa apagava processos e o espaço não descia —
+         o que enchia estava noutro sítio e não aparecia em lado nenhum. */
+      const grandes=o.itens.filter(x=>x.bytes>50*1024&&!x.chave.startsWith('ce_proj_'));
+      if(grandes.length){
+        const cx2=document.createElement('div');
+        cx2.style.cssText='margin-top:8px;padding-top:7px;border-top:1px solid var(--br)';
+        cx2.innerHTML='<div style="color:var(--tx2);margin-bottom:5px">Fora dos processos, o que ocupa mais:</div>';
+        grandes.slice(0,6).forEach(x=>{
+          const l=document.createElement('div');
+          l.style.cssText='display:flex;align-items:center;gap:8px;margin-bottom:4px';
+          const desconhecida=/desconhecida/.test(x.rotulo);
+          l.innerHTML='<span style="flex:1;'+(desconhecida?'color:var(--am,#e8a33d)':'')+'">'+
+            escHtml(x.rotulo)+'</span><span style="color:var(--tx3)">'+_mbTxt(x.bytes)+'</span>';
+          const b=document.createElement('button');
+          b.textContent='🗑️';
+          b.style.cssText='background:var(--bg3);border:1px solid var(--br);border-radius:7px;padding:4px 8px;min-height:0';
+          b.title='apagar '+x.chave;
+          b.onclick=()=>{
+            if(!confirm('Apagar «'+x.rotulo+'» ('+_mbTxt(x.bytes)+')?'+
+              (desconhecida?'\n\nA app já não usa esta chave — é de uma versão antiga.'
+                           :'\n\nIsto não apaga nenhum levantamento.'))) return;
+            localStorage.removeItem(x.chave); listRecolhas();
+          };
+          l.appendChild(b); cx2.appendChild(l);
+        });
+        medidor.appendChild(cx2);
+      }
+      if(pct>85){
+        const av=document.createElement('div');
+        av.style.cssText='color:#ff8a80;margin-top:6px';
+        av.textContent='Quase cheio — a gravação vai começar a falhar. Apaga o que ocupa mais, em cima.';
+        medidor.appendChild(av);
+      }
     }catch(e){}
   };
   pintarMedidor();

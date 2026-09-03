@@ -67,6 +67,8 @@ button:disabled{opacity:.45;cursor:default}
       Se em algum momento a gravação passou, ficou aqui uma cópia que pode ter
       mais do que o ficheiro exportado.</p>
     <button class="p" id="btProc">Procurar processos</button>
+    <button id="btEspaco" style="margin-left:6px">Ver o que ocupa espaço</button>
+    <div id="listaEspaco" style="margin-top:10px"></div>
     <div id="listaProc" style="margin-top:10px"></div>
   </div>
 
@@ -87,7 +89,7 @@ button:disabled{opacity:.45;cursor:default}
 
 <script>
 "use strict";
-const RESGATE_VERSAO='v1.1.0 (2026-08-31)';
+const RESGATE_VERSAO='v1.3.0 (2026-09-02)';
 document.getElementById('versao').textContent=
   RESGATE_VERSAO+' — lê as imagens guardadas neste navegador';
 
@@ -327,6 +329,111 @@ function procurarProcessos(){
     'compara com o ficheiro que já tens.';
   el.appendChild(n);
 }
+/* Nome legível de cada chave do armazenamento, para a lista não ser uma
+   parede de identificadores técnicos. */
+const NOMES_CHAVE={
+  'ce_ultimo':'ponteiro para o último levantamento aberto',
+  'ce_ultimo_cheio':'cópia inteira do último levantamento (formato antigo)',
+  'ce_perfis':'perfis guardados',
+  'ce_vis_planta':'preferências da planta',
+  'ce_modo_duplo':'preferência de ecrã dividido',
+  'ce_larg_app':'largura da app no ecrã dividido',
+  'ce_sw_limpo':'marca de limpeza do service worker',
+  'ce_od_pasta_docs':'pasta do OneDrive onde abrir os documentos',
+  'ce_equip_lib':'biblioteca de equipamentos',
+  'ce_equipamentos':'biblioteca de equipamentos',
+};
+function rotuloChave(k){
+  if(k.startsWith('ce_proj_')) return 'PROCESSO «'+k.slice(8).replace(/_/g,' ')+'» — levantamento guardado';
+  if(k.startsWith('ce_arquivo_')) return 'cópia arquivada de «'+k.slice(11).replace(/_/g,' ')+'»';
+  if(k==='ce_ultimo_cheio') return 'cópia inteira do último levantamento — de uma versão antiga da app';
+  if(NOMES_CHAVE[k]) return NOMES_CHAVE[k];
+  if(/^msal|^okta|^auth/i.test(k)) return '«'+k+'» — sessão de login';
+  if(k.startsWith('ce_')) return '«'+k+'» — chave da app que já não se reconhece, de uma versão antiga';
+  return '«'+k+'» — não é da CE Voz, é de outra página no mesmo endereço';
+}
+/* Havia AQUI uma primeira versão de verEspaco e de seguroApagar, apagadas
+   pela segunda ao carregar a página — a mesma armadilha que já tinha
+   aparecido três vezes na app. Fica uma. */
+// o que se pode apagar sem perder levantamentos
+function seguroApagar(k){
+  return k.startsWith('ce_arquivo_')||k==='ce_ultimo_cheio'||k==='ce_sw_limpo'||
+         (k.startsWith('ce_')&&!k.startsWith('ce_proj_')&&!NOMES_CHAVE[k]);
+}
+function verEspaco(){
+  const el=$('listaEspaco'); el.innerHTML='';
+  const itens=[];
+  for(let i=0;i<localStorage.length;i++){
+    const k=localStorage.key(i); if(!k) continue;
+    // cada caractere ocupa 2 bytes no armazenamento do navegador
+    itens.push({k,bytes:(localStorage.getItem(k)||'').length*2});
+  }
+  itens.sort((a,b)=>b.bytes-a.bytes);
+  const total=itens.reduce((a,x)=>a+x.bytes,0);
+
+  const cab=document.createElement('div');
+  cab.style.cssText='font-size:13px;color:var(--tx);font-weight:700;margin-bottom:8px';
+  cab.textContent='Total: '+kb(total)+' em '+itens.length+' entradas';
+  el.appendChild(cab);
+
+  const proc=itens.filter(x=>x.k.startsWith('ce_proj_')).reduce((a,x)=>a+x.bytes,0);
+  const arq=itens.filter(x=>x.k.startsWith('ce_arquivo_'));
+  const bytesArq=arq.reduce((a,x)=>a+x.bytes,0);
+  const res=document.createElement('div');
+  res.className='nota'; res.style.marginBottom='10px';
+  res.innerHTML='Processos: <b>'+kb(proc)+'</b> · Cópias arquivadas: <b>'+kb(bytesArq)+
+    '</b> ('+arq.length+') · Resto: <b>'+kb(total-proc-bytesArq)+'</b>';
+  el.appendChild(res);
+
+  if(arq.length){
+    const b=document.createElement('button');
+    b.className='p'; b.style.cssText='margin-bottom:10px';
+    b.textContent='🧹 Apagar as '+arq.length+' cópias arquivadas ('+kb(bytesArq)+')';
+    b.onclick=()=>{
+      if(!confirm('As cópias arquivadas são versões ANTERIORES de processos que ainda '+
+        'tens guardados.\n\nApagar '+arq.length+' cópias e libertar '+kb(bytesArq)+'?')) return;
+      arq.forEach(x=>localStorage.removeItem(x.k));
+      verEspaco();
+    };
+    el.appendChild(b);
+  }
+
+  itens.forEach(x=>{
+    const d=document.createElement('div');
+    const grande=x.bytes>200*1024;
+    d.style.cssText='display:flex;align-items:center;gap:9px;padding:9px 10px;margin-bottom:5px;'+
+      'background:var(--bg3);border:1px solid '+(grande?'var(--am)':'var(--br)')+';border-radius:8px';
+    const t=document.createElement('div'); t.style.flex='1';
+    t.innerHTML='<div style="font-size:13px;color:var(--tx)">'+rotuloChave(x.k).replace(/</g,'&lt;')+'</div>'+
+      '<div class="nota">'+kb(x.bytes)+' · '+(x.bytes/total*100).toFixed(1)+'% do total</div>';
+    d.appendChild(t);
+    if(!x.k.startsWith('ce_proj_')){
+      const b=document.createElement('button');
+      b.style.cssText='padding:8px 11px;min-height:0;font-size:12px'+
+        (seguroApagar(x.k)?';border-color:var(--er);color:var(--er)':'');
+      b.textContent='apagar';
+      b.onclick=()=>{
+        if(!confirm('Apagar «'+x.k+'» ('+kb(x.bytes)+')?'+
+          (seguroApagar(x.k)?'\n\nNão perde nenhum levantamento.'
+            :'\n\n⚠ Isto pode perder alguma coisa. Só apaga se souberes o que é.'))) return;
+        localStorage.removeItem(x.k); verEspaco();
+      };
+      d.appendChild(b);
+    }
+    el.appendChild(d);
+  });
+
+  const n=document.createElement('div');
+  n.className='nota'; n.style.marginTop='10px';
+  n.textContent='Os PROCESSOS não têm botão de apagar aqui — descarrega-os primeiro '+
+    'na lista de cima e apaga-os depois pela app, para não perderes trabalho.';
+  el.appendChild(n);
+}
+$('btEspaco').onclick=()=>{
+  try{ verEspaco(); }
+  catch(e){ $('listaEspaco').innerHTML='<div class="nota">Não consegui ler: '+
+    String(e.message||e).replace(/</g,'&lt;')+'</div>'; }
+};
 $('btProc').onclick=()=>{
   try{ procurarProcessos(); }
   catch(e){ $('listaProc').innerHTML='<div class="nota">Não consegui ler: '+
