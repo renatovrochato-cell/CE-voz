@@ -500,7 +500,8 @@ body.com-planta #visDivisoria.a-arrastar::after{color:#04140c}
 <div id="painel-lado"></div>
 <div id="visPlanta">
   <div id="visPlantaBarra">
-    <button id="vpAbrir" onclick="visPlantaAbrir()" title="Abrir uma planta (PDF ou imagem)">📂</button>
+    <button id="vpAbrir" onclick="visPlantaAbrir()" title="Abrir uma planta do telemóvel (PDF ou imagem)">📂</button>
+    <button id="vpOneDrive" onclick="escolherPlantaDoOneDrive()" title="Escolher a planta no OneDrive, na pasta do processo">☁</button>
     <button onclick="visPlantaZoom(1.25)" title="Ampliar">＋</button>
     <button onclick="visPlantaZoom(0.8)" title="Reduzir">−</button>
     <button onclick="visPlantaAjustar()" title="Ajustar ao ecrã">⤢</button>
@@ -512,6 +513,8 @@ body.com-planta #visDivisoria.a-arrastar::after{color:#04140c}
     <button onclick="visPlantaPag(1)" title="Página seguinte">›</button>
     <button onclick="alternarVisPlanta()" title="Fechar">✕</button>
   </div>
+  <div id="od-browser-planta" style="display:none;padding:10px;background:var(--bg);
+       border-bottom:1px solid var(--br);max-height:70vh;overflow-y:auto"></div>
   <div id="visPlantaTela"><img id="visPlantaImg" alt=""></div>
   <div id="visRosa"></div>
 </div>
@@ -561,7 +564,7 @@ const DIVS_BASE=[
 // VERSÃO — fonte única (selo no ecrã inicial + cabeçalho do TXT exportado).
 // Subir aqui a cada alteração ao ficheiro.
 // ═══════════════════════════════════════
-const APP_VERSION='v2026.09.03-FIX244';
+const APP_VERSION='v2026.09.03-FIX245';
 
 /* ══════════════════════════════════════════════════════════════════
    A APP INSTALADA FICAVA PRESA NUMA VERSÃO ANTIGA
@@ -18140,13 +18143,34 @@ document.addEventListener('visibilitychange',()=>{
    seguem pelo mesmo caminho de OCR dos outros documentos. */
 const OD_PASTA_DOCS_KEY='ce_od_pasta_docs';
 let _odCaminhoAtual='';
-async function escolherDoOneDrive(){
-  const box=document.getElementById('od-browser'); if(!box) return;
+/* O NAVEGADOR DO ONEDRIVE SERVE QUALQUER SÍTIO, NÃO SÓ OS DOCUMENTOS.
+   Estava preso ao ecrã de anexar documentos: quem carregava no 📂 para ir
+   buscar a planta só tinha o seletor do sistema, que no Android não deixa
+   escolher vários no Drive nem abrir numa pasta. Passa a receber onde
+   desenhar, o que fazer com os ficheiros escolhidos, e que pasta lembrar. */
+let _odDestino=null;
+async function escolherPlantaDoOneDrive(){
+  return escolherDoOneDrive({
+    box:'od-browser-planta',
+    chavePasta:'ce_od_pasta_plantas',
+    unico:true,
+    onEscolha:async(files)=>{ if(files&&files[0]) await visPlantaCarregarFicheiro(files[0]); },
+  });
+}
+async function escolherDoOneDrive(op){
+  op=op||{};
+  _odDestino={
+    onEscolha:op.onEscolha||(async fs=>{ await processarFicheirosDocumento(fs); }),
+    chavePasta:op.chavePasta||OD_PASTA_DOCS_KEY,
+    boxId:op.box||'od-browser',
+    unico:!!op.unico,
+  };
+  const box=document.getElementById(_odDestino.boxId); if(!box) return;
   box.style.display='block';
   box.innerHTML='<div style="font-size:13px;color:var(--tx2);padding:8px">A ligar ao OneDrive…</div>';
   try{
     const token=await oneDriveGetToken();
-    const inicio=localStorage.getItem(OD_PASTA_DOCS_KEY)||ONEDRIVE_PASTA_BASE;
+    const inicio=localStorage.getItem(_odDestino.chavePasta)||ONEDRIVE_PASTA_BASE;
     await _odListar(token,inicio);
   }catch(e){
     box.innerHTML='<div style="font-size:13px;color:var(--red);padding:8px">Não consegui abrir o OneDrive: '+
@@ -18154,7 +18178,7 @@ async function escolherDoOneDrive(){
   }
 }
 async function _odListar(token,caminho){
-  const box=document.getElementById('od-browser');
+  const box=document.getElementById((_odDestino&&_odDestino.boxId)||'od-browser');
   _odCaminhoAtual=caminho||'';
   const url=caminho
     ? 'https://graph.microsoft.com/v1.0/me/drive/root:/'+caminho.split('/').map(encodeURIComponent).join('/')+':/children?$top=200&$select=id,name,folder,file,size,lastModifiedDateTime'
@@ -18181,7 +18205,7 @@ async function _odListar(token,caminho){
   const lembrar=document.createElement('button');
   lembrar.textContent='📌 Abrir sempre aqui';
   lembrar.style.cssText='background:none;color:var(--ac);border:1px dashed var(--ac);border-radius:8px;padding:6px 10px;font-size:12px;margin-bottom:8px';
-  lembrar.onclick=()=>{ localStorage.setItem(OD_PASTA_DOCS_KEY,_odCaminhoAtual); lembrar.textContent='📌 Guardado — abre aqui da próxima vez'; };
+  lembrar.onclick=()=>{ localStorage.setItem(_odDestino.chavePasta,_odCaminhoAtual); lembrar.textContent='📌 Guardado — abre aqui da próxima vez'; };
   box.appendChild(lembrar);
   const lista=document.createElement('div'); lista.style.cssText='display:flex;flex-direction:column;gap:5px;max-height:46vh;overflow-y:auto';
   pastas.forEach(pf=>{
@@ -18196,7 +18220,16 @@ async function _odListar(token,caminho){
     const d=document.createElement('label');
     d.style.cssText='display:flex;align-items:center;gap:10px;padding:9px 10px;background:var(--bg2);border:1px solid var(--br);border-radius:8px;font-size:13px;cursor:pointer';
     const cb=document.createElement('input'); cb.type='checkbox'; cb.style.cssText='width:20px;height:20px';
-    cb.onchange=()=>{ if(cb.checked) sel.add(f); else sel.delete(f); btOk.textContent='⬇ Anexar '+sel.size+' ficheiro(s)'; btOk.disabled=!sel.size; };
+      cb.onchange=()=>{
+        // para a planta só faz sentido um ficheiro de cada vez
+        if(_odDestino&&_odDestino.unico&&cb.checked){ sel.clear();
+          lista.querySelectorAll('input[type=checkbox]').forEach(o=>{ if(o!==cb) o.checked=false; }); }
+        if(cb.checked) sel.add(f); else sel.delete(f);
+        btOk.textContent=(_odDestino&&_odDestino.unico)
+          ? (sel.size?'⬇ Abrir esta planta':'⬇ Escolhe uma planta')
+          : ('⬇ Anexar '+sel.size+' ficheiro(s)');
+        btOk.disabled=!sel.size;
+      };
     const nm=document.createElement('span'); nm.style.flex='1'; nm.textContent=f.name;
     const tam=document.createElement('span'); tam.style.cssText='color:var(--tx3);font-size:11.5px'; tam.textContent=(f.size/1048576).toFixed(1)+' MB';
     d.appendChild(cb); d.appendChild(nm); d.appendChild(tam); lista.appendChild(d);
@@ -18220,7 +18253,7 @@ async function _odListar(token,caminho){
       }catch(e){ alert('Não consegui descarregar «'+f.name+'»: '+(e.message||e)); }
     }
     box.style.display='none';
-    if(ficheiros.length) await processarFicheirosDocumento(ficheiros);
+    if(ficheiros.length) await _odDestino.onEscolha(ficheiros);
   };
   const btX=document.createElement('button'); btX.textContent='Fechar'; btX.style.cssText='background:var(--bg3);color:var(--tx);border:1px solid var(--br);border-radius:10px;padding:10px 14px';
   btX.onclick=()=>{ box.style.display='none'; };
@@ -18851,6 +18884,14 @@ function visPlantaAbrir(){
   inp.type='file'; inp.accept='image/*,application/pdf';
   inp.onchange=async()=>{
     const f=(inp.files||[])[0]; if(!f) return;
+    await visPlantaCarregarFicheiro(f);
+  };
+  inp.click();
+}
+/* O mesmo caminho para uma planta venha ela do seletor do sistema ou do
+   OneDrive: era só o seletor que sabia abrir plantas. */
+async function visPlantaCarregarFicheiro(f){
+  {
     const tela=document.getElementById('visPlantaTela');
     if(tela) tela.style.opacity='.4';
     try{
@@ -18869,8 +18910,7 @@ function visPlantaAbrir(){
         '\n\nSe for um PDF, experimenta uma captura de ecrã ou uma fotografia.');
     }
     if(tela) tela.style.opacity='';
-  };
-  inp.click();
+  }
 }
 
 /* Um PDF é rasterizado página a página, com resolução suficiente para se ler as
