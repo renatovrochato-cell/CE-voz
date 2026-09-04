@@ -500,7 +500,7 @@ body.com-planta #visDivisoria.a-arrastar::after{color:#04140c}
 <div id="painel-lado"></div>
 <div id="visPlanta">
   <div id="visPlantaBarra">
-    <button id="vpAbrir" onclick="visPlantaAbrir()" title="Abrir uma planta do telemóvel (PDF ou imagem)">📂</button>
+    <button id="vpAbrir" onclick="visPlantaEscolherOrigem()" title="Abrir uma planta — OneDrive ou telemóvel">📂</button>
     <button id="vpOneDrive" onclick="escolherPlantaDoOneDrive()" title="Escolher a planta no OneDrive, na pasta do processo">☁</button>
     <button onclick="visPlantaZoom(1.25)" title="Ampliar">＋</button>
     <button onclick="visPlantaZoom(0.8)" title="Reduzir">−</button>
@@ -564,7 +564,7 @@ const DIVS_BASE=[
 // VERSÃO — fonte única (selo no ecrã inicial + cabeçalho do TXT exportado).
 // Subir aqui a cada alteração ao ficheiro.
 // ═══════════════════════════════════════
-const APP_VERSION='v2026.09.03-FIX246';
+const APP_VERSION='v2026.09.04-FIX249';
 
 /* ══════════════════════════════════════════════════════════════════
    A APP INSTALADA FICAVA PRESA NUMA VERSÃO ANTIGA
@@ -13884,7 +13884,9 @@ async function identificarDocumentoOficial(dataURL,mediaType,nomeFicheiro){
   /* Se o nome do ficheiro diz «certidão», vai só o topo da 1ª página — é lá que
      estão os dois únicos campos que a app usa de uma certidão. Se a leitura
      vier sem eles, a rede de segurança abaixo repete com tudo. */
-  const perfil=pareceCertidao(nomeFicheiro)?'certidao':null;
+  /* Sem indicação em contrário, um documento oficial é uma caderneta — é o que
+     mais se anexa — e vai inteiro, para não perder a tipologia nem o ano. */
+  const perfil=pareceCertidao(nomeFicheiro)?'certidao':'caderneta';
   const r1=await _identificarDoc(dataURL,mediaType,false,perfil);
   /* O nome do ficheiro nem sempre diz o que é — «doc1.pdf», «scan.pdf». Mas a
      PRIMEIRA leitura diz: se o documento se identificou como certidão e já
@@ -13966,7 +13968,7 @@ async function _chamarOCRCompleto(blocosFicheiro){
     '"3291/20080724") e o código de acesso da certidão no cabeçalho (formato XXXX-XXXX-XXXX); a conservatória e a '+
     'freguesia vêm no topo, a composição do prédio a seguir. Ignora titulares, quotas, inscrições, ónus e hipotecas — '+
     'não são precisos. A imagem pode estar cortada em baixo: se um campo não aparecer, devolve null em vez de o inventar. '+
-    'Extrai em JSON (usa null nos campos que não encontrares ou não se apliquem): tipo_documento ("caderneta_predial"|"certidao_permanente"|"outro"), numero_matriz (número de matriz predial urbana, só o número/código, ex: "1234"), numero_fracao (letra ou número de identificação da fração autónoma, ex: "A" ou "12"), morada_completa (morada do prédio/fração tal como consta no documento: rua, número de polícia, andar se aplicável, código postal e localidade, tudo numa só linha), localidade (apenas o nome da localidade/cidade/vila onde se situa o imóvel, ex: "Portimão"), freguesia (nome da freguesia tal como consta no documento), concelho (nome do concelho/município, ex: "Portimão"), ano_inscricao_matriz (ano em que o prédio foi inscrito na matriz predial, só o ano, ex: "1995"), numero_pisos_predio (nº total de pisos do EDIFÍCIO/prédio — este valor serve APENAS para a descrição do prédio; null se não constar), numero_pisos_fracao (nº de pisos da FRAÇÃO/moradia em si, ou seja quantos pisos tem a habitação que está a ser certificada — numa moradia unifamiliar coincide com os pisos do prédio; num apartamento é normalmente 1, ou 2 se for duplex; null se não constar explicitamente), numero_descricao_predial (número de descrição predial — canto superior direito, formato "3291/20080724" → extrai só "3291", nunca a data), numero_certidao_permanente (código de acesso da certidão permanente, formato XXXX-XXXX-XXXX, DIFERENTE do número de descrição predial), tipologia (SÓ se o documento a disser de forma explícita — «T2», «tipologia T3», «tipo T1», na descrição da fração ou nas divisões; devolve no formato \"T2\"; null se não constar ou se for preciso deduzir do número de quartos), area_bruta_privativa_m2 (área bruta privativa em m², só o número; null se não constar), area_bruta_dependente_m2 (área bruta dependente em m², só o número; null se não constar). Responde APENAS com JSON válido, sem texto adicional e sem blocos de código.';
+    'Extrai em JSON (usa null nos campos que não encontrares ou não se apliquem): tipo_documento ("caderneta_predial"|"certidao_permanente"|"outro"), numero_matriz (número de matriz predial urbana, só o número/código, ex: "1234"), numero_fracao (letra ou número de identificação da fração autónoma, ex: "A" ou "12"), morada_completa (morada do prédio/fração tal como consta no documento: rua, número de polícia, andar se aplicável, código postal e localidade, tudo numa só linha), localidade (apenas o nome da localidade/cidade/vila onde se situa o imóvel, ex: "Portimão"), freguesia (nome da freguesia tal como consta no documento), concelho (nome do concelho/município, ex: "Portimão"), ano_inscricao_matriz (ano em que o prédio foi inscrito na matriz predial, só o ano, ex: "1995"), numero_pisos_predio (nº total de pisos do EDIFÍCIO/prédio — este valor serve APENAS para a descrição do prédio; null se não constar), numero_pisos_fracao (nº de pisos da FRAÇÃO/moradia em si, ou seja quantos pisos tem a habitação que está a ser certificada — numa moradia unifamiliar coincide com os pisos do prédio; num apartamento é normalmente 1, ou 2 se for duplex; null se não constar explicitamente), numero_descricao_predial (número de descrição predial — canto superior direito, formato "3291/20080724" → extrai só "3291", nunca a data), numero_certidao_permanente (código de acesso da certidão permanente, formato XXXX-XXXX-XXXX, DIFERENTE do número de descrição predial), codigo_distrito (o número do DISTRITO no cabeçalho da caderneta, ex: em «DISTRITO: 08 - FARO» devolve \"08\"; dois dígitos, com o zero à frente; null se não constar), codigo_concelho (idem para «CONCELHO: 06 - LAGOA» → \"06\"), codigo_freguesia (idem para «FREGUESIA: 08 - UNIÃO DAS FREGUESIAS...» → \"08\"), tipologia (SÓ se o documento a disser de forma explícita — «T2», «tipologia T3», «tipo T1», na descrição da fração ou nas divisões; devolve no formato \"T2\"; null se não constar ou se for preciso deduzir do número de quartos), area_bruta_privativa_m2 (área bruta privativa em m², só o número; null se não constar), area_bruta_dependente_m2 (área bruta dependente em m², só o número; null se não constar). Responde APENAS com JSON válido, sem texto adicional e sem blocos de código.';
   return comRetry(async(rep)=>{
     const data=await _pedidoIA('documento',{model:'claude-sonnet-4-6',max_tokens:600,
       messages:[{role:'user',content:[...blocosFicheiro,{type:'text',text:PROMPT_OCR}]}]},rep);
@@ -14001,7 +14003,13 @@ async function _reduzirParaJpeg(dataURL,maxLado){
    primeira; a segunda apanha a continuação das frações. A terceira é quase
    sempre o quadro de avaliação, que não se usa. Se faltar alguma coisa, a
    revisão no escritório lê o documento inteiro. */
-const OCR_PDF_DPI=150, OCR_PDF_MAX_PAGINAS=2;
+/* TRÊS PÁGINAS, NÃO DUAS.
+   O «Ano de inscrição na matriz» está na página a seguir à identificação. Numa
+   caderneta de prédio com muitas frações, essa é a 3.ª — e o ano ficava de
+   fora. Uma página a 150 DPI custa ~2900 tokens; perder o ano de construção
+   custa o levantamento todo, porque dele dependem os valores por defeito de
+   todas as envolventes. */
+const OCR_PDF_DPI=150, OCR_PDF_MAX_PAGINAS=3;
 /* De uma CERTIDÃO PERMANENTE a app só usa dois números — o de descrição
    predial e o código de acesso — e ambos estão no cabeçalho da 1ª página. Vai
    só o terço de cima dessa página: um quarto do que ia antes. */
@@ -14020,11 +14028,25 @@ function pareceCertidao(nome){
    Numa CERTIDÃO PERMANENTE o número de descrição predial está no canto
    superior direito e a composição do prédio no topo; a metade de baixo são
    inscrições, ónus e hipotecas.
-   Enviar 65% da altura poupa 35% dos tokens sem perder um único campo dos que
-   a app pede. E vai com rede: se a leitura vier sem os campos essenciais,
-   repete-se com a página inteira — melhor gastar mais numa caderneta de
-   formato invulgar do que ficar sem a matriz. */
-const OCR_RECORTE_TOPO=0.65;
+   65% PARECIA CHEGAR E NÃO CHEGAVA. Numa caderneta real de fração autónoma o
+   bloco «ELEMENTOS DA FRACÇÃO», onde está a Tipologia/Divisões, fica a 79,5%
+   da altura da página 1 — logo a seguir a «Andar/Divisão», a 73,7%. Com 65%
+   cortava-se tudo isso: a app pedia a tipologia ao modelo, o modelo não a via,
+   e voltava a perguntá-la em obra.
+   88% apanha os elementos da fração e continua a poupar: o que fica de fora é
+   só o rodapé e o início dos dados de avaliação, que a app não usa.
+   E vai com rede: se a leitura vier sem os campos essenciais, repete-se com a
+   página inteira. */
+/* O RECORTE DE 88% CORTAVA A TIPOLOGIA.
+   Na caderneta da Elena, «Tipologia/Divisões: T3» está a 79,5% da altura —
+   dentro dos 88% por pouco. Numa caderneta com mais moradas ou mais
+   confrontações, a secção ELEMENTOS DA FRACÇÃO desce e fica de fora: a app
+   deixava de saber a tipologia e ninguém percebia porquê.
+   O recorte poupava 12% de uma página — cerca de 250 tokens. Não compensa
+   perder um campo. Numa caderneta vai a página inteira; o recorte fica para
+   fotos de documentos, onde há margem branca a sério. */
+const OCR_RECORTE_TOPO=0.88;
+const OCR_RECORTE_CADERNETA=1.0;
 function recortarTopo(dataURL,fracao){
   return new Promise(resolve=>{
     try{
@@ -14053,6 +14075,13 @@ function _ocrTemEssencial(o){
   // uma certidão basta-se com um dos seus dois números — não tem matriz nem áreas
   if(o&&o.tipo_documento==='certidao_permanente')
     return !!(o.numero_descricao_predial||o.numero_certidao_permanente);
+  /* Numa CADERNETA, a matriz sozinha não chega: a tipologia e o ano de
+     inscrição estão mais abaixo na página e são os primeiros a perder-se num
+     recorte ou numa página que não foi enviada. Exigi-los aqui é o que faz a
+     releitura com a página inteira disparar — antes, a matriz vinha, a
+     leitura dava-se por boa, e os outros dois desapareciam em silêncio. */
+  if(o&&o.tipo_documento==='caderneta_predial')
+    return !!(o.numero_matriz&&(o.tipologia||o.ano_inscricao_matriz));
   return !!(o.numero_matriz||o.numero_descricao_predial||o.numero_certidao_permanente||
             (o.morada_completa&&o.concelho));
 }
@@ -14065,7 +14094,8 @@ async function _blocosParaModelo(dataURL,mediaType,inteiro,perfil){
     try{
       const pg1=await rasterizarPaginaPDF(dataURL,1,OCR_PDF_DPI);
       const n=soTopo?1:Math.min(pg1.nPaginas,OCR_PDF_MAX_PAGINAS);
-      const rec=async du=>(inteiro?du:await recortarTopo(du,soTopo?OCR_RECORTE_CERTIDAO:undefined));
+      const rec=async du=>(inteiro?du:await recortarTopo(du,
+        soTopo?OCR_RECORTE_CERTIDAO:(perfil==='caderneta'?OCR_RECORTE_CADERNETA:undefined)));
       const blocos=[{type:'image',source:{type:'base64',media_type:'image/jpeg',
         data:(await rec(pg1.jpegDataURL)).split(',')[1]}}];
       for(let p=2;p<=n;p++){
@@ -15601,6 +15631,16 @@ async function processarFicheirosDocumento(files){
               if(z){D.zonaClimatica=z;}
             }
           }
+          /* OS CÓDIGOS DA DECLARAÇÃO DE VISITA VÊM DA CADERNETA.
+             Estão no cabeçalho — «DISTRITO: 08 · CONCELHO: 06 · FREGUESIA: 08»
+             — e a app pedia-os à mão no fim, quando já tinha o documento na
+             mão desde o princípio. */
+          ['distrito','concelho','freguesia'].forEach(k=>{
+            const v=String((ocr&&ocr['codigo_'+k])||'').replace(/\D/g,'');
+            if(v){ D['dvCod'+k.charAt(0).toUpperCase()+k.slice(1)]=v.padStart(2,'0'); }
+          });
+          if(D.dvCodDistrito&&D.dvCodConcelho&&D.dvCodFreguesia)
+            achados.push('códigos da DV '+D.dvCodDistrito+'·'+D.dvCodConcelho+'·'+D.dvCodFreguesia);
           if(ocr.ano_inscricao_matriz){
             D.anoConstrucao=String(ocr.ano_inscricao_matriz);
             D.anoInscricaoMatriz=D.anoConstrucao;
@@ -15636,6 +15676,19 @@ async function processarFicheirosDocumento(files){
             if(ocr&&ocr.area_bruta_privativa_m2){ D.areaBrutaPrivativa=String(ocr.area_bruta_privativa_m2); achados.push('ABP '+D.areaBrutaPrivativa+' m²'); }
             if(ocr&&ocr.area_bruta_dependente_m2){ D.areaBrutaDependente=String(ocr.area_bruta_dependente_m2); achados.push('ABD '+D.areaBrutaDependente+' m²'); }
           }catch(e){}
+          /* O QUE NÃO SE CONSEGUIU LER FICA DITO.
+             A app lia a matriz, dava-se por satisfeita, e a tipologia e o ano
+             de construção não apareciam em lado nenhum — nem preenchidos nem
+             assinalados. Quem estava em obra só dava por isso quando a
+             pergunta voltava a aparecer, e não sabia porquê. */
+          if(tipoDoc==='caderneta_predial'){
+            const emFalta=[];
+            if(!D.tipologia) emFalta.push('tipologia');
+            if(!D.anoConstrucao) emFalta.push('ano de construção');
+            if(!D.numeroFracao&&ocr.numero_matriz) emFalta.push('fração');
+            if(emFalta.length) achados.push('⚠ não consegui ler: '+emFalta.join(', ')+
+              ' — vai ser perguntado');
+          }
           if(achados.length){
             autoSave();
             st.style.color='var(--ac)';
@@ -17956,8 +18009,39 @@ async function oneDriveGetToken(){
 // pastaRelativa pode vir vazia: nesse caso o ficheiro fica logo na pasta base.
 // Era isto que duplicava — uma pasta com a morada na nuvem, e outra igual dentro
 // do ZIP, com caminhos enormes para chegar às fotos.
+/* UM 401 A MEIO DO UPLOAD TEM DE RENOVAR O TOKEN.
+   O token era pedido UMA vez, no início, e guardado numa constante. Se o Graph
+   o recusasse — expirou entretanto, a sessão foi revogada noutro aparelho, o
+   relógio do telemóvel está adiantado — as 3 tentativas do comRetry reenviavam
+   exactamente o mesmo token expirado e falhavam as três da mesma maneira:
+   «Sessão de upload falhou: HTTP 401». Repetir sem renovar nunca podia dar.
+   Agora o token vive numa variável, e um 401 força a renovação antes da
+   tentativa seguinte. Como o MSAL tem cache própria, pede-se-lhe que a ignore. */
+async function _odTokenFresco(){
+  try{
+    const app=await getMsalApp();
+    if(typeof app.initialize==='function') await app.initialize();
+    await _msalPronto(app);
+    const contas=app.getAllAccounts();
+    if(contas.length){
+      const r=await app.acquireTokenSilent({scopes:ONEDRIVE_SCOPES,account:contas[0],forceRefresh:true});
+      if(r&&r.accessToken) return r.accessToken;
+    }
+  }catch(e){ /* cai no caminho normal, que sabe pedir login */ }
+  return await oneDriveGetToken();
+}
 async function oneDriveUploadFile(pastaRelativa,nomeFicheiro,blob,onProgress){
-  const token=await oneDriveGetToken();
+  let token=await oneDriveGetToken();
+  if(!token) throw new Error('sem sessão OneDrive — toca em «Guardar no OneDrive» para ligar a conta');
+  // renova uma vez por upload, no máximo: não se entra em ciclo de renovações
+  let jaRenovou=false;
+  const renovar=async()=>{
+    if(jaRenovou) return false;
+    jaRenovou=true;
+    const t=await _odTokenFresco();
+    if(t){ token=t; return true; }
+    return false;
+  };
   const caminho=[ONEDRIVE_PASTA_BASE,pastaRelativa,nomeFicheiro]
     .filter(x=>x!==null&&x!==undefined&&String(x).trim()!=='')
     .join('/').replace(/\/+/g,'/');
@@ -17971,7 +18055,9 @@ async function oneDriveUploadFile(pastaRelativa,nomeFicheiro,blob,onProgress){
         headers:{'Authorization':'Bearer '+token,'Content-Type':blob.type||'application/octet-stream'},
         body:blob,
       });
-      if(!resp.ok) throw new Error('Upload falhou: HTTP '+resp.status);
+      if(resp.status===401&&await renovar()) throw new Error('token renovado — a repetir');
+      if(!resp.ok) throw new Error('Upload falhou: HTTP '+resp.status+
+        (resp.status===401?' — a sessão OneDrive expirou. Toca em «Guardar no OneDrive» para voltar a entrar.':''));
       return await resp.json();
     });
   }
@@ -17982,7 +18068,9 @@ async function oneDriveUploadFile(pastaRelativa,nomeFicheiro,blob,onProgress){
       headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},
       body:JSON.stringify({item:{'@microsoft.graph.conflictBehavior':'replace'}}),
     });
-    if(!sessResp.ok) throw new Error('Sessão de upload falhou: HTTP '+sessResp.status);
+    if(sessResp.status===401&&await renovar()) throw new Error('token renovado — a repetir');
+    if(!sessResp.ok) throw new Error('Sessão de upload falhou: HTTP '+sessResp.status+
+      (sessResp.status===401?' — a sessão OneDrive expirou. Toca em «Guardar no OneDrive» para voltar a entrar.':''));
     return await sessResp.json();
   });
   const uploadUrl=sess.uploadUrl;
@@ -18907,11 +18995,45 @@ function alternarVisPlanta(){
   if(on){
     posicionarDivisoria();
     ligarGestosPlanta();
-    if(!_vpPaginas.length) visPlantaAbrir();
+    /* NÃO ABRIR O SELETOR DO SISTEMA SOZINHO.
+       Ao abrir o painel da planta, a app disparava logo visPlantaAbrir() — o
+       seletor do Android, que mostra o WhatsApp, a galeria e tudo o resto.
+       Quem queria a planta do OneDrive tinha de fechar aquilo primeiro, e o
+       botão ☁ ficava escondido por trás. Passa a mostrar as duas opções e a
+       deixar escolher. */
+    if(!_vpPaginas.length) visPlantaEscolherOrigem();
   }
   window.dispatchEvent(new Event('resize'));
 }
 
+/* Ecrã de escolha da origem da planta, dentro do painel. Sem isto, a única
+   porta era o seletor do sistema. */
+function visPlantaEscolherOrigem(){
+  const box=document.getElementById('od-browser-planta'); if(!box) return;
+  box.style.display='block';
+  box.innerHTML='';
+  const t=document.createElement('div');
+  t.style.cssText='font-size:13px;color:var(--tx2);margin-bottom:10px';
+  t.textContent='De onde vem a planta?';
+  box.appendChild(t);
+  const bt=(txt,sub,fn,forte)=>{
+    const b=document.createElement('button'); b.type='button';
+    b.innerHTML=txt+'<br><span style="font-size:11.5px;opacity:.75">'+sub+'</span>';
+    b.style.cssText='width:100%;margin-bottom:8px;padding:12px;border-radius:10px;text-align:left;'+
+      'font-size:14px;cursor:pointer;border:1px '+(forte?'solid':'dashed')+' var(--ac);'+
+      'background:'+(forte?'var(--ac)':'none')+';color:'+(forte?'#04120c':'var(--ac)');
+    b.onclick=fn; box.appendChild(b);
+  };
+  bt('☁ OneDrive','abre na pasta dos certificados',()=>{ escolherPlantaDoOneDrive(); },true);
+  bt('📂 Ficheiros do telemóvel','galeria, transferências, WhatsApp',
+    ()=>{ box.style.display='none'; visPlantaAbrir(); });
+  const x=document.createElement('button');
+  x.textContent='Fechar'; x.type='button';
+  x.style.cssText='background:var(--bg3);color:var(--tx);border:1px solid var(--br);'+
+    'border-radius:9px;padding:9px 14px;font-size:13px';
+  x.onclick=()=>{ box.style.display='none'; };
+  box.appendChild(x);
+}
 function visPlantaAbrir(){
   const inp=document.createElement('input');
   /* A MESMA ORDEM DO `accept` QUE O ANEXO DE DOCUMENTOS.
