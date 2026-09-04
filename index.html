@@ -564,7 +564,7 @@ const DIVS_BASE=[
 // VERSÃO — fonte única (selo no ecrã inicial + cabeçalho do TXT exportado).
 // Subir aqui a cada alteração ao ficheiro.
 // ═══════════════════════════════════════
-const APP_VERSION='v2026.09.03-FIX245';
+const APP_VERSION='v2026.09.03-FIX246';
 
 /* ══════════════════════════════════════════════════════════════════
    A APP INSTALADA FICAVA PRESA NUMA VERSÃO ANTIGA
@@ -729,8 +729,12 @@ function buildQs(){
     key:'docsInicio'});
 
   // PROJETO
+  /* Se a caderneta disse «T3» de forma explícita, não se pergunta outra vez —
+     é o mesmo tratamento que a localidade e os pisos já têm. Fica no bloco
+     «lido dos documentos» e corrige-se na revisão se estiver mal. */
   qs.push({id:'tipologia',ctx:'Projeto',text:'Qual a tipologia da habitação?',
-    chips:['T0','T1','T2','T3','T4','T5','T6','Serviços','Moradia unifamiliar'],key:'tipologia'});
+    chips:['T0','T1','T2','T3','T4','T5','T6','Serviços','Moradia unifamiliar'],key:'tipologia',
+    cond:()=>!(D.tipologiaDeDocumento&&D.tipologia)});
   qs.push({id:'edificio-tipo',ctx:'Projeto',
     text:'É apartamento ou moradia?',
     chips:['Apartamento','Moradia'],
@@ -1440,6 +1444,8 @@ async function iniciar(_restoreCurQ, _restoreAnswers){
     // repor o estado de arranque, com os valores por defeito que não são vazios
     Object.assign(D,JSON.parse(JSON.stringify(D_INICIAL)));
     D_MANTER.forEach(k=>{ if(guardados[k]!==undefined) D[k]=guardados[k]; });
+    // o momento do arranque — DEPOIS do reset, senão era apagado com o resto
+    D._tsArranque=new Date().toISOString();
     // aplicar perfil de edifício se seleccionado
     if(window._perfilPendente){aplicarPerfil(window._perfilPendente);window._perfilPendente=null;}
     // já não é preciso limpar a IndexedDB aqui: os documentos ficam sempre associados
@@ -8272,9 +8278,39 @@ function renderIsolInline(wrap){
    escreve-se mal e devagar; tocar é mais rápido e não erra. */
 const DV_HORAS=['08:30','09:00','09:30','10:00','10:30','11:00','11:30','12:00',
   '14:00','14:30','15:00','15:30','16:00','16:30','17:00','17:30'];
+/* A HORA DE INÍCIO É A HORA A QUE SE COMEÇOU.
+   A declaração de visita pedia dia e hora em branco, a escolher entre chips —
+   dois toques, todas as vezes, para dizer o que a app já sabe: que o
+   levantamento começou hoje, à hora a que se carregou em «Iniciar». Fica
+   sugerido de origem, arredondado aos 15 minutos para baixo (o laser e as
+   fotos só começam depois de se entrar); quem quiser outra hora toca noutra. */
+function _dvPreencherDoArranque(){
+  if(D.dvData&&D.dvHoraInicio) return false;
+  const ini=D._tsArranque?new Date(D._tsArranque):new Date();
+  if(isNaN(ini.getTime())) return false;
+  let mudou=false;
+  if(!D.dvData){
+    D.dvData=String(ini.getDate()).padStart(2,'0')+'/'+String(ini.getMonth()+1).padStart(2,'0')+'/'+ini.getFullYear();
+    D.dvDataDoArranque=true; mudou=true;
+  }
+  if(!D.dvHoraInicio){
+    const m=Math.floor(ini.getMinutes()/15)*15;
+    D.dvHoraInicio=String(ini.getHours()).padStart(2,'0')+':'+String(m).padStart(2,'0');
+    D.dvHoraDoArranque=true; mudou=true;
+  }
+  return mudou;
+}
 function renderDVInline(wrap){
   wrap.innerHTML='';
+  if(_dvPreencherDoArranque()){ try{ autoSave(); }catch(e){} }
   const dt=_dvDatasSugeridas();
+  if(D.dvDataDoArranque&&D.dvHoraDoArranque){
+    const n=document.createElement('div');
+    n.style.cssText='font-size:12px;color:var(--ac);margin-bottom:6px';
+    n.textContent='✓ Preenchido com o início do levantamento — '+D.dvData+' às '+D.dvHoraInicio+
+      '. Toca noutro valor se a visita for a outra hora.';
+    wrap.appendChild(n);
+  }
   const sec=(titulo)=>{
     const d=document.createElement('div');
     d.className='aqs-lbl'; d.style.marginTop='12px'; d.textContent=titulo;
@@ -8292,7 +8328,7 @@ function renderDVInline(wrap){
     const c=document.createElement('div');
     c.className='chip'+(D.dvData===val?' on':'');
     c.innerHTML=lbl+'<br><span style="font-size:11px;opacity:.75">'+val+'</span>';
-    c.onclick=()=>{ D.dvData=val; autoSave(); renderDVInline(wrap); };
+    c.onclick=()=>{ D.dvData=val; delete D.dvDataDoArranque; autoSave(); renderDVInline(wrap); };
     rD.appendChild(c);
   });
   {
@@ -8311,11 +8347,12 @@ function renderDVInline(wrap){
   // ── hora ──
   sec('Hora de início');
   const rH=linha();
-  DV_HORAS.forEach(h=>{
+  const _horas=DV_HORAS.includes(D.dvHoraInicio)||!D.dvHoraInicio?DV_HORAS:[D.dvHoraInicio].concat(DV_HORAS);
+  _horas.forEach(h=>{
     const c=document.createElement('div');
     c.className='chip'+(D.dvHoraInicio===h?' on':'');
     c.textContent=h;
-    c.onclick=()=>{ D.dvHoraInicio=h; autoSave(); renderDVInline(wrap); };
+    c.onclick=()=>{ D.dvHoraInicio=h; delete D.dvHoraDoArranque; autoSave(); renderDVInline(wrap); };
     rH.appendChild(c);
   });
   if(D.dvHoraInicio){
@@ -15244,6 +15281,8 @@ function renderDocsInline(wrap){
     if(D.pisosDeDocumento&&D.pisos) lidos.push(['Pisos da fração/moradia',String(D.pisos)+(D.pisos>1?' (R/C + '+(D.pisos-1)+'º)':' (R/C)')]);
     if(D.numeroMatriz) lidos.push(['Matriz',D.numeroMatriz]);
     if(D.numeroFracao) lidos.push(['Fração',D.numeroFracao]);
+    if(D.tipologiaDeDocumento&&D.tipologia) lidos.push(['Tipologia',D.tipologia]);
+    if(D.areaBrutaPrivativa) lidos.push(['Área bruta privativa',D.areaBrutaPrivativa+' m²']);
     let boxLidos=document.getElementById('docs-inline-lidos');
     if(!boxLidos){
       if(!thumbs.parentNode) return;      // o ecrã mudou entretanto
