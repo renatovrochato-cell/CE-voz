@@ -327,7 +327,14 @@ body.com-planta #visDivisoria.a-arrastar::after{color:#04140c}
   </div>
   <div class="sum-scroll" id="sum-scroll"></div>
   <div class="bottom">
-    <button class="btn-next" onclick="goExp()">📥 Exportar</button>
+    <div style="display:flex;gap:8px">
+      <button class="btn-next" style="flex:1" onclick="goExp()">📥 Exportar</button>
+      <!-- Atalho: no fim do levantamento o que se quer é o pacote na nuvem.
+           Fazia-se Exportar → percorrer o menu → Guardar no OneDrive. Aqui é
+           um toque, e o menu continua lá para o resto. -->
+      <button class="btn-next" style="flex:1;background:var(--bg3);color:var(--tx)"
+        onclick="exportarDiretoOneDrive()">☁ Exportar p/ OneDrive</button>
+    </div>
     <div class="btn-row"><button class="btn-sec" onclick="voltarInt()">← Continuar</button><button class="btn-sec" onclick="guardarPerfil()">🏢 Guardar perfil</button></div>
   </div>
 </div>
@@ -564,7 +571,7 @@ const DIVS_BASE=[
 // VERSÃO — fonte única (selo no ecrã inicial + cabeçalho do TXT exportado).
 // Subir aqui a cada alteração ao ficheiro.
 // ═══════════════════════════════════════
-const APP_VERSION='v2026.09.04-FIX249';
+const APP_VERSION='v2026.09.04-FIX251';
 
 /* ══════════════════════════════════════════════════════════════════
    A APP INSTALADA FICAVA PRESA NUMA VERSÃO ANTIGA
@@ -1841,7 +1848,7 @@ function renderVentObstInline(wrap){
     const r=document.createElement('div'); r.style.cssText='font-size:12px;color:var(--tx2);margin-bottom:6px'; r.textContent=rotulo; g.appendChild(r);
     const row=document.createElement('div'); row.style.cssText='display:flex;flex-wrap:wrap;gap:6px';
     opcoes.forEach(o=>{
-      const c=document.createElement('div'); c.className='chip'+(String(D[campo]||'')===String(o)?' sel':''); c.textContent=o+(sufixo&&/^\d/.test(o)?sufixo:'');
+      const c=document.createElement('div'); c.className='chip'+(String(D[campo]||'')===String(o)?' on':''); c.textContent=o+(sufixo&&/^\d/.test(o)?sufixo:'');
       c.onclick=()=>{ D[campo]=String(o); autoSave(); renderVentObstInline(wrap); };
       row.appendChild(c);
     });
@@ -7279,6 +7286,27 @@ function mostrarPainelCustos(){
   const box=document.getElementById('exp-box');
   if(box&&box.parentNode) box.parentNode.insertBefore(cx,box); else scr.appendChild(cx);
 }
+/* EXPORTAR DIRETO PARA O ONEDRIVE, SEM PASSAR PELO MENU.
+   Passa pelo ecrã de exportação — que é onde a versão do levantamento é
+   registada e o painel de custos aparece — mas dispara logo o envio. Se a
+   conta não estiver ligada, manda ligar em vez de rebentar com um 401. */
+async function exportarDiretoOneDrive(){
+  goExp();
+  try{
+    const t=await oneDriveGetToken();
+    if(!t){
+      alert('Ainda não há sessão do OneDrive neste aparelho.\n\n'+
+        'Toca em «Guardar no OneDrive» aqui em baixo para ligar a conta. '+
+        'Da próxima vez o atalho já funciona.');
+      return;
+    }
+  }catch(e){
+    alert('Não consegui ligar ao OneDrive: '+(e.message||e)+
+      '\n\nO pacote pode ser exportado à mão com «Partilhar».');
+    return;
+  }
+  return guardarNoOneDrive();
+}
 function goExp(){
   document.getElementById('exp-box').textContent=buildTxt();
   document.getElementById('copy-ok').style.display='none';
@@ -12289,7 +12317,13 @@ async function buildPacoteZipBlob(show){
   // recurso o nome do projecto.
   const nome=nomePacoteExportacao();
   // pasta raiz com o mesmo nome
-  const raiz=zip.folder(nome);
+  /* SEM PASTA DENTRO DE PASTA.
+     O ZIP chamava-se «X_completo.zip» e trazia lá dentro uma pasta «X». Ao
+     extrair, o telemóvel cria uma pasta com o nome do ficheiro e mete lá a
+     pasta de dentro: ficavam duas, uma dentro da outra, com o mesmo nome.
+     Agora os ficheiros vão na RAIZ do ZIP. Ao extrair fica uma pasta só, com
+     as pastas «documentos» e «fotos» e os ficheiros soltos. */
+  const raiz=zip;
   /* DENTRO DA PASTA, AS PASTAS PRIMEIRO.
      O gestor de ficheiros ordena por nome: «documentos» e «fotos» apareciam
      no meio dos TXT. Um espaço à frente põe-nas em cima, que é onde se procura
@@ -12593,7 +12627,8 @@ async function buildPacoteZipBlob(show){
   const avisoFalhas=(nFalhas||nDocsFalhas)?` — ⚠️ ${nFalhas+nDocsFalhas} ficheiro(s) não puderam ser lidos e foram ignorados`:'';
   show(`A gerar ZIP (${nFotos} foto${nFotos!==1?'s':''}${nPq?' + '+nPq+' reduzida'+(nPq!==1?'s':''):''}${docsList.length?' + '+(docsList.length-nDocsFalhas)+' doc.':''})…${avisoFalhas}`);
   const zipBlob=await zip.generateAsync({type:'blob'});
-  const zipNome=nome+'_completo.zip';
+  // «_completo» não acrescentava nada — o nome da pasta que se extrai é este
+  const zipNome=nome+'.zip';
   return {zipBlob,zipNome,nome,nFotos,nPq,
     docsCount:docsList.length-nDocsFalhas,nFalhas:nFalhas+nDocsFalhas,
     pecasFalhadas:_pacoteFalhas.slice()};
@@ -12807,6 +12842,25 @@ function nomePacoteExportacao(){
   }
   n=n.replace(/[\s,.;:-]+$/,'');
   n=n||'CE';
+  /* LOCALIDADE E CONCELHO NO NOME.
+     «R. 25 de Abril, Bl. 51» não diz onde é. Com dez processos na pasta dos
+     certificados, ruas com o mesmo nome em concelhos diferentes ficam
+     indistinguíveis — e há uma Rua 25 de Abril em quase todos.
+     Acrescenta-se o que ainda não estiver no nome: primeiro a localidade
+     (Carvoeiro, Alvor), depois o concelho. Se a morada já os disser, não se
+     repete. */
+  const _jaLa=x=>{
+    const a=String(x||'').trim().toLowerCase();
+    if(!a) return true;
+    return n.toLowerCase().includes(a);
+  };
+  const _lugar=[];
+  if(!_jaLa(D.localidade)) _lugar.push(String(D.localidade).trim());
+  const _conc=D.concelhoCaderneta||D.concelho;
+  if(!_jaLa(_conc)&&!_lugar.some(x=>x.toLowerCase()===String(_conc||'').trim().toLowerCase()))
+    _lugar.push(String(_conc).trim());
+  if(_lugar.length) n=n+', '+_lugar.join(', ');
+  n=abreviarMorada(n).replace(/[\\/:*?"<>|]/g,' ').replace(/\s+/g,' ').trim();
   // a partir da 2ª versão o nome do ficheiro identifica-a, para não se
   // confundir o que foi levantado no local com o que foi revisto em casa
   const v=versaoLevantamento();
@@ -16392,25 +16446,63 @@ function renderUnidExt(wrap){
       row.appendChild(img);row.appendChild(meta);row.appendChild(del);
       wrap.appendChild(row);
       /* QUE DIVISÕES SERVE ESTA UNIDADE EXTERIOR.
-         O TXT pedia «confirmar que divisões servem cada um» porque a app não
-         sabia. Agora pergunta-se aqui, ao pé da foto, com as divisões que têm
-         AC como chips — toca nas que esta unidade serve. Uma chapa com uma
-         divisão é split; com várias é multi-split. */
-      const divsAC=Object.entries(D.climaDivisoes||{}).filter(([,cd])=>cd&&(cd.tipos||[cd.tipo]).some(t=>/split|bomba de calor/i.test(t||''))).map(([d])=>d);
+         A primeira versão tinha três defeitos: os chips usavam a classe «sel»
+         em vez de «on» e por isso NUNCA se marcavam — tocava-se e não mudava
+         nada; a mesma divisão podia ser dada a duas unidades ao mesmo tempo,
+         o que não existe; e quando nenhuma estava escolhida não se percebia
+         que era preciso escolher. */
+      const divsAC=Object.entries(D.climaDivisoes||{})
+        .filter(([,cd])=>cd&&(cd.tipos||[cd.tipo]).some(t=>/split|bomba de calor/i.test(t||'')))
+        .map(([d])=>d);
       if(divsAC.length){
-        const sv=document.createElement('div');
-        sv.style.cssText='margin:-2px 0 10px 64px;display:flex;flex-wrap:wrap;gap:5px;align-items:center';
-        const rot=document.createElement('span'); rot.style.cssText='font-size:11.5px;color:var(--tx3);margin-right:2px'; rot.textContent='serve:';
-        sv.appendChild(rot);
         f.divs=Array.isArray(f.divs)?f.divs:[];
+        const cx=document.createElement('div');
+        cx.style.cssText='margin:-2px 0 12px 0;padding:9px 11px;background:var(--bg2);'+
+          'border:1px solid '+(f.divs.length?'var(--br)':'var(--ac)')+';border-radius:9px';
+        const rot=document.createElement('div');
+        rot.style.cssText='font-size:12px;margin-bottom:7px;color:'+(f.divs.length?'var(--tx2)':'var(--ac)');
+        rot.textContent=f.divs.length
+          ? 'UE'+(idx+1)+' serve '+f.divs.length+' divisão(ões)'+(f.divs.length>1?' — multi-split':' — split')
+          : '⚠ UE'+(idx+1)+': que divisões serve esta unidade?';
+        cx.appendChild(rot);
+        const row=document.createElement('div');
+        row.style.cssText='display:flex;flex-wrap:wrap;gap:6px';
         divsAC.forEach(d=>{
-          const c=document.createElement('div'); c.className='chip'+(f.divs.includes(d)?' sel':'');
-          c.style.cssText='font-size:12px;padding:5px 9px;min-height:0';
-          c.textContent=d;
-          c.onclick=()=>{ f.divs=f.divs.includes(d)?f.divs.filter(x=>x!==d):f.divs.concat(d); autoSave(); renderUnidExt(wrap); };
-          sv.appendChild(c);
+          // uma divisão só pode ser servida por UMA unidade exterior
+          const donoIdx=(D.unidadesExtFotos||[]).findIndex((o,i)=>i!==idx&&Array.isArray(o.divs)&&o.divs.includes(d));
+          const minha=f.divs.includes(d);
+          const c=document.createElement('div');
+          c.className='chip'+(minha?' on':'');
+          c.style.cssText='font-size:12.5px;padding:7px 11px;min-height:0'+
+            (donoIdx>=0?';opacity:.45':'');
+          c.textContent=(donoIdx>=0?'UE'+(donoIdx+1)+': ':'')+d;
+          c.title=donoIdx>=0?('já atribuída à UE'+(donoIdx+1)+' — toca para passar para esta'):'';
+          c.onclick=()=>{
+            if(minha) f.divs=f.divs.filter(x=>x!==d);
+            else {
+              // passa de dono: tira-a de quem a tinha
+              (D.unidadesExtFotos||[]).forEach(o=>{ if(Array.isArray(o.divs)) o.divs=o.divs.filter(x=>x!==d); });
+              f.divs=f.divs.concat(d);
+            }
+            autoSave(); renderUnidExt(wrap);
+          };
+          row.appendChild(c);
         });
-        wrap.appendChild(sv);
+        cx.appendChild(row);
+        if(divsAC.length>1&&f.divs.length<divsAC.length){
+          const todas=document.createElement('button');
+          todas.type='button';
+          todas.textContent='Serve todas as divisões';
+          todas.style.cssText='margin-top:8px;background:none;border:1px dashed var(--ac);color:var(--ac);'+
+            'border-radius:8px;padding:6px 10px;font-size:12px;cursor:pointer';
+          todas.onclick=()=>{
+            (D.unidadesExtFotos||[]).forEach((o,i)=>{ if(i!==idx&&Array.isArray(o.divs)) o.divs=[]; });
+            f.divs=divsAC.slice();
+            autoSave(); renderUnidExt(wrap);
+          };
+          cx.appendChild(todas);
+        }
+        wrap.appendChild(cx);
       }
     });
 
@@ -16432,7 +16524,7 @@ function renderUnidExt(wrap){
         const row=document.createElement('div'); row.style.cssText='display:flex;flex-wrap:wrap;gap:5px';
         D.ueNaoAcessiveis=Array.isArray(D.ueNaoAcessiveis)?D.ueNaoAcessiveis:[];
         porServir.forEach(d=>{
-          const c=document.createElement('div'); c.className='chip'+(D.ueNaoAcessiveis.includes(d)?' sel':'');
+          const c=document.createElement('div'); c.className='chip'+(D.ueNaoAcessiveis.includes(d)?' on':'');
           c.style.cssText='font-size:12px;padding:5px 9px;min-height:0';
           c.textContent=(D.ueNaoAcessiveis.includes(d)?'🚫 ':'')+d;
           c.onclick=()=>{ D.ueNaoAcessiveis=D.ueNaoAcessiveis.includes(d)?D.ueNaoAcessiveis.filter(x=>x!==d):D.ueNaoAcessiveis.concat(d); autoSave(); renderUnidExt(wrap); };
@@ -18620,6 +18712,12 @@ function retomar(){
     // abrir manualmente o ecrã "Anexar documentos", por isso um projeto retomado
     // parecia não ter documentos nenhuns mesmo estando tudo guardado.
     dbGetAllDocsDoProjeto().then(docs=>{window._docsAnexos=docs;renderDocsThumbs();}).catch(()=>{});
+    /* A planta do painel da direita também volta. Sem isto, quem retomava um
+       processo encontrava o painel vazio e tinha de ir buscar a planta outra
+       vez ao OneDrive — o PDF, a rasterização, tudo de novo. */
+    if(D.plantaChave) visPlantaRestaurar().then(voltou=>{
+      if(voltou&&document.body.classList.contains('com-planta')) visPlantaMostrar();
+    }).catch(()=>{});
     // recolhas antigas (antes desta funcionalidade existir) já podem ter altitude
     // guardada mas nunca recalcularam a zona — força o recálculo agora, ao reabrir
     if(D.gpsCoords&&D.gpsCoords.alt!=null) atualizarZonaClimaticaSeAuto(D.gpsCoords.alt);
@@ -18983,6 +19081,36 @@ function mostrarFabAlcado(mostrar){
    para trás para conferir. */
 /* ══════════ VISUALIZADOR DE PLANTA ══════════ */
 let _vpPaginas=[], _vpPag=0, _vpZoom=1, _vpRot=0, _vpNorte=null, _vpArrasto=null;
+/* A PLANTA TEM DE SOBREVIVER A FECHAR A APP.
+   _vpPaginas vivia só em memória. Se o telemóvel matava o browser a meio do
+   levantamento — que é o que faz sempre com a app em segundo plano — ao voltar
+   ao processo o painel da direita estava vazio e havia que carregar a planta
+   toda outra vez: abrir o OneDrive, procurar a pasta, esperar pela
+   rasterização do PDF. Agora as páginas ficam no IndexedDB, com uma chave por
+   processo, e voltam sozinhas. */
+async function visPlantaGuardar(){
+  try{
+    if(!_vpPaginas.length){ D.plantaChave=null; try{ autoSave(); }catch(e){} return; }
+    const chave='planta:'+(D.nome||'sem_nome').replace(/[^a-zA-Z0-9]/g,'_').toLowerCase();
+    await fotoDbSet(chave,JSON.stringify(_vpPaginas));
+    D.plantaChave=chave;
+    D.plantaNPaginas=_vpPaginas.length;
+    D.plantaNorte=_vpNorte;
+    try{ autoSave(); }catch(e){}
+  }catch(e){ console.warn('planta não guardada:',e.message); }
+}
+async function visPlantaRestaurar(){
+  try{
+    if(_vpPaginas.length||!D.plantaChave) return false;
+    const raw=await fotoDbGet(D.plantaChave);
+    if(!raw) return false;
+    const pgs=JSON.parse(raw);
+    if(!Array.isArray(pgs)||!pgs.length) return false;
+    _vpPaginas=pgs; _vpPag=0;
+    if(D.plantaNorte!=null) _vpNorte=D.plantaNorte;
+    return true;
+  }catch(e){ return false; }
+}
 // deslocamento da imagem dentro do painel, em pixels de ecrã
 let _vpX=0, _vpY=0;
 
@@ -18995,6 +19123,13 @@ function alternarVisPlanta(){
   if(on){
     posicionarDivisoria();
     ligarGestosPlanta();
+    if(!_vpPaginas.length&&D.plantaChave){
+      visPlantaRestaurar().then(voltou=>{
+        if(voltou){ visPlantaMostrar(); }
+        else if(!_vpPaginas.length) visPlantaEscolherOrigem();
+      });
+      return;
+    }
     /* NÃO ABRIR O SELETOR DO SISTEMA SOZINHO.
        Ao abrir o painel da planta, a app disparava logo visPlantaAbrir() — o
        seletor do Android, que mostra o WhatsApp, a galeria e tudo o resto.
@@ -19071,6 +19206,7 @@ async function visPlantaCarregarFicheiro(f){
         '\n\nSe for um PDF, experimenta uma captura de ecrã ou uma fotografia.');
     }
     if(tela) tela.style.opacity='';
+    visPlantaGuardar();      // para não se perder se a app fechar
   }
 }
 
