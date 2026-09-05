@@ -571,7 +571,7 @@ const DIVS_BASE=[
 // VERSÃO — fonte única (selo no ecrã inicial + cabeçalho do TXT exportado).
 // Subir aqui a cada alteração ao ficheiro.
 // ═══════════════════════════════════════
-const APP_VERSION='v2026.09.04-FIX251';
+const APP_VERSION='v2026.09.04-FIX256';
 
 /* ══════════════════════════════════════════════════════════════════
    A APP INSTALADA FICAVA PRESA NUMA VERSÃO ANTIGA
@@ -835,6 +835,47 @@ function buildQs(){
     isPrepOrientInline:true,
     key:'prepOrientacoes'});
 
+  /* A pergunta global «Existem paredes em contacto com espaços não úteis?»
+     saiu daqui. Os espaços não úteis são declarados divisão a divisão, no
+     painel de medidas de cada uma — que é onde se sabe qual parede confina
+     com a marquise e qual com a circulação comum. Perguntar primeiro em
+     geral e depois em pormenor era responder duas vezes ao mesmo. */
+  // ELEMENTOS GERAIS
+  /* ISOLAMENTO — pergunta-se cedo porque muda a descrição de TODAS as
+     envolventes. As de pormenor (tijolos, material) só aparecem depois do sim,
+     e podem ficar por responder: nem sempre se sabe no local, às vezes só a
+     FTH o diz. A revisão no escritório preenche o que faltar. */
+  /* UMA PERGUNTA SÓ: ao dizer Sim, os pormenores abrem por baixo.
+     Cinco perguntas seguidas para o mesmo assunto obrigavam a cinco toques em
+     «seguinte» quando não há isolamento nenhum. */
+  qs.push({id:'isol-yn',ctx:'Isolamento térmico',
+    text:'O fogo tem isolamento térmico?',
+    hint:'Se disseres que sim, abrem-se os pormenores aqui mesmo. Não sabendo, '+
+         'responde Não sei — a revisão no escritório corrige.',
+    isIsolInline:true,
+    key:'temIsolamento'});
+
+  /* CLIMATIZAÇÃO: UMA PERGUNTA ANTES DE TODAS AS OUTRAS.
+     Num imóvel sem ar condicionado nenhum — e há muitos — a app perguntava
+     «a Sala tem sistema de climatização?», «o Quarto 1 tem…», uma vez por
+     divisão, para dizer sempre que não. Numa T3 são sete «Não» seguidos.
+     Aqui pergunta-se uma vez; se a resposta for Não, as perguntas por
+     divisão desaparecem todas. */
+  qs.push({id:'clima-global',ctx:'Climatização',
+    text:'O imóvel tem sistemas de climatização ambiente?',
+    hint:'Ar condicionado, bomba de calor, radiadores, pavimento radiante, '+
+         'lareira ou recuperador. Se não houver nada, as perguntas por divisão são saltadas.',
+    chips:['Sim','Não'],
+    key:'temClimatizacao'});
+
+  /* A CLIMATIZAÇÃO GLOBAL TEM DE VIR ANTES DAS DIVISÕES.
+     Estava depois do marcador que expande as perguntas por divisão: a
+     pergunta «o imóvel tem climatização?» aparecia DEPOIS das perguntas
+     «a Sala tem climatização?», «a Cozinha tem…». A condição que as devia
+     esconder nunca chegava a ser avaliada a tempo — respondia-se a todas e só
+     no fim é que se dizia que não havia nenhuma.
+     O mesmo para o isolamento: muda a descrição de todas as envolventes, por
+     isso responde-se antes de se entrar nas divisões. */
   // MARCADOR: expande paredes+vãos por divisão (logo a seguir às divisões)
   qs.push({id:'__div_completo__',isDivCompletoMarker:true});
 
@@ -865,13 +906,6 @@ function buildQs(){
   // marcador: expande dinamicamente conforme nº pisos
   qs.push({id:'__pe__',isPeMarker:true});
 
-  // ESPAÇOS NÃO ÚTEIS
-  qs.push({id:'enu-yn',ctx:'Espaços Não Úteis',
-    text:'Existem paredes em contacto com espaços não úteis?',
-    hint:'Ex: garagem, desvão, arrumos não aquecidos.',
-    chips:['Sim','Não'],
-    isEnuInline:true,
-    key:'enuYN'});
 
   // Climatização recolhida por divisão (ver expandDivCompleto) — sem perguntas globais
 
@@ -911,20 +945,6 @@ function buildQs(){
     isVentObstInline:true,
     key:'ventObstaculos'});
 
-  // ELEMENTOS GERAIS
-  /* ISOLAMENTO — pergunta-se cedo porque muda a descrição de TODAS as
-     envolventes. As de pormenor (tijolos, material) só aparecem depois do sim,
-     e podem ficar por responder: nem sempre se sabe no local, às vezes só a
-     FTH o diz. A revisão no escritório preenche o que faltar. */
-  /* UMA PERGUNTA SÓ: ao dizer Sim, os pormenores abrem por baixo.
-     Cinco perguntas seguidas para o mesmo assunto obrigavam a cinco toques em
-     «seguinte» quando não há isolamento nenhum. */
-  qs.push({id:'isol-yn',ctx:'Isolamento térmico',
-    text:'O fogo tem isolamento térmico?',
-    hint:'Se disseres que sim, abrem-se os pormenores aqui mesmo. Não sabendo, '+
-         'responde Não sei — a revisão no escritório corrige.',
-    isIsolInline:true,
-    key:'temIsolamento'});
 
   /* COBERTURA — a pergunta aparece sempre, porque um piso intermédio pode ter
      uma parte de cobertura (recuados, terraços de cobertura parcial). É a
@@ -936,7 +956,11 @@ function buildQs(){
          'intermédio costuma não haver cobertura — responde Não tem.',
     chips:['Terraço','Inclinada com desvão','Inclinada sem desvão',
            'Não tem / não aplicável'],
-    key:'coberturaTipoEsc'});
+    key:'coberturaTipoEsc',
+    /* Num piso intermédio entre frações não há cobertura própria: o que está
+       por cima é outra habitação aquecida. Quem tiver um recuado ou um terraço
+       parcial escolhe «2*» na localização do piso e as perguntas voltam. */
+    cond:()=>!pisoEntreFracoes()});
 
   /* PAVIMENTO — o que está por baixo muda a descrição e o U. */
   qs.push({id:'pav-baixo',ctx:'Pavimento',
@@ -945,7 +969,9 @@ function buildQs(){
          'sobre outro fogo — que não é envolvente e não conta.',
     chips:['Terreno','Garagem','Arrecadação','Loja / comércio','Cave',
            'Outro fogo','Não aplicável'],
-    key:'pavPorBaixo'});
+    key:'pavPorBaixo',
+    // idem para o pavimento: por baixo é outra fração aquecida
+    cond:()=>!pisoEntreFracoes()});
 
   /* A cave (ou garagem) ocupa TODA a área do piso de cima, ou só parte?
      Quando ocupa parte, o piso de cima tem DUAS envolventes de baixo: a laje
@@ -958,6 +984,7 @@ function buildQs(){
     chips:['Toda a área','Só parte — o resto assenta no solo','Não sei'],
     key:'pavAbrangencia',
     cond:()=>{
+      if(pisoEntreFracoes()) return false;      // não há pavimento próprio a caracterizar
       const v=String(D.pavPorBaixo||'').toLowerCase();
       if(/garagem|arrecada|loja|com[ée]rcio|cave/.test(v)) return true;
       // sem resposta, pergunta-se quando há cave declarada como ENU
@@ -1177,7 +1204,9 @@ function expandDivCompleto(){
         chips:['Não','Split','Multi-split','Bomba de calor ar-ar','Bomba de calor ar-água','Radiadores elétricos','Pavimento radiante','Lareira/recuperador'],
         isClimaDivInline:true,
         div:div,
-        key:`dc-${div}-clima`
+        key:`dc-${div}-clima`,
+        // se o imóvel não tem climatização nenhuma, não se pergunta por divisão
+        cond:()=>String(D.temClimatizacao||'')!=='Não'
       });
     }
   }
@@ -1565,13 +1594,57 @@ function renderClimaDiv(div){
     // campo outra marca
     const oi=document.createElement('input');oi.className='aqs-inp';oi.type='text';oi.placeholder='Outra marca…';oi.style.marginTop='5px';
     oi.oninput=()=>{const v=oi.value.trim();if(v&&!cd.marcasPorTipo[tipo].includes(v)) cd.marcasPorTipo[tipo].push(v);};
+    /* LAREIRA ABERTA OU RECUPERADOR — ESCOLHE-SE, JÁ NÃO SE FOTOGRAFA.
+       Isto vinha do reconhecimento da foto, que foi retirado. A distinção
+       importa: uma lareira aberta e um recuperador fechado não têm o mesmo
+       rendimento por defeito (Tabela 76), e descrever tudo como recuperador é
+       favorável ao edifício sem corresponder ao que lá está. Quem está à
+       frente da lareira responde em dois toques. */
+    if(/lareira|recuperador/i.test(tipo)){
+      const lg=document.createElement('div');
+      lg.style.cssText='margin-top:8px';
+      const ll=document.createElement('div');
+      ll.style.cssText='font-size:11.5px;color:var(--tx2);margin-bottom:5px';
+      ll.textContent='É aberta ou fechada?';
+      lg.appendChild(ll);
+      const lrow=document.createElement('div');
+      lrow.style.cssText='display:flex;flex-wrap:wrap;gap:6px';
+      D.lareiraTipo=D.lareiraTipo||{};
+      [['lareira aberta','Lareira aberta'],
+       ['lareira com recuperador de calor','Recuperador de calor (fechado)'],
+       ['salamandra a pellets','Salamandra a pellets'],
+       ['salamandra a lenha','Salamandra a lenha']].forEach(([val,rot])=>{
+        const c=document.createElement('div');
+        c.className='chip'+(D.lareiraTipo[div]===val?' on':'');
+        c.style.cssText='font-size:12px;padding:6px 10px;min-height:0';
+        c.textContent=rot;
+        c.onclick=(e)=>{ e.preventDefault();
+          D.lareiraTipo[div]=(D.lareiraTipo[div]===val?'':val);
+          autoSave(); renderClimaDivInline(div,wrap); };
+        lrow.appendChild(c);
+      });
+      lg.appendChild(lrow);
+      mg.appendChild(lg);
+    }
     // botão ler etiqueta para este sistema
     const etqBtnId='etq-status-'+div+'-'+tipo.replace(/\s/g,'_');
     const etqBtn=document.createElement('button');
     etqBtn.textContent='🔍 Ler etiqueta — '+tipo;
     etqBtn.style.cssText='border:1px dashed var(--ac);border-radius:8px;background:none;color:var(--ac);font-size:12px;padding:7px 12px;cursor:pointer;width:100%;margin-top:6px';
     etqBtn.onclick=(e)=>{e.preventDefault();lerEtiquetaEquipamento(div, etqBtnId, tipo);};
-    mg.appendChild(ml);mg.appendChild(mrow);mg.appendChild(oi);mg.appendChild(etqBtn);
+    /* FOTO DA UNIDADE INTERIOR, SEM LEITURA.
+       A etiqueta tem marca, modelo e potências — vale a pena ler. A unidade
+       interior em si não tem nada que se leia: o que interessa é o registo
+       visual de que está ali, onde está e como está instalada, para quem revê
+       o processo no escritório. Mandá-la ao OCR era pagar uma leitura para
+       receber campos vazios. */
+    const fotoBtn=document.createElement('button');
+    fotoBtn.type='button';
+    fotoBtn.textContent='📷 Foto da unidade interior — '+tipo;
+    fotoBtn.style.cssText='border:1px dashed var(--tx2);border-radius:8px;background:none;color:var(--tx2);'+
+      'font-size:12px;padding:7px 10px;margin-top:6px;cursor:pointer;width:100%;text-align:left';
+    fotoBtn.onclick=(e)=>{e.preventDefault();fotografarSemLeitura('unidade interior '+tipo+' — '+div,div);};
+    mg.appendChild(ml);mg.appendChild(mrow);mg.appendChild(oi);mg.appendChild(etqBtn);mg.appendChild(fotoBtn);
     // estado + miniatura — criados SEMPRE aqui (não só ao clicar), para sobreviverem
     // ao redesenho do formulário depois de uma leitura de etiqueta bem-sucedida
     const stEl=document.createElement('div');stEl.id=etqBtnId;stEl.style.cssText='font-size:11px;margin-top:4px;display:none';
@@ -1793,14 +1866,39 @@ function renderEnuInline(){
 // ═══════════════════════════════════════
 // RENDER PISO LOCALIZAÇÃO (apartamento)
 // ═══════════════════════════════════════
+/* DOIS TIPOS DE PISO INTERMÉDIO.
+   Um apartamento entre duas frações não tem cobertura nem pavimento em
+   contacto com o exterior ou com espaço não útil: o que está por cima e por
+   baixo são outras habitações aquecidas, e não entram no cálculo. Perguntar
+   com que é que a cobertura e o pavimento confinam nesse caso é fazer perder
+   tempo e convidar a respostas erradas.
+   Mas há pisos intermédios com uma parte de cobertura (recuados, terraços
+   parciais) ou com pavimento sobre garagem numa zona. Para esses fica a
+   opção «2* — Piso intermédio com cobertura ou pavimento a caracterizar»,
+   que mantém as perguntas todas. */
 const PISO_LOCAL_OPTS=[
   {val:'1',label:'1 — Piso sobre cave / ENU'},
-  {val:'2',label:'2 — Piso intermédio'},
+  {val:'2',label:'2 — Piso intermédio (entre frações)'},
+  {val:'2*',label:'2* — Piso intermédio COM cobertura ou pavimento próprio'},
   {val:'3',label:'3 — Último piso'},
   {val:'4',label:'4 — Piso térreo'}
 ];
+/* Um piso intermédio «puro»: por cima e por baixo há outras frações. */
+function pisoEntreFracoes(){
+  return D.edificioTipo==='Apartamento'&&String(D.pisoLocal||'')==='2';
+}
 function renderPisoLocal(wrap){
   wrap.innerHTML='';
+  /* Quando o andar veio da caderneta, diz-se de onde veio em vez de esconder
+     a escolha: o campo continua a poder ser corrigido — um «2º» num prédio
+     com um recuado é «2*», e isso a caderneta não diz. */
+  if(D.pisoLocalDeDocumento&&D.pisoLocal){
+    const n=document.createElement('div');
+    n.style.cssText='font-size:12px;color:var(--ac);margin-bottom:8px;line-height:1.4';
+    n.textContent='✓ Deduzido da caderneta (Andar/Divisão: '+(D.dvAndar||'—')+
+      ', prédio com '+(D.nPisosEdificio||'?')+' pisos). Corrige se tiver cobertura ou pavimento próprios.';
+    wrap.appendChild(n);
+  }
   const lbl=document.createElement('div');
   lbl.style.cssText='font-size:11px;font-weight:700;color:var(--ac);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px';
   lbl.textContent='Localização do piso';
@@ -1812,6 +1910,7 @@ function renderPisoLocal(wrap){
     c.textContent=label;
     c.onclick=()=>{
       D.pisoLocal=val;
+      delete D.pisoLocalDeDocumento;
       list.querySelectorAll('.piso-loc-chip').forEach(x=>x.classList.remove('on'));
       c.classList.add('on');
       setTimeout(()=>next(),250);
@@ -3571,6 +3670,14 @@ function renderVaosInline(div,n){
     .filter(([,v])=>parseFloat(String(v).replace(',','.'))>0)
     .map(([k])=>k);
   const orientUnica=orientsDaDivisao.length===1?orientsDaDivisao[0]:'';
+
+  /* VÃOS PARA ESPAÇO NÃO ÚTIL, LOGO NO TOPO.
+     Se a cozinha confina com uma marquise, a primeira pergunta a fazer é se
+     há janela entre as duas — é o vão que mais se esquece, porque não se vê
+     da rua e não tem orientação. Fica em cima, antes dos vãos exteriores, e
+     não os substitui: a mesma cozinha pode ter uma janela para a marquise E
+     outra para o exterior. */
+  renderVaosInterioresInline(div,wrap);
   while(arr.length<n){
     const pv=D.perfilVaoTipo||{};
     arr.push({id:`VE${arr.length+1}`,orient:orientUnica,larg:'',alt:'',
@@ -4145,8 +4252,10 @@ function renderVaosInline(div,n){
   notaWrap.appendChild(notaL);notaWrap.appendChild(notaTA);
   wrap.appendChild(notaWrap);
 
-  // vãos interiores para espaço não útil (marquise, garagem, circulação comum…)
-  renderVaosInterioresInline(div,wrap);
+  /* Os vãos interiores mudaram-se para o TOPO do painel dos vãos, ao pé dos
+     exteriores — ver renderVaosInline. Estavam aqui, no fim do painel das
+     MEDIDAS, longe de onde se preenchem os vãos: quem fechava as medidas e
+     passava aos vãos já não os via. */
 }
 
 /* ══════════ VÃOS ENVIDRAÇADOS INTERIORES ══════════
@@ -4218,8 +4327,11 @@ function renderVaosInterioresInline(div,wrap){
 
 function novoVaoInterior(n){
   const pv=D.perfilVaoTipo||{};
+  /* Herda a proteção do perfil como os exteriores: numa marquise fechada as
+     janelas são as antigas de fachada, com a persiana que já tinham. */
   return {id:'VI'+n,larg:'',alt:'',tipo:pv.tipo||'',caixMat:pv.caixMat||'Alumínio',
-    abertura:pv.abertura||'',corteTerm:!!pv.corteTerm,caixAr:D.caixaArGlobal||6,prot:''};
+    abertura:pv.abertura||'',corteTerm:!!pv.corteTerm,caixAr:D.caixaArGlobal||6,
+    prot:pv.prot||'',protInt:pv.protInt||'',caixEstore:!!pv.caixEstore};
 }
 
 function cartaoVaoInterior(div,tipo,vi,idx){
@@ -4278,6 +4390,25 @@ function cartaoVaoInterior(div,tipo,vi,idx){
   chips('Vidro',['Simples','Duplo'],'tipo');
   chips('Caixilharia',['Alumínio','PVC','Madeira'],'caixMat');
   chips('Abertura',['De abrir','De correr'],'abertura');
+  /* PROTEÇÕES TAMBÉM NOS VÃOS INTERIORES.
+     Partia-se do princípio de que uma janela para a marquise não leva
+     persiana. Leva: a janela da cozinha para a marquise fechada é, quase
+     sempre, a mesma janela de fachada que lá estava antes de a marquise
+     existir — com a mesma persiana e a mesma caixa de estore. E há portadas
+     e blackout interiores em quartos que dão para marquises.
+     A proteção baixa o Uwdn (Tabela 13 do ITE50), e ignorá-la é penalizar o
+     edifício num vão que ele tem. */
+  chips('Proteção exterior',PROT_OPTS,'prot');
+  if(/persiana/i.test(vi.prot||'')){
+    const ce=document.createElement('div');
+    ce.style.cssText='display:flex;gap:6px;align-items:center;margin-bottom:6px';
+    const cec=document.createElement('div');
+    cec.className='chip'+(vi.caixEstore?' on':''); cec.style.fontSize='12px';
+    cec.textContent='Tem caixa de estore';
+    cec.onclick=()=>{vi.caixEstore=!vi.caixEstore;renderVaosInline(div,(dd.vaos||[]).length);};
+    ce.appendChild(cec); card.appendChild(ce);
+  }
+  chips('Proteção interior',PROT_INT_OPTS,'protInt');
 
   const ct=document.createElement('div');
   ct.style.cssText='display:flex;gap:6px;align-items:center;margin-bottom:6px';
@@ -4287,9 +4418,10 @@ function cartaoVaoInterior(div,tipo,vi,idx){
   ctc.onclick=()=>{vi.corteTerm=!vi.corteTerm;renderVaosInline(div,(dd.vaos||[]).length);};
   ct.appendChild(ctc); card.appendChild(ct);
 
-  /* Uwdn de um vão INTERIOR: sem proteção exterior — uma janela para a
-     marquise não leva persiana — o Uwdn é o próprio Uw. É esse o valor que
-     entra no ITeCons, afetado depois pelo btr do espaço não útil. */
+  /* Uwdn de um vão INTERIOR: com a proteção que ele tiver. Sem proteção
+     declarada assume-se «Sem proteção exterior», que é o caso desfavorável —
+     nunca se supõe uma persiana que ninguém disse existir. O valor entra no
+     ITeCons afetado depois pelo btr do espaço não útil. */
   const calc=document.createElement('div');
   calc.style.cssText='font-size:11px;color:var(--ac);background:var(--bg3);border-radius:8px;'+
     'padding:6px 9px;font-family:monospace';
@@ -4302,7 +4434,8 @@ function cartaoVaoInterior(div,tipo,vi,idx){
       vi.uw=r.uw;
       vi.uwdn=(r.uwdn!==null&&r.uwdn!==undefined)?r.uwdn:r.uw;
       calc.textContent='Área '+(a>0?a.toFixed(2):'—')+' m² · Uw '+fmtUw(r.uw)+
-        ' → Uwdn '+fmtUw(vi.uwdn)+' W/(m².°C) — vão interior, sem ganhos solares';
+        ' → Uwdn '+fmtUw(vi.uwdn)+' W/(m².°C) — vão interior, sem ganhos solares'+
+        (vi.prot&&!/sem prote/i.test(vi.prot)?' (com '+vi.prot.toLowerCase()+')':'');
     }catch(e){ calc.textContent='Área '+(a>0?a.toFixed(2):'—')+' m²'; }
   }
   atualizar();
@@ -6563,6 +6696,7 @@ function verificarLevantamento(){
   if(!D.tipologia) L('Identificação','Tipologia por definir');
   if(!D.edificioTipo) L('Identificação','Tipo de edifício (apartamento/moradia) por definir');
   if(D.edificioTipo==='Apartamento'&&!D.pisoLocal) L('Identificação','Localização do piso do apartamento em falta');
+  // (a pergunta é saltada quando o andar da caderneta a determinou — ver pisoLocalDeDocumento)
   if(!Object.keys(D.peDireitos||{}).length) L('Identificação','Pé-direito não registado');
 
   // ── divisões: área resolvida ──
@@ -6966,7 +7100,7 @@ function buildSum(){
   const divResumo=D.divisoes.join(', ');
   const nQs=D.divisoes.filter(d=>d.startsWith('Quarto')).length;
   const nCBs=D.divisoes.filter(d=>d.startsWith('Casa de banho')||d==='WC').length;
-  const pisoLocalLabels={'1':'Piso sobre cave/ENU','2':'Piso intermédio','3':'Último piso','4':'Piso térreo','Moradia':'Moradia'};
+  const pisoLocalLabels={'1':'Piso sobre cave/ENU','2':'Piso intermédio (entre frações — sem cobertura nem pavimento próprios)','2*':'Piso intermédio com cobertura ou pavimento próprio','3':'Último piso','4':'Piso térreo','Moradia':'Moradia'};
   const pisoLocalStr=pisoLocalLabels[D.pisoLocal]||D.pisoLocal||'—';
   // orientações presentes (todas as paredes exteriores)
   const orientsPres=[...new Set(Object.values(D.divisoesDados||{}).flatMap(dd=>Object.keys(dd.comprimentos||{})))].filter(Boolean);
@@ -8917,8 +9051,17 @@ function buildTxt(){
   if(D.tipologiaDeDocumento) t+='  (tipologia lida na caderneta predial)\n';
   t+=ln('Tipo edifício',D.edificioTipo);
   if(D.edificioTipo==='Apartamento'){
-    const plMap={'1':'Piso sobre cave/ENU','2':'Piso intermédio','3':'Último piso','4':'Piso térreo'};
+    const plMap={'1':'Piso sobre cave/ENU',
+      '2':'Piso intermédio (entre frações)',
+      '2*':'Piso intermédio com cobertura ou pavimento próprio',
+      '3':'Último piso','4':'Piso térreo'};
     t+=ln('Localização piso',plMap[D.pisoLocal]||D.pisoLocal);
+    if(D.pisoLocalDeDocumento) t+='  (deduzido do «Andar/Divisão» da caderneta: '+(D.dvAndar||'—')+')\n';
+    /* Quem revê tem de saber que a ausência de cobertura e de pavimento é uma
+       decisão do levantamento, não um esquecimento. */
+    if(String(D.pisoLocal||'')==='2')
+      t+='  Por cima e por baixo há outras frações aquecidas: sem cobertura nem '+
+         'pavimento a caracterizar (perguntas saltadas).\n';
   }
   // ── Localização e dados climáticos — campos explícitos (antes só apareciam dentro
   // do parágrafo de texto corrido, difícil de conferir/transferir para o Excel) ──
@@ -9280,6 +9423,10 @@ function buildTxt(){
 
   // ── CLIMATIZAÇÃO ──
   t+=sep('CLIMATIZAÇÃO');
+  if(String(D.temClimatizacao||'')==='Não'){
+    t+='Sem sistemas de climatização ambiente (declarado no levantamento).\n';
+    t+='As perguntas por divisão foram saltadas.\n\n';
+  }
   const climDivs=Object.entries(D.climaDivisoes||{}).filter(([,v])=>v&&(((v.tipos||[]).filter(t=>t&&t!=='Sem sistema')).length||(v.tipo&&v.tipo!==''&&v.tipo!=='Sem sistema')));
   if(climDivs.length){
     t+='\nClimatização por divisão:\n';
@@ -10643,7 +10790,11 @@ function buildTxt(){
         }
         linhasVI.push({div,tipo,id:vi.id||'VI',larg,alt,area:larg*alt,
           vidro:vi.tipo||'—',caix:vi.caixMat||'—',abertura:vi.abertura||'—',
-          corte:vi.corteTerm?'com corte térmico':'sem corte térmico',uwdn});
+          corte:vi.corteTerm?'com corte térmico':'sem corte térmico',uwdn,
+          // as proteções contam para o Uwdn e têm de sair no TXT
+          prot:vi.prot||'Sem proteção exterior',
+          protInt:vi.protInt||'',
+          caixEstore:!!vi.caixEstore});
       });
     });
   });
@@ -10658,12 +10809,20 @@ function buildTxt(){
          `${(v.larg.toFixed(2)+'×'+v.alt.toFixed(2)).padEnd(12)} ${(v.area.toFixed(2)+'m²').padEnd(8)} `+
          `${v.uwdn!==null&&v.uwdn!==undefined?fmtUw(v.uwdn):'—'}\n`;
       t+=`       ${v.vidro} · caixilharia ${v.caix} · ${v.abertura} · ${v.corte}\n`;
+      // proteções: contam para o Uwdn e são o que mais se esquece nestes vãos
+      const _p=[];
+      if(v.prot&&!/sem prote/i.test(v.prot)) _p.push(v.prot+(v.caixEstore?' (com caixa de estore)':''));
+      if(v.protInt&&!/sem prote/i.test(v.protInt)) _p.push(v.protInt+' (interior)');
+      t+=`       Proteções: ${_p.length?_p.join(' · '):'nenhuma declarada'}\n`;
     });
     t+=`${'─'.repeat(95)}\n`;
     t+=`Total de vãos interiores: ${totalVI.toFixed(2)}m²\n\n`;
     t+='COMO ENTRAM NO ITeCons:\n';
     t+='  · Envolvente INTERIOR (não exterior) — folha dos vãos em contacto com espaços não úteis.\n';
-    t+='  · U a usar = Uwdn acima. Sem proteção exterior num vão interior, Uwdn = Uw.\n';
+    t+='  · U a usar = Uwdn acima. Sem proteção declarada, Uwdn = Uw; com persiana ou\n';
+    t+='    portada, o Uwdn já vem afectado (Tabela 13 do ITE50).\n';
+    t+='  · Numa marquise fechada a janela costuma ser a antiga de fachada, com a mesma\n';
+    t+='    persiana — confirmar antes de a dar como sem proteção.\n';
     t+='  · Sem orientação, sem Xj, sem fator solar e sem sombreamento: um vão para espaço\n';
     t+='    não útil não tem ganhos solares directos.\n';
     t+='  · A perda é afectada pelo btr do espaço do outro lado (Tabela 22 do Manual SCE),\n';
@@ -11378,6 +11537,21 @@ function buildTxt(){
   // Registo do que foi alterado durante o levantamento, com data/hora. Serve
   // para reconstituir o processo se o CE for contestado, e para perceber o que
   // mudou entre visitas ao mesmo imóvel.
+  if(Array.isArray(D.docsSemLeitura)&&D.docsSemLeitura.length){
+    t+=sep('DOCUMENTOS ANEXADOS SEM LEITURA AUTOMÁTICA');
+    D.docsSemLeitura.forEach(d=>{
+      t+='  '+(d.etiqueta?'['+d.etiqueta+'] ':'')+d.nome+(d.ts?'  ('+d.ts+')':'')+'\n';
+    });
+    t+='  Vão na pasta «documentos» do pacote. Não foram lidos pelo modelo.\n\n';
+  }
+  if(Array.isArray(D.fotosSemLeitura)&&D.fotosSemLeitura.length){
+    t+=sep('FOTOS DE REGISTO (sem leitura automática)');
+    D.fotosSemLeitura.forEach(f=>{
+      t+='  '+f.legenda+(f.div?'  ('+f.div+')':'')+'\n';
+    });
+    t+='\n';
+  }
+
   if(D.usoIA&&D.usoIA.chamadas){
     const c=custoEstimadoIA(D.usoIA);
     t+=sep('RECONHECIMENTO AUTOMÁTICO — CONSUMO');
@@ -12518,6 +12692,14 @@ async function buildPacoteZipBlob(show){
     });
   }
   if(D.obsAudioKey) listaFotos.push({f:{idbKey:D.obsAudioKey},nomeFicheiro:'observacoes_audio',audio:true});
+  /* As fotos de registo (unidade interior, lareira) vão no pacote como as
+     outras. Sem isto ficavam só no telemóvel: tiradas, guardadas, e perdidas
+     na exportação. */
+  (D.fotosSemLeitura||[]).forEach((f,i)=>{
+    if(!f||!f.idbKey) return;
+    const base=String(f.legenda||('registo_'+(i+1))).replace(/[^a-zA-Z0-9À-ú ]/g,'_').replace(/\s+/g,'_').slice(0,50);
+    listaFotos.push({f,nomeFicheiro:(i+1)+'_'+base+'.jpg',pq:false});
+  });
 
   const faltas=[];
   let nPq=0;
@@ -12562,6 +12744,7 @@ async function buildPacoteZipBlob(show){
   (D.fotosAlcado||[]).forEach(f=>f&&f.idbKey&&chavesNaRecolha.add(f.idbKey));
   (D.fotoEtiquetas||[]).forEach(f=>f&&f.idbKey&&chavesNaRecolha.add(f.idbKey));
   (D.unidadesExtFotos||[]).forEach(f=>f&&f.idbKey&&chavesNaRecolha.add(f.idbKey));
+  (D.fotosSemLeitura||[]).forEach(f=>f&&f.idbKey&&chavesNaRecolha.add(f.idbKey));
   Object.values(D.fotosCampos||{}).forEach(v=>fotosDoCampo(v).forEach(f=>chavesNaRecolha.add(f.idbKey)));
   Object.values(D.divisoesDados||{}).forEach(dd=>(dd.fotos||[]).forEach(f=>f&&f.idbKey&&chavesNaRecolha.add(f.idbKey)));
   if(D.obsAudioKey) chavesNaRecolha.add(D.obsAudioKey);
@@ -13853,7 +14036,54 @@ const COMPRESSAO_PERFIS={
      A foto GUARDADA continua na resolução alta — isto é só a cópia que se
      envia para ser lida. */
   ocr:{maxLado:1568,tamanhoAlvo:700*1024,qualidadeInicial:0.85,qualidadeMin:0.6},
+  /* FOTOS DE REGISTO: 1600 px, uma passagem só.
+     Uma foto de divisão ou de alçado serve para se ver o que lá está, não
+     para se lerem cotas. A 2200 px o toDataURL leva perto de um segundo por
+     passagem — e fazia duas, porque a 2200 px quase sempre passa de 1 MB.
+     A 1600 px a área é 53% e cabe no alvo à primeira: poupa ~1,3 s por foto
+     sem diferença visível numa fotografia de compartimento. */
+  rapido:{maxLado:1600,tamanhoAlvo:900*1024,qualidadeInicial:0.82,qualidadeMin:0.55},
 };
+/* A DESCODIFICAÇÃO FORA DA THREAD DO ECRÃ.
+   new Image() + onload descodifica o JPEG na thread principal e trava a app
+   durante ~450 ms numa foto de 12 MP. createImageBitmap faz o mesmo trabalho
+   fora dela, e ainda aceita o Blob directamente — o que dispensa o
+   FileReader e a conversão para base64, que custam outros ~350 ms.
+   Onde não existir (browsers antigos), o caminho de sempre continua lá. */
+async function comprimirFicheiroRapido(file,perfil){
+  const cfg=COMPRESSAO_PERFIS[perfil]||COMPRESSAO_PERFIS.rapido;
+  if(typeof createImageBitmap!=='function') throw new Error('sem createImageBitmap');
+  const bmp=await createImageBitmap(file);
+  try{
+    const w=bmp.width,h=bmp.height;
+    if(!w||!h) throw new Error('imagem sem dimensões');
+    const esc=Math.min(1,cfg.maxLado/Math.max(w,h));
+    const wF=Math.round(w*esc),hF=Math.round(h*esc);
+    const c=document.createElement('canvas');
+    c.width=wF; c.height=hF;
+    c.getContext('2d').drawImage(bmp,0,0,wF,hF);
+    let q=cfg.qualidadeInicial;
+    let out=c.toDataURL('image/jpeg',q);
+    const tam=du=>Math.round((du.length-du.indexOf(',')-1)*3/4);
+    // uma segunda passagem só se falhar por muito — a 1600 px é raro
+    if(tam(out)>cfg.tamanhoAlvo*1.2){
+      const q2=Math.max(cfg.qualidadeMin,q*(cfg.tamanhoAlvo/tam(out))*0.92);
+      out=c.toDataURL('image/jpeg',q2);
+    }
+    return out;
+  } finally { try{ bmp.close&&bmp.close(); }catch(e){} }
+}
+/* O caminho que os sítios de foto usam: tenta o rápido (Blob → bitmap fora da
+   thread → uma passagem), e cai no de sempre se o browser não souber. */
+async function fotoParaGuardar(file,perfil){
+  try{ return await comprimirFicheiroRapido(file,perfil||'rapido'); }
+  catch(e){
+    const bruta=await new Promise((res,rej)=>{
+      const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=rej; r.readAsDataURL(file);
+    });
+    return await comprimirFotoGenerica(bruta,perfil==='rapido'?'normal':(perfil||'normal'));
+  }
+}
 function comprimirFotoGenerica(dataURL,perfil='normal'){
   const cfg=COMPRESSAO_PERFIS[perfil]||COMPRESSAO_PERFIS.normal;
   return new Promise((resolve)=>{
@@ -14022,7 +14252,7 @@ async function _chamarOCRCompleto(blocosFicheiro){
     '"3291/20080724") e o código de acesso da certidão no cabeçalho (formato XXXX-XXXX-XXXX); a conservatória e a '+
     'freguesia vêm no topo, a composição do prédio a seguir. Ignora titulares, quotas, inscrições, ónus e hipotecas — '+
     'não são precisos. A imagem pode estar cortada em baixo: se um campo não aparecer, devolve null em vez de o inventar. '+
-    'Extrai em JSON (usa null nos campos que não encontrares ou não se apliquem): tipo_documento ("caderneta_predial"|"certidao_permanente"|"outro"), numero_matriz (número de matriz predial urbana, só o número/código, ex: "1234"), numero_fracao (letra ou número de identificação da fração autónoma, ex: "A" ou "12"), morada_completa (morada do prédio/fração tal como consta no documento: rua, número de polícia, andar se aplicável, código postal e localidade, tudo numa só linha), localidade (apenas o nome da localidade/cidade/vila onde se situa o imóvel, ex: "Portimão"), freguesia (nome da freguesia tal como consta no documento), concelho (nome do concelho/município, ex: "Portimão"), ano_inscricao_matriz (ano em que o prédio foi inscrito na matriz predial, só o ano, ex: "1995"), numero_pisos_predio (nº total de pisos do EDIFÍCIO/prédio — este valor serve APENAS para a descrição do prédio; null se não constar), numero_pisos_fracao (nº de pisos da FRAÇÃO/moradia em si, ou seja quantos pisos tem a habitação que está a ser certificada — numa moradia unifamiliar coincide com os pisos do prédio; num apartamento é normalmente 1, ou 2 se for duplex; null se não constar explicitamente), numero_descricao_predial (número de descrição predial — canto superior direito, formato "3291/20080724" → extrai só "3291", nunca a data), numero_certidao_permanente (código de acesso da certidão permanente, formato XXXX-XXXX-XXXX, DIFERENTE do número de descrição predial), codigo_distrito (o número do DISTRITO no cabeçalho da caderneta, ex: em «DISTRITO: 08 - FARO» devolve \"08\"; dois dígitos, com o zero à frente; null se não constar), codigo_concelho (idem para «CONCELHO: 06 - LAGOA» → \"06\"), codigo_freguesia (idem para «FREGUESIA: 08 - UNIÃO DAS FREGUESIAS...» → \"08\"), tipologia (SÓ se o documento a disser de forma explícita — «T2», «tipologia T3», «tipo T1», na descrição da fração ou nas divisões; devolve no formato \"T2\"; null se não constar ou se for preciso deduzir do número de quartos), area_bruta_privativa_m2 (área bruta privativa em m², só o número; null se não constar), area_bruta_dependente_m2 (área bruta dependente em m², só o número; null se não constar). Responde APENAS com JSON válido, sem texto adicional e sem blocos de código.';
+    'Extrai em JSON (usa null nos campos que não encontrares ou não se apliquem): tipo_documento ("caderneta_predial"|"certidao_permanente"|"outro"), numero_matriz (número de matriz predial urbana, só o número/código, ex: "1234"), numero_fracao (letra ou número de identificação da fração autónoma, ex: "A" ou "12"), morada_completa (morada do prédio/fração tal como consta no documento: rua, número de polícia, andar se aplicável, código postal e localidade, tudo numa só linha), localidade (apenas o nome da localidade/cidade/vila onde se situa o imóvel, ex: "Portimão"), freguesia (nome da freguesia tal como consta no documento), concelho (nome do concelho/município, ex: "Portimão"), ano_inscricao_matriz (ano em que o prédio foi inscrito na matriz predial, só o ano, ex: "1995"), numero_pisos_predio (nº total de pisos do EDIFÍCIO/prédio — este valor serve APENAS para a descrição do prédio; null se não constar), numero_pisos_fracao (nº de pisos da FRAÇÃO/moradia em si, ou seja quantos pisos tem a habitação que está a ser certificada — numa moradia unifamiliar coincide com os pisos do prédio; num apartamento é normalmente 1, ou 2 se for duplex; null se não constar explicitamente), numero_descricao_predial (número de descrição predial — canto superior direito, formato "3291/20080724" → extrai só "3291", nunca a data), numero_certidao_permanente (código de acesso da certidão permanente, formato XXXX-XXXX-XXXX, DIFERENTE do número de descrição predial), codigo_distrito (o número do DISTRITO no cabeçalho da caderneta, ex: em «DISTRITO: 08 - FARO» devolve \"08\"; dois dígitos, com o zero à frente; null se não constar), codigo_concelho (idem para «CONCELHO: 06 - LAGOA» → \"06\"), codigo_freguesia (idem para «FREGUESIA: 08 - UNIÃO DAS FREGUESIAS...» → \"08\"), tipologia (SÓ se o documento a disser de forma explícita — «T2», «tipologia T3», «tipo T1», na descrição da fração ou nas divisões; devolve no formato \"T2\"; null se não constar ou se for preciso deduzir do número de quartos), andar_fracao (o campo «Andar/Divisão» da caderneta, tal como lá está — «RC», «RC/1º», «2º Esq», «3º Dto»; null se não constar), area_bruta_privativa_m2 (área bruta privativa em m², só o número; null se não constar), area_bruta_dependente_m2 (área bruta dependente em m², só o número; null se não constar). Responde APENAS com JSON válido, sem texto adicional e sem blocos de código.';
   return comRetry(async(rep)=>{
     const data=await _pedidoIA('documento',{model:'claude-sonnet-4-6',max_tokens:600,
       messages:[{role:'user',content:[...blocosFicheiro,{type:'text',text:PROMPT_OCR}]}]},rep);
@@ -15427,10 +15657,85 @@ function renderDocsInline(wrap){
   };
   wrap.appendChild(btnAbrir);
 
+  /* FICHA TÉCNICA DE HABITAÇÃO — ANEXAR SEM LER.
+     A FTH não tem dados matriciais: tem a composição das paredes, os
+     isolamentos, os equipamentos. É o documento que se consulta no escritório
+     para preencher o que ficou por saber no local, não um documento de onde
+     se extrai a matriz. Passá-la pelo OCR seria pagar uma leitura para
+     devolver campos vazios. Aqui só se anexa — vai no ZIP, na pasta
+     «documentos», e fica lá para quem revê. */
+  const btnFTH=document.createElement('button');
+  btnFTH.type='button';
+  btnFTH.innerHTML='📘 Anexar Ficha Técnica de Habitação (FTH)'+
+    '<br><span style="font-size:11px;opacity:.75">vai para o processo, sem leitura automática</span>';
+  btnFTH.style.cssText='width:100%;margin-top:8px;border:1px dashed var(--tx2);border-radius:10px;'+
+    'background:none;color:var(--tx);font-size:14px;padding:12px;cursor:pointer;text-align:left';
+  btnFTH.onclick=()=>anexarSemLeitura('FTH');
+  wrap.appendChild(btnFTH);
+
   const nota=document.createElement('div');
   nota.style.cssText='font-size:11px;color:var(--tx3);line-height:1.5';
   nota.textContent='Podes voltar a este passo mais tarde, ou anexar também a partir do ecrã de exportação.';
   wrap.appendChild(nota);
+}
+
+/* Anexa um documento ao processo SEM o mandar ler. Serve para a FTH e para
+   qualquer outro documento que se queira no pacote mas de que não há nada a
+   extrair — projeto de arquitetura, telas finais, licença de utilização. */
+/* Uma foto que serve de registo, não de fonte de dados. Vai para as fotos do
+   processo com uma legenda, e não passa pelo modelo — nem custa nada. */
+async function fotografarSemLeitura(legenda,div){
+  const input=document.createElement('input');
+  input.type='file'; input.accept='image/*'; input.capture='environment';
+  input.onchange=async()=>{
+    const f=(input.files||[])[0]; if(!f) return;
+    try{
+      const dataURL=await fotoParaGuardar(f,'rapido');
+      const idbKey='semocr:'+Date.now()+':'+Math.random().toString(36).slice(2,7);
+      await fotoDbSet(idbKey,dataURL);
+      D.fotosSemLeitura=Array.isArray(D.fotosSemLeitura)?D.fotosSemLeitura:[];
+      D.fotosSemLeitura.push({idbKey,legenda:legenda||'foto',div:div||'',
+        ts:new Date().toLocaleString('pt-PT')});
+      try{ autoSave(); }catch(e){}
+      mostrarToastLaser('📷 Foto guardada: '+(legenda||'foto')+' — vai no pacote, sem leitura automática.',4000);
+      try{ renderQ(); }catch(e){}
+    }catch(e){ alert('Não consegui guardar a foto: '+(e.message||e)); }
+  };
+  input.click();
+}
+async function anexarSemLeitura(etiqueta){
+  const input=document.createElement('input');
+  input.type='file';
+  input.accept='image/*,application/pdf';
+  input.multiple=true;
+  input.onchange=async()=>{
+    const files=Array.from(input.files||[]);
+    if(!files.length) return;
+    const st=document.getElementById('docs-status');
+    let n=0,erros=0;
+    for(const f of files){
+      try{
+        const dataURL=await new Promise((res,rej)=>{
+          const r=new FileReader(); r.onload=()=>res(r.result);
+          r.onerror=()=>rej(new Error('não consegui ler o ficheiro')); r.readAsDataURL(f);
+        });
+        await dbAddDoc({nome:(etiqueta?etiqueta+'_':'')+f.name,tipo:f.type||'application/pdf',
+          dataURL,projetoKey:recolhaKey(D.nome),semLeitura:true,etiqueta:etiqueta||''});
+        n++;
+      }catch(e){ erros++; console.error('FTH não anexada:',e); }
+    }
+    try{ window._docsAnexos=await dbGetAllDocsDoProjeto(); renderDocsThumbs(); }catch(e){}
+    if(!D.docsSemLeitura) D.docsSemLeitura=[];
+    files.forEach(f=>D.docsSemLeitura.push({nome:f.name,etiqueta:etiqueta||'',ts:new Date().toLocaleString('pt-PT')}));
+    try{ autoSave(); }catch(e){}
+    if(st){
+      st.style.color=erros?'var(--red)':'var(--ac)';
+      st.textContent=(n?'✅ '+n+' ficheiro(s) anexado(s) como '+(etiqueta||'documento')+
+        ' — sem leitura automática':'')+(erros?'  ⚠️ '+erros+' falhou/falharam':'');
+    }
+    try{ renderQ(); }catch(e){}
+  };
+  input.click();
 }
 
 async function abrirAnexarDocumentos(){
@@ -15727,6 +16032,40 @@ async function processarFicheirosDocumento(files){
                 achados.push('⚠ caderneta diz '+tipDoc+' mas o levantamento tem '+D.tipologia);
               }
             }
+            /* O ANDAR DA CADERNETA DIZ ONDE FICA A FRAÇÃO.
+               «Andar/Divisão: 2º Esq» num prédio de 4 pisos é um piso
+               intermédio; «3º» num prédio de 3 é o último; «RC» é o térreo ou
+               o piso sobre cave. A app perguntava sempre, tendo a resposta no
+               documento.
+               Só se conclui quando NÃO há dúvida: o andar tem de ser um número
+               claro e o nº de pisos do prédio tem de ser conhecido. Um «RC»
+               pode ser térreo ou estar sobre garagem — aí continua a
+               perguntar-se, porque a diferença muda o pavimento.
+               E nunca se escolhe entre «2» e «2*»: se há um recuado ou um
+               terraço parcial, isso não está na caderneta. Fica no «2», que é
+               o caso corrente, e quem tiver cobertura própria corrige. */
+            if(ocr&&ocr.andar_fracao){
+              D.dvAndar=String(ocr.andar_fracao).trim();
+              achados.push('andar '+D.dvAndar);
+              try{
+                const a=D.dvAndar.toUpperCase().replace(/\s+/g,'');
+                const nPisos=parseInt(String(ocr.numero_pisos_predio||D.nPisosEdificio||''),10);
+                // o piso mais alto que a fração ocupa: «RC/1º» → 1
+                const nums=[...a.matchAll(/(\d+)\s*[ºO°]/g)].map(m=>+m[1]);
+                const temRC=/(^|\/)RC|R\/C/.test(a);
+                const alto=nums.length?Math.max(...nums):(temRC?0:null);
+                let pl=null;
+                if(alto!=null&&nPisos>0){
+                  if(alto>0&&alto===nPisos-1) pl='3';        // último piso (RC conta como 0)
+                  else if(alto>0&&alto<nPisos-1) pl='2';     // entre frações
+                  // um RC sozinho não se decide: térreo ou sobre cave muda o pavimento
+                }
+                if(pl&&!D.pisoLocal){
+                  D.pisoLocal=pl; D.pisoLocalDeDocumento=true;
+                  achados.push('piso '+(pl==='3'?'último':'intermédio')+' (da caderneta)');
+                }
+              }catch(e){}
+            }
             if(ocr&&ocr.area_bruta_privativa_m2){ D.areaBrutaPrivativa=String(ocr.area_bruta_privativa_m2); achados.push('ABP '+D.areaBrutaPrivativa+' m²'); }
             if(ocr&&ocr.area_bruta_dependente_m2){ D.areaBrutaDependente=String(ocr.area_bruta_dependente_m2); achados.push('ABD '+D.areaBrutaDependente+' m²'); }
           }catch(e){}
@@ -15799,7 +16138,13 @@ function anexarFotoCampo(campo,wrap){
       autoSave();
       renderFotoCampoThumb(campo,wrap);
       // a foto da lareira vai ser lida, para se saber o que lá está
-      if(/^lareira[-_]/i.test(campo)) analisarFotoLareira(campo,dataURL,wrap);
+      /* A FOTO DA LAREIRA JÁ NÃO É LIDA PELO MODELO.
+         A leitura devolvia «lareira aberta» ou «com recuperador» — uma
+         classificação que quem está à frente da lareira faz melhor e mais
+         depressa do que uma fotografia. Custava uma chamada por lareira para
+         confirmar o óbvio, e enganava-se em recuperadores com porta aberta.
+         A foto continua a ser guardada e a ir no pacote; a classificação
+         responde-se nos chips, que já lá estão. */
     }catch(e){alert('Erro ao guardar foto: '+e.message);}
   };
   input.click();
@@ -15908,82 +16253,9 @@ function renderMultiFotoThumb(campo,wrap,minFotos){
    coisa (Tabela 76).
    A leitura é uma SUGESTÃO — escreve-se ao lado da foto e o utilizador
    confirma. Nunca substitui o que ele escolheu. */
-async function analisarFotoLareira(campo,dataURL,wrap){
-  const div=campo.replace(/^lareira[-_]/i,'');
-  const st=document.createElement('div');
-  st.style.cssText='font-size:12.5px;color:var(--tx2);margin-top:5px';
-  st.textContent='A ler a foto…';
-  wrap.appendChild(st);
-  try{
-    const b64=String(dataURL).split(',')[1];
-    const r=await fetch('https://api.anthropic.com/v1/messages',{
-      method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:400,messages:[{
-        role:'user',content:[
-          {type:'image',source:{type:'base64',media_type:'image/jpeg',data:b64}},
-          {type:'text',text:'Esta é a foto de um equipamento de aquecimento a '+
-           'biomassa numa habitação. Identifica o que está na imagem e responde '+
-           'SÓ com JSON, sem texto à volta nem marcas de código:\n'+
-           '{"equipamento":"lareira aberta"|"lareira com recuperador"|'+
-           '"salamandra a lenha"|"salamandra a pellets"|"recuperador de calor"|'+
-           '"fogão de sala"|"não identificado",'+
-           '"tem_porta_vidro":true|false|null,'+
-           '"marca":"..."|null,"modelo":"..."|null,'+
-           '"confianca":"alta"|"media"|"baixa",'+
-           '"nota":"o que se vê, numa frase curta"}\n'+
-           'Se a imagem não mostrar um equipamento de aquecimento, devolve '+
-           '"não identificado" com confiança baixa.'}
-        ]}]})});
-    const j=await r.json();
-    /* Esta chamada vai directa à API — as outras passam pelo proxy. Conta na
-       mesma, senão o painel de custos mente por defeito. */
-    try{ const us=j.usage||{}; _registarUsoIA({tipo:'lareira',
-      entrada:us.input_tokens||Math.round(b64.length/900),
-      saida:us.output_tokens||100}); }catch(e){}
-    const txt=(j.content||[]).filter(x=>x.type==='text').map(x=>x.text).join('');
-    const d=JSON.parse(txt.replace(/```json|```/g,'').trim());
-    if(!D.lareiraFotoDados) D.lareiraFotoDados={};
-    D.lareiraFotoDados[div]=d;
-    autoSave();
-    if(!d.equipamento||/não identificado/i.test(d.equipamento)){
-      st.textContent='Não consegui identificar o equipamento nesta foto.';
-      return;
-    }
-    st.innerHTML='';
-    const cx=document.createElement('div');
-    cx.style.cssText='background:var(--bg2);border:1px solid var(--br);'+
-      'border-radius:9px;padding:9px 11px;margin-top:6px;font-size:13px';
-    const conf=d.confianca==='alta'?'':' <span style="color:var(--am)">('+
-      'confiança '+(d.confianca||'baixa')+' — confirma)</span>';
-    cx.innerHTML='<b>Parece: '+esc(d.equipamento)+'</b>'+conf+
-      (d.marca?'<br><span style="color:var(--tx2)">marca: '+esc(d.marca)+
-        (d.modelo?' '+esc(d.modelo):'')+'</span>':'')+
-      (d.nota?'<br><span style="color:var(--tx2)">'+esc(d.nota)+'</span>':'');
-    const bt=document.createElement('button');
-    bt.type='button';
-    bt.style.cssText='margin-top:8px;width:100%;padding:8px;background:var(--ac);'+
-      'color:#04140c;border:none;border-radius:8px;font-size:13px;font-weight:700;'+
-      'cursor:pointer';
-    bt.textContent='✓ Usar «'+d.equipamento+'» na descrição';
-    bt.onclick=()=>{
-      D.lareiraTipo=D.lareiraTipo||{};
-      D.lareiraTipo[div]=d.equipamento;
-      if(d.marca){
-        const c=D.climaDivisoes[div]||(D.climaDivisoes[div]={tipos:[],marcasPorTipo:{}});
-        c.marcasPorTipo=c.marcasPorTipo||{};
-        c.marcasPorTipo['Lareira/recuperador']=[[d.marca,d.modelo].filter(Boolean).join(' ')];
-      }
-      autoSave();
-      bt.textContent='✓ Guardado';
-      bt.disabled=true; bt.style.opacity='.6';
-    };
-    cx.appendChild(bt);
-    wrap.appendChild(cx);
-  }catch(e){
-    st.textContent='Não consegui ler a foto ('+(e.message||e)+'). '+
-      'A foto ficou guardada na mesma.';
-  }
-}
+/* A função analisarFotoLareira foi removida: a foto da lareira já não é lida
+   pelo modelo. Devolvia «lareira aberta» ou «com recuperador», que quem está
+   à frente dela classifica melhor — e custava uma chamada por lareira. */
 
 function botaoFotoCampo(campo,label){
   const wrap=document.createElement('div');
@@ -16005,7 +16277,7 @@ function botaoFotoCampo(campo,label){
    As fotos vão para D.fotosAlcado, que é o saco que já vai no pacote. */
 function fotografarExterior(){
   const input=document.createElement('input');
-  input.type='file'; input.accept='image/*'; input.capture='environment'; input.multiple=true;
+  input.type='file'; input.accept='image/*'; input.capture='environment';
   input.onchange=async()=>{
     const files=Array.from(input.files||[]);
     if(!files.length) return;
@@ -16014,10 +16286,7 @@ function fotografarExterior(){
     let ok=0,falhas=0;
     for(const file of files){
       try{
-        const orig=await new Promise((res,rej)=>{
-          const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=rej;
-          r.readAsDataURL(file);});
-        const dataURL=await comprimirFotoGenerica(orig,'normal');
+        const dataURL=await fotoParaGuardar(file,'rapido');
         const idbKey=novaFotoKey('alcado');
         await fotoDbSet(idbKey,dataURL);
         if(!Array.isArray(D.fotosAlcado)) D.fotosAlcado=[];
@@ -16051,24 +16320,44 @@ function actualizarBotaoFotoExt(){
 
 function fotografarDivisao(div,callback){
   const input=document.createElement('input');
-  // capture='environment' de volta: sem isto, em vários Android o seletor mostra só
-  // Galeria/Ficheiros e nem apresenta a câmara como opção óbvia — a tentativa de
-  // "modo contínuo" (tirar várias fotos numa só sessão) sem capture não compensa
-  // partir a abertura fiável da câmara. Para várias fotos, toca no botão outra vez.
-  input.type='file';input.accept='image/*';input.capture='environment';input.multiple=true;
+  /* CAPTURE SIM, MULTIPLE NÃO — SÃO CONTRADITÓRIOS.
+     `capture='environment'` diz «abre a câmara e devolve UMA foto».
+     `multiple` diz «devolve várias». Com os dois ao mesmo tempo, o Android
+     abre a câmara em modo de sessão múltipla: a foto tirada NÃO fica fixa
+     como na câmara normal — fica à espera de mais, e só ao confirmar a
+     sessão é que volta à app. É essa a espera que se sente ao disparar, e
+     não vem da compressão.
+     Fica só o capture: uma foto por toque, com o obturador e a confirmação
+     imediatos da câmara do telemóvel. Para várias fotos, toca outra vez —
+     é mais rápido do que a sessão múltipla. */
+  input.type='file';input.accept='image/*';input.capture='environment';
   input.onchange=async()=>{
     const files=Array.from(input.files||[]);
     if(!files.length)return;
     let falhas=0;
     for(const file of files){
       try{
-        const dataURLOrig=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=rej;r.readAsDataURL(file);});
-        const dataURL=await comprimirFotoGenerica(dataURLOrig,'normal');
+        const dataURL=await fotoParaGuardar(file,'rapido');
         const idbKey=novaFotoKey('div');
-        await fotoDbSet(idbKey,dataURL);
+        /* A MINIATURA APARECE ANTES DE A GRAVAÇÃO ACABAR.
+           Esperava-se pelo IndexedDB e pelo autoSave para só então redesenhar:
+           mais uns 300 ms de ecrã parado no fim de cada foto. A foto já está
+           comprimida e em memória — regista-se logo na lista, mostra-se, e a
+           gravação corre por trás. Se falhar, a linha é tirada e o aviso
+           aparece, que é o que já acontecia. */
         if(!D.divisoesDados[div]) D.divisoesDados[div]={comprimentos:{},vaos:[],fotos:[]};
         if(!D.divisoesDados[div].fotos) D.divisoesDados[div].fotos=[];
-        D.divisoesDados[div].fotos.push({idbKey,ts:new Date().toLocaleString('pt-PT')});
+        const reg={idbKey,ts:new Date().toLocaleString('pt-PT')};
+        D.divisoesDados[div].fotos.push(reg);
+        if(callback) try{ callback(); }catch(e){}
+        fotoDbSet(idbKey,dataURL).then(()=>{ try{ autoSave(); }catch(e){} })
+          .catch(e=>{
+            console.error('Foto de compartimento não gravada:',e.name,e.message);
+            const arr=D.divisoesDados[div].fotos;
+            const i=arr.indexOf(reg); if(i>=0) arr.splice(i,1);
+            if(callback) try{ callback(); }catch(e2){}
+            alert('⚠️ Uma foto não ficou guardada. Tira outra vez.');
+          });
       }catch(e){
         falhas++;
         console.error('Foto de compartimento ignorada (falha ao guardar):',e.name,e.message);
@@ -16984,8 +17273,8 @@ function tirarFotoAlcado(){
   });
 
   const input=document.createElement('input');
-  // capture='environment' de volta — ver nota em fotografarDivisao
-  input.type='file';input.accept='image/*';input.capture='environment';input.multiple=true;
+  // capture sem multiple — ver a nota em fotografarDivisao
+  input.type='file';input.accept='image/*';input.capture='environment';
   input.onchange=async()=>{
     const files=Array.from(input.files||[]);
     if(!files.length){st.textContent='Sem foto.';return;}
@@ -16996,8 +17285,7 @@ function tirarFotoAlcado(){
     for(const file of files){
       st.textContent=`A guardar foto ${guardadas+falhas+1} de ${files.length}…`;
       try{
-        const dataURLOrig=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=rej;r.readAsDataURL(file);});
-        const dataURL=await comprimirFotoGenerica(dataURLOrig,'normal');
+        const dataURL=await fotoParaGuardar(file,'rapido');
         const idbKey=novaFotoKey('alcado');
         await fotoDbSet(idbKey,dataURL);
         if(!D.fotosAlcado) D.fotosAlcado=[];
@@ -17109,7 +17397,7 @@ function tirarFotoAlcadoInline(statusEl,thumbsEl){
   });
 
   const input=document.createElement('input');
-  input.type='file';input.accept='image/*';input.capture='environment';input.multiple=true;
+  input.type='file';input.accept='image/*';input.capture='environment';
   input.onchange=async()=>{
     const files=Array.from(input.files||[]);
     if(!files.length){statusEl.textContent='Sem foto.';return;}
@@ -17120,8 +17408,7 @@ function tirarFotoAlcadoInline(statusEl,thumbsEl){
     for(const file of files){
       statusEl.textContent=`A guardar foto ${guardadas+falhas+1} de ${files.length}…`;
       try{
-        const dataURLOrig=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=rej;r.readAsDataURL(file);});
-        const dataURL=await comprimirFotoGenerica(dataURLOrig,'normal');
+        const dataURL=await fotoParaGuardar(file,'rapido');
         const idbKey=novaFotoKey('alcado');
         await fotoDbSet(idbKey,dataURL);
         if(!D.fotosAlcado) D.fotosAlcado=[];
