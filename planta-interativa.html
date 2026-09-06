@@ -331,7 +331,7 @@ table.bal tr.tot td{border-top:1px solid var(--linha);padding-top:4px}
     <button id="btRel">Relatório TXT</button>
     <button id="btRelHtml">Relatório a cores</button>
     <button id="btPdfEnv" class="primaria">📄 PDF da envolvente</button>
-    <button id="btPng">PNG</button>
+    <button id="btPng" title="Exportar a planta em JPG">JPG</button>
   </div>
 </header>
 
@@ -581,7 +581,7 @@ Ver tudo</button>
   window.addEventListener('online',aviso);
 })();
 "use strict";
-const PLANTA_VERSAO='v1.50.0 (2026-09-03)';
+const PLANTA_VERSAO='v1.52.0 (2026-09-05)';
 /* ══════════════════════════════════════════════════════════════════
    CE Voz · motor de planta interativa
    Fonte de verdade: o levantamento (D). A planta é uma camada de
@@ -3733,9 +3733,22 @@ function aplicarAdjacenteAsParedes(a){
     const p0=vert?par.p1.y:par.p1.x, p1=vert?par.p2.y:par.p2.x;
     const q0=vert?a.y:a.x, q1=vert?a.y+a.h:a.x+a.w;
     const de=Math.max(Math.min(p0,p1),q0), ate=Math.min(Math.max(p0,p1),q1);
-    if(ate-de<0.05) return;
-    const t0=(de-Math.min(p0,p1))/par.comp, t1=(ate-Math.min(p0,p1))/par.comp;
-    if(t0<=0.02&&t1>=0.98){
+    /* UMA SOBRA DE 6 CM NÃO É UMA PAREDE.
+       O mínimo era 5 cm e a tolerância das pontas era RELATIVA (2% do
+       comprimento). Numa parede de 3,90 m, 2% são 8 cm — mas 23 cm já não
+       passavam, e ficava um troço de 23 cm marcado como exterior no meio de
+       uma parede que dá toda para a circulação comum. Foi isso que apareceu
+       na planta: «0,06 m» e «0,23 m» como envolvente própria.
+       As sobras vêm de o vizinho ser arrastado à mão e não encostar ao
+       milímetro. A tolerância passa a ser ABSOLUTA: 25 cm de cada ponta, que
+       é menos do que qualquer parede real e mais do que qualquer desalinho
+       de arrasto. */
+    const TOL_PONTA=0.25;              // metros
+    if(ate-de<TOL_PONTA) return;       // sobreposição residual: não é contacto
+    const pIni=Math.min(p0,p1), pFim=Math.max(p0,p1);
+    const sobraIni=de-pIni, sobraFim=pFim-ate;
+    const t0=(de-pIni)/par.comp, t1=(ate-pIni)/par.comp;
+    if(sobraIni<=TOL_PONTA&&sobraFim<=TOL_PONTA){
       // encosta de ponta a ponta: a parede inteira, sem troços a mais
       L.env=L.env||{};
       if(cf==='ext'){
@@ -3836,6 +3849,24 @@ function trocosDe(blocoId,lado){
    kitchenette. Corre-se ao carregar e diz-se quantas saíram. */
 function limparEnvolventesInternas(){
   let n=0;
+  /* TROÇOS RESIDUAIS DE ARRASTO.
+     Um vizinho arrastado à mão raramente encosta ao milímetro: sobravam
+     pedaços de 6 ou 23 cm marcados como envolvente própria, com rótulo e cor,
+     no meio de uma parede que dá toda para a circulação comum. Não são
+     paredes — são o desalinho do arrasto. Saem, e diz-se quantos.
+     O limite é o mesmo do contacto: 25 cm. */
+  const TOL_RESIDUO=0.25;
+  L.blocos.forEach(b=>paredes(b).forEach(par=>{
+    const k=b.id+'|'+par.lado;
+    const lista=(L.envTrocos||{})[k];
+    if(lista&&lista.length){
+      const limpos=lista.filter(t=>((t.z-t.a)*par.comp)>=TOL_RESIDUO);
+      if(limpos.length!==lista.length){
+        n+=lista.length-limpos.length;
+        if(limpos.length) L.envTrocos[k]=limpos; else delete L.envTrocos[k];
+      }
+    }
+  }));
   L.blocos.forEach(b=>paredes(b).forEach(par=>{
     const k=b.id+'|'+par.lado;
     if(paredeInternaDoFogo(par)){
@@ -5442,7 +5473,7 @@ function porModo(m){
     : m==='zona' ? 'Arrasta por cima da parte que tem outra condição — só pinta dentro das divisões.'
     : m==='colocar' ? 'Clica dentro de cada compartimento, pela ordem que a app for pedindo.'
     : m==='recorte' ? 'Arrasta um rectângulo à volta da casa — o resto da folha é deitado fora.'
-    : m==='cota' ? 'Clica as duas pontas da cota — fica desenhada e sai no PNG e no relatório.'
+    : m==='cota' ? 'Clica as duas pontas da cota — fica desenhada e sai no JPG e no relatório.'
     : m==='medir' ? 'Clica dois pontos para medir. Os pontos agarram aos cantos das divisões.'
     : m==='circ' ? 'Escolhe a divisão e arrasta do centro para o bordo.'
     : m==='poli' ? 'Clica canto a canto. Trava de 15 em 15 graus — Shift solta o ângulo. ◜ Arco faz um troço curvo. Enter fecha.'
@@ -7312,7 +7343,7 @@ function resolverVars(txt){
 /* Exportar a planta: enquadra TUDO (não depende do zoom em que estás), desenha
    num tamanho próprio, e compõe a imagem de fundo directamente na tela — uma
    imagem dentro de outra imagem é bloqueada por alguns navegadores e era isso
-   que fazia sair o PNG errado. */
+   que fazia sair a imagem errada. */
 function planoParaExportar(ppm){
   const PPM=ppm||70, M=1.2;
   const cs=L.blocos.length?L.blocos.map(caixa):[{x0:0,y0:0,x1:8,y1:6}];
@@ -7528,7 +7559,7 @@ async function pdfEnvolvente(){
     '. Na janela de impressão escolhe "Guardar como PDF".';
 }
 function exportarPNG(){
-  /* A legenda fica FORA do PNG: sobreposta ao desenho, tapava a planta — e uma
+  /* A legenda fica FORA da imagem: sobreposta ao desenho, tapava a planta — e uma
      imagem que se anexa ao processo tem de mostrar o desenho inteiro. Quem
      precisa da legenda tem-na no PDF, por baixo. */
   const guardaLeg=legendaForaDoDesenho;
@@ -7549,13 +7580,21 @@ function exportarPNG(){
     const img=new Image();
     img.onload=()=>{
       cx.drawImage(img,0,0);
+      /* JPEG EM VEZ DE PNG.
+         A planta é linha e cor chapada sobre fundo claro — o PNG guarda isso
+         sem perda mas fica com vários MB numa planta grande, e depois é preciso
+         anexá-la ao processo e enviá-la. Em JPEG com qualidade 0,92 a
+         diferença não se vê no papel nem no ecrã e o ficheiro fica quatro a
+         seis vezes menor.
+         O fundo é pintado antes de desenhar (já era), o que é indispensável:
+         o JPEG não tem transparência e sem fundo saía preto. */
       const a=document.createElement('a');
-      a.href=cv.toDataURL('image/png');
-      a.download=nomeFich.replace(/\.json$/i,'')+'_planta.png';
+      a.href=cv.toDataURL('image/jpeg',0.92);
+      a.download=nomeFich.replace(/\.json$/i,'')+'_planta.jpg';
       a.click();
-      document.getElementById('dica').textContent='PNG gerado ('+cv.width+'×'+cv.height+' px).';
+      document.getElementById('dica').textContent='JPG gerado ('+cv.width+'×'+cv.height+' px).';
     };
-    img.onerror=()=>alert('Não consegui gerar o PNG neste navegador. Usa uma captura de ecrã.');
+    img.onerror=()=>alert('Não consegui gerar o JPG neste navegador. Usa uma captura de ecrã.');
     img.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svgTxt);
   };
   const lista=(planoParaExportar._lista||[]).length?planoParaExportar._lista:(pos?[pos]:[]);

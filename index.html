@@ -571,7 +571,7 @@ const DIVS_BASE=[
 // VERSÃO — fonte única (selo no ecrã inicial + cabeçalho do TXT exportado).
 // Subir aqui a cada alteração ao ficheiro.
 // ═══════════════════════════════════════
-const APP_VERSION='v2026.09.04-FIX256';
+const APP_VERSION='v2026.09.05-FIX262';
 
 /* ══════════════════════════════════════════════════════════════════
    A APP INSTALADA FICAVA PRESA NUMA VERSÃO ANTIGA
@@ -1553,7 +1553,7 @@ function grupoDaDivisao(div){
   if(semUE.length){
     // sem unidade exterior: agrupa por tipo em todo o projeto
     const tipo=semUE[0];
-    const divs=Object.entries(D.climaDivisoes||{})
+    const divs=Object.entries(_climaDivisoesVivas())
       .filter(([,c])=>c&&(c.tipos||[c.tipo]).some(t=>String(t).toLowerCase()===tipo.toLowerCase()))
       .map(([d])=>d);
     return {chave:'SEMUE|'+tipo.toLowerCase(),
@@ -4426,7 +4426,7 @@ function cartaoVaoInterior(div,tipo,vi,idx){
   calc.style.cssText='font-size:11px;color:var(--ac);background:var(--bg3);border-radius:8px;'+
     'padding:6px 9px;font-family:monospace';
   function atualizar(){
-    const a=(parseFloat(vi.larg)||0)*(parseFloat(vi.alt)||0);
+    const a=areaVao(vi);
     vi.area=a>0?a.toFixed(2):'';
     try{
       const r=calcUw({...vi,prot:vi.prot||'Sem proteção exterior',
@@ -6696,6 +6696,85 @@ function verificarLevantamento(){
   if(!D.tipologia) L('Identificação','Tipologia por definir');
   if(!D.edificioTipo) L('Identificação','Tipo de edifício (apartamento/moradia) por definir');
   if(D.edificioTipo==='Apartamento'&&!D.pisoLocal) L('Identificação','Localização do piso do apartamento em falta');
+  /* A COBERTURA E O PAVIMENTO PASSAVAM EM SILÊNCIO.
+     Num levantamento real de um último piso, coberturaTipoEsc ficou por
+     responder: a secção COBERTURA não saiu no TXT e o verificador não disse
+     nada. Um elemento da envolvente que falta é uma lacuna, não uma opção. */
+  /* A TIPOLOGIA CONFRONTADA COM O QUE FOI LEVANTADO.
+     Um T1 com 88 m² e nove divisões é possível, mas é mais provável que a
+     tipologia esteja errada ou que falte um quarto na lista. Nenhuma das duas
+     coisas era assinalada. O mesmo ao contrário: um T3 com dois quartos
+     levantados. É aviso, não erro — há T1 grandes e há escritórios que já
+     foram quartos. */
+  try{
+    const tp=String(D.tipologia||'').trim().toUpperCase();
+    const m=tp.match(/^T(\d)$/);
+    if(m){
+      const nT=+m[1];
+      const quartos=(D.divisoes||[]).filter(d=>/^quarto\b/i.test(String(d).trim())).length;
+      if(quartos&&quartos!==nT)
+        A('Divisões','Tipologia '+tp+' mas '+quartos+' quarto(s) levantado(s) — confirma a '+
+          'tipologia ou a lista de compartimentos');
+      const area=(D.divisoes||[]).reduce((s2,d)=>{
+        const a=parseFloat(String(((D.divisoesDados||{})[d]||{}).areaUtil||'').replace(',','.'));
+        return s2+(isFinite(a)?a:0);
+      },0);
+      // referência larga: um T0 até 55, e mais 30 m² por quarto
+      const maxPlausivel=55+nT*30;
+      if(area>maxPlausivel)
+        A('Áreas',tp+' com '+area.toFixed(2).replace('.',',')+' m² de área útil — '+
+          'acima do habitual para esta tipologia, confirma as medidas e a tipologia');
+    }
+  }catch(e){}
+
+  /* UM VÃO MAIOR DO QUE A PAREDE ONDE ESTÁ.
+     Uma janela de 5 m numa fachada de 3 m é um erro de medição — o laser
+     apanhou outra parede, ou trocou-se largura por comprimento. Passava em
+     silêncio e ia para o cálculo: a área de envidraçado ficava maior do que a
+     área opaca dessa orientação, e o Nic sai errado. */
+  try{
+    (D.divisoes||[]).forEach(dv=>{
+      const dd=(D.divisoesDados||{})[dv]||{};
+      const somaOrient={};
+      (dd.vaos||[]).forEach(v=>{
+        const l=parseFloat(String(v.larg||'').replace(',','.'));
+        if(!(l>0)||!v.orient) return;
+        somaOrient[v.orient]=(somaOrient[v.orient]||0)+l;
+      });
+      Object.entries(somaOrient).forEach(([o,largTotal])=>{
+        const comp=parseFloat(String((dd.comprimentos||{})[o]||'').replace(',','.'));
+        if(!(comp>0)) return;
+        if(largTotal>comp+0.02)
+          E('Vãos',dv+' '+o+': os vãos somam '+largTotal.toFixed(2).replace('.',',')+
+            ' m de largura numa parede de '+comp.toFixed(2).replace('.',',')+
+            ' m — confirma as medidas');
+      });
+      // e a altura contra o pé-direito
+      const pd=Math.max(...Object.values(D.peDireitos||{})
+        .map(x=>parseFloat(String(x||'').replace(',','.'))||0),0);
+      (dd.vaos||[]).forEach(v=>{
+        const a=parseFloat(String(v.alt||'').replace(',','.'));
+        if(a>0&&pd>0&&a>pd+0.02)
+          E('Vãos',dv+' '+(v.id||'')+': altura de '+a.toFixed(2).replace('.',',')+
+            ' m num pé-direito de '+pd.toFixed(2).replace('.',',')+' m');
+      });
+    });
+  }catch(e){}
+  try{
+    const _ult=ehUltimoPiso();
+    const _semCobResp=/não tem|nao tem|não aplic|nao aplic/i.test(D.coberturaTipoEsc||'');
+    if(_ult&&!D.coberturaTipoEsc&&!(D.coberturaTipos||[]).length)
+      L('Cobertura','Cobertura por caracterizar — o fogo é o último piso e a cobertura '+
+        'é envolvente exterior (tipo, isolamento e área)');
+    if(_ult&&!_semCobResp&&!D.isolCobEsp&&D.temIsolamento==='Sim')
+      A('Cobertura','Isolamento da cobertura por indicar — há isolamento no imóvel mas '+
+        'não se disse se a cobertura o tem');
+    const _pisoBaixoExposto=D.edificioTipo!=='Apartamento'||
+      ['1','4'].includes(String(D.pisoLocal||''))||String(D.pisoLocal||'')==='2*';
+    if(_pisoBaixoExposto&&!D.pavPorBaixo)
+      L('Pavimento','Pavimento por caracterizar — não se disse o que está por baixo '+
+        '(solo, cave, garagem ou outro fogo)');
+  }catch(e){}
   // (a pergunta é saltada quando o andar da caderneta a determinou — ver pisoLocalDeDocumento)
   if(!Object.keys(D.peDireitos||{}).length) L('Identificação','Pé-direito não registado');
 
@@ -6739,13 +6818,13 @@ function verificarLevantamento(){
 
   // ── CLIMATIZAÇÃO ──
   {
-    const brancos=Object.entries(D.climaDivisoes||{})
+    const brancos=Object.entries(_climaDivisoesVivas())
       .filter(([,cd])=>cd&&(cd.tipos||[]).some(t=>!String(t||'').trim()))
       .map(([d])=>d);
     if(brancos.length)
       E('Climatização','Tipo de equipamento em branco em: '+brancos.join(', ')+
         ' — nem "sem sistema" nem equipamento');
-    const semMarca=Object.entries(D.climaDivisoes||{}).filter(([,cd])=>{
+    const semMarca=Object.entries(_climaDivisoesVivas()).filter(([,cd])=>{
       if(!cd) return false;
       const tipos=(cd.tipos||[]).filter(t=>String(t||'').trim()&&t!=='Sem sistema');
       if(!tipos.length) return false;
@@ -7123,7 +7202,7 @@ function buildSum(){
       `<span class="sum-v">${escHtml(D.zonaClimatica||'—')} <span style="color:var(--tx3);font-size:11px">${zonaTag} ✏️</span></span>`+
       `</div></div></div>`;
   }
-  const climDivEntries=Object.entries(D.climaDivisoes||{}).filter(([,v])=>v.tipo);
+  const climDivEntries=Object.entries(_climaDivisoesVivas()).filter(([,v])=>v.tipo);
   if(climDivEntries.length){
     climDivEntries.forEach(([div,cd])=>{
       h+=sec(`Climatização — ${div}`,[['Sistema(s)',(cd.tipos||[cd.tipo]).filter(Boolean).join(' + ')],['Marca(s)',(cd.marcas||[]).join(', ')]]);
@@ -7217,7 +7296,7 @@ function buildSum(){
       });
       (dd.vaos||[]).forEach(ve=>{
         const o=ve.orient||'—';
-        const a=(parseFloat(ve.larg)||0)*(parseFloat(ve.alt)||0);
+        const a=areaVao(ve);
         vaosOrient[o]=(vaosOrient[o]||0)+a;
       });
     }
@@ -7551,6 +7630,14 @@ function sombToFh(somb, estacao){
 // interiores — ou (b) marca E modelo coincidem. Antes juntava-se tudo num só
 // sistema com a marca do primeiro equipamento, o que inventava um aparelho
 // que não existe na casa.
+/* Uma divisão apagada deixa lixo em climaDivisoes: o sistema dela continuava
+   a sair no TXT, com uma divisão que já não existe no levantamento. */
+function _climaDivisoesVivas(){
+  const vivas=new Set(D.divisoes||[]);
+  const out={};
+  Object.entries(D.climaDivisoes||{}).forEach(([d,v])=>{ if(vivas.has(d)) out[d]=v; });
+  return out;
+}
 function agruparSistemasAC(D,tiposSemUE){
   const SEM=(tiposSemUE||['pavimento radiante','lareira/recuperador','radiadores elétricos'])
     .map(t=>t.toLowerCase());
@@ -7571,7 +7658,7 @@ function agruparSistemasAC(D,tiposSemUE){
     return {};
   };
   const unidades=[];
-  Object.entries(D.climaDivisoes||{}).forEach(([div,cd])=>{
+  Object.entries(_climaDivisoesVivas()).forEach(([div,cd])=>{
     if(!cd) return;
     const mpt=cd.marcasPorTipo||{};
     (cd.tipos||[cd.tipo]).filter(t=>t&&t!=='Sem sistema'&&!SEM.includes(String(t).toLowerCase()))
@@ -7765,6 +7852,18 @@ function _nm(v,casas){
   const n=typeof v==='number'?v:parseFloat(String(v==null?'':v).replace(',','.'));
   if(!isFinite(n)) return '';
   return n.toFixed(casas==null?2:casas).replace('.',',');
+}
+/* ÁREA DE UM VÃO — SEM NEGATIVOS.
+   Cinco sítios multiplicavam largura por altura sem olhar ao sinal. Uma
+   largura negativa — um «-1.5» escrito por engano, ou um campo que ficou com
+   o sinal de um traço — dava área negativa, que ENTRA na soma e reduz a
+   área de envidraçado do fogo. Aparecia no TXT como «-3,00 m²», mas quem lê
+   um total não repara que uma parcela é negativa. */
+function areaVao(v){
+  const l=parseFloat(String((v&&v.larg)??'').replace(',','.'));
+  const a=parseFloat(String((v&&v.alt)??'').replace(',','.'));
+  if(!isFinite(l)||!isFinite(a)||l<=0||a<=0) return 0;
+  return l*a;
 }
 function marcarSeccoesVazias(t){
   const L=String(t||'').split('\n');
@@ -8418,13 +8517,26 @@ function renderIsolInline(wrap){
   grupo('Espessura nas PAREDES (cm)',ISOL_PAREDE_ESP,'isolParedeEsp',['Não tem','Não sei']);
   grupo('Tijolos da parede',ISOL_TIJOLOS,'isolParedeTijolos');
   grupo('Material do isolamento',ISOL_MAT,'isolParedeMat');
-  grupo('Espessura na COBERTURA (cm)',ISOL_COB_ESP,'isolCobEsp',['Não tem','Não sei']);
+  /* NUM PISO INTERMÉDIO NÃO HÁ COBERTURA PARA ISOLAR.
+     A pergunta aparecia sempre. Num apartamento entre frações, o que está por
+     cima é outra habitação aquecida — perguntar pelo isolamento da cobertura
+     é pedir uma resposta sobre uma coisa que não existe, e a resposta («Não
+     sei») ficava gravada e ia para a revisão. */
+  if(ehUltimoPiso())
+    grupo('Espessura na COBERTURA (cm)',ISOL_COB_ESP,'isolCobEsp',['Não tem','Não sei']);
+  else if(D.isolCobEsp){
+    // resposta de um levantamento anterior, antes de o piso estar definido
+    const n=document.createElement('div');
+    n.style.cssText='font-size:11.5px;color:var(--tx3);margin-top:8px';
+    n.textContent='Sem cobertura própria (piso entre frações) — o isolamento da cobertura não se aplica.';
+    wrap.appendChild(n);
+  }
   /* A cobertura leva muitas vezes um isolante diferente do das paredes — lã
      mineral no desvão sobre XPS nas fachadas é o mais corrente. Sem esta
      pergunta a cobertura herdava o material das paredes e saía com o λ errado.
      «Igual às paredes» é o atalho para o caso corrente; «Não sei» é aceite e
      fica assinalado. */
-  if(D.isolCobEsp&&!/^(Não tem|Não sei)$/i.test(String(D.isolCobEsp)))
+  if(ehUltimoPiso()&&D.isolCobEsp&&!/^(Não tem|Não sei)$/i.test(String(D.isolCobEsp)))
     grupo('Material na COBERTURA',ISOL_MAT,'isolCobMat',['Igual às paredes','Não sei']);
 
   const n=document.createElement('div');
@@ -8561,6 +8673,29 @@ function renderDVInline(wrap){
   bt.style.cssText='margin-top:9px;width:100%;padding:10px;background:var(--bg3);'+
     'color:var(--tx);border:1px solid var(--br);border-radius:9px;font-size:13px;'+
     'min-height:42px';
+  /* ANDAR DA FRAÇÃO — CAMPO PRÓPRIO.
+     Vem da caderneta quando ela o diz; quando não vem, escreve-se aqui em vez
+     de sair em branco na declaração. */
+  if(D.edificioTipo==='Apartamento'){
+    const ca=document.createElement('div');
+    ca.style.cssText='margin-top:10px';
+    const la=document.createElement('div');
+    la.style.cssText='font-size:12px;color:'+(_dvAndar()?'var(--tx2)':'var(--red)')+';margin-bottom:5px';
+    la.textContent=_dvAndar()?'Andar da fração':'⚠ Andar da fração — em falta na declaração';
+    ca.appendChild(la);
+    const ia=document.createElement('input');
+    ia.className='inp'; ia.placeholder='Ex.: 3º, 2º Esq, R/C';
+    ia.value=D.dvAndar||_dvAndar()||'';
+    ia.style.cssText='width:100%;box-sizing:border-box';
+    ia.oninput=()=>{ D.dvAndar=ia.value.trim(); };
+    ia.onblur=()=>{ D.dvAndar=ia.value.trim(); autoSave(); renderDVInline(wrap); };
+    ca.appendChild(ia);
+    const na=document.createElement('div');
+    na.style.cssText='font-size:11px;color:var(--tx3);margin-top:4px';
+    na.textContent='É o «Andar/Divisão» da caderneta — não é a localização do piso.';
+    ca.appendChild(na);
+    box.appendChild(ca);
+  }
   bt.textContent='✎ Corrigir requerente ou códigos';
   bt.onclick=()=>{
     let r=prompt('Nome do requerente (da caderneta):',D.dvRequerente||D.nome||'');
@@ -8569,8 +8704,15 @@ function renderDVInline(wrap){
       'Vêm da caderneta. Em branco se ainda não os tens.',
       [D.dvCodDistrito,D.dvCodConcelho,D.dvCodFreguesia].filter(Boolean).join('/'));
     if(r!==null){
-      const pt=r.split(/[\/\-\s]+/).filter(Boolean);
-      D.dvCodDistrito=pt[0]||''; D.dvCodConcelho=pt[1]||''; D.dvCodFreguesia=pt[2]||'';
+      /* Aceita «08/06/07» e também o composto «080607» do rodapé da caderneta,
+         que é o que se copia mais depressa e o que mais engana. */
+      const so=r.replace(/\D/g,'');
+      if(so.length===6&&!/[\/\-\s]/.test(r.trim())){
+        D.dvCodDistrito=so.slice(0,2); D.dvCodConcelho=so.slice(2,4); D.dvCodFreguesia=so.slice(4,6);
+      } else {
+        const pt=r.split(/[\/\-\s]+/).map(x=>x.replace(/\D/g,'')).filter(Boolean);
+        D.dvCodDistrito=pt[0]||''; D.dvCodConcelho=pt[1]||''; D.dvCodFreguesia=pt[2]||'';
+      }
     }
     autoSave(); renderDVInline(wrap);
   };
@@ -8604,14 +8746,25 @@ function _dvDatasSugeridas(){
     depois:f(new Date(Date.now()+2*864e5))};
 }
 /* O andar sai do piso onde a fracção está; numa moradia não se aplica. */
+/* O ANDAR DA DECLARAÇÃO DE VISITA É O ANDAR, NÃO A LOCALIZAÇÃO DO PISO.
+   Isto convertia D.pisoLocal em número de andar — e pisoLocal NÃO é um andar:
+   é uma classificação térmica (1 = sobre cave, 2 = intermédio, 3 = último
+   piso, 4 = térreo). Num apartamento no 3.º andar de um prédio de 4 pisos, o
+   pisoLocal é «3» (último piso) e a conta n-1 dava «2º». A DV saía com o andar
+   errado, e é um campo que vai para a declaração assinada.
+   O andar vem do «Andar/Divisão» da caderneta. Sem ele, fica em branco: o
+   formulário aceita um campo vazio, um andar errado não. */
 function _dvAndar(){
   if(D.dvAndar) return D.dvAndar;
   if(/moradia/i.test(D.edificioTipo||'')) return '—  (moradia)';
-  const pl=String(D.pisoLocal||'').trim();
-  if(!pl) return '';
-  if(/^r\/?c$|^1$/i.test(pl)) return 'R/C';
-  const n=parseInt(pl);
-  return (isFinite(n)&&n>1) ? (n-1)+'º' : pl;
+  // último recurso: a morada às vezes traz o andar («… Bl 51 3 Esq»)
+  const _mor=String(D.moradaCaderneta||'')+' '+String(D.morada||'');
+  // «2º Esq», «3.º Dto», e também «Bl 51 3 Esq» — a caderneta escreve das duas formas
+  let m=_mor.match(/\b(\d{1,2})\s*[ºo°]\s*(esq|dt[ºo°]?|dir|frt|tr[ºs]?)?/i)
+       ||_mor.match(/\b(\d{1,2})\s+(?:esq|dt[ºo°]?|dir|frt|tr[ºs]?)\b/i);
+  if(m) return m[1]+'º';
+  if(/\br\/?c\b/i.test(String(D.moradaCaderneta||'')+' '+String(D.morada||''))) return 'R/C';
+  return '';
 }
 function _dvCodPostal(){
   if(D.dvCodPostal) return D.dvCodPostal;
@@ -8739,6 +8892,16 @@ function dvCodigo(v){
   const d=String(v||'').replace(/\D/g,'');
   return d?d.split('').join(' '):'';
 }
+/* Rede final antes de escrever o extrato: um código de distrito com seis
+   dígitos é o composto do rodapé e parte-se aqui. Vale para levantamentos
+   antigos, gravados antes desta correção. */
+function _dvCodigos(){
+  let d=String(D.dvCodDistrito||'').replace(/\D/g,''),
+      c=String(D.dvCodConcelho||'').replace(/\D/g,''),
+      f=String(D.dvCodFreguesia||'').replace(/\D/g,'');
+  if(d.length===6&&!c&&!f){ f=d.slice(4,6); c=d.slice(2,4); d=d.slice(0,2); }
+  return {d,c,f};
+}
 function buildDV(){
   const nl='\n';
   const mor=dvMorada();
@@ -8765,9 +8928,10 @@ function buildDV(){
   t+=L('Piso/Andar',dvPisoAndar());
   t+=L('De Registo Predial de',
     (concT||'')+(D.numeroDescricaoPredial?' — registo n.º '+D.numeroDescricaoPredial:''));
-  t+=L('Distrito',dvCodigo(D.dvCodDistrito));
-  t+=L('Concelho',dvCodigo(D.dvCodConcelho));
-  t+=L('Freguesia',dvCodigo(D.dvCodFreguesia));
+  const _cod=_dvCodigos();
+  t+=L('Distrito',dvCodigo(_cod.d));
+  t+=L('Concelho',dvCodigo(_cod.c));
+  t+=L('Freguesia',dvCodigo(_cod.f));
   t+=nl;
   t+='Nota para o Claude do Chrome: nos campos Distrito, Concelho e Freguesia '+
      'introduz apenas o código numérico, um dígito por caixa. Não escrever o nome.'+nl;
@@ -8796,8 +8960,13 @@ function faltasDV(){
   if(!D.dvData) f.push('dia da visita');
   if(!D.dvHoraInicio) f.push('hora de início');
   if(!D.numeroMatriz) f.push('nº matricial');
-  if(![D.dvCodDistrito,D.dvCodConcelho,D.dvCodFreguesia].every(Boolean))
+  if(![_dvCodigos().d,_dvCodigos().c,_dvCodigos().f].every(Boolean))
     f.push('códigos de distrito/concelho/freguesia');
+  /* O ANDAR FALTAVA EM SILÊNCIO.
+     Num apartamento, o piso vai para a declaração assinada. A app não o pedia
+     nem o assinalava: saía em branco, ou pior, saía um andar deduzido da
+     localização térmica do piso, que não é a mesma coisa. */
+  if(D.edificioTipo==='Apartamento'&&!_dvAndar()) f.push('andar da fração');
   return f;
 }
 
@@ -8847,15 +9016,31 @@ function podeTocarOSolo(){
   return true;                              // sem informação, não se exclui
 }
 
+/* É O ÚLTIMO PISO?
+   Isto comparava D.pisoLocal com o número de pisos do edifício — e pisoLocal
+   NÃO é um andar: é a classificação térmica do piso (1 sobre cave,
+   2 intermédio, 2* intermédio com cobertura própria, 3 ÚLTIMO PISO, 4 térreo).
+   Num apartamento no último piso de um prédio de 4, pisoLocal é «3» e a conta
+   3 >= 4 dava FALSO. Resultado: a app decidia que não havia cobertura, a
+   secção COBERTURA não saía no TXT e a ponte térmica «Fachada c/ cobertura»
+   não era contabilizada — num fogo que tem terraço por cima.
+   A resposta está no próprio pisoLocal: «3» quer dizer último piso. É essa a
+   pergunta que se faz ao utilizador e é essa que manda. O andar da morada e o
+   nº de pisos ficam como recurso quando o pisoLocal não foi respondido. */
 function ehUltimoPiso(){
   if(/moradia/i.test(D.edificioTipo||'')) return true;
+  const pl=String(D.pisoLocal||'').trim();
+  if(pl==='3') return true;                 // último piso, declarado
+  if(pl==='2') return false;                // intermédio entre frações
+  if(pl==='2*') return true;                // intermédio COM cobertura própria
+  if(pl==='1'||pl==='4') return false;      // sobre cave / térreo
+  // sem localização de piso respondida: tenta pelo andar e pelo nº de pisos
   const mor=String(D.moradaCaderneta||'')+' '+String(D.morada||'');
   if(/\bR\/?C\s*\d*\b|\brés-?do-?ch[aã]o\b|\bcave\b/i.test(mor)) return false;
   const nE=parseInt(D.nPisosEdificio)||0;
   const andar=mor.replace(/\b\d{4}-\d{3}\b/g,'').match(/(?:^|[\s,])(\d{1,2})\.?[ºo°]/);
   if(andar&&nE) return parseInt(andar[1])>=nE-1;
-  const n=parseInt(D.pisoLocal);
-  return !!(n&&nE&&n>=nE);
+  return false;
 }
 
 /* ══════════ BASE TÉRMICA 2025 ══════════
@@ -9427,7 +9612,7 @@ function buildTxt(){
     t+='Sem sistemas de climatização ambiente (declarado no levantamento).\n';
     t+='As perguntas por divisão foram saltadas.\n\n';
   }
-  const climDivs=Object.entries(D.climaDivisoes||{}).filter(([,v])=>v&&(((v.tipos||[]).filter(t=>t&&t!=='Sem sistema')).length||(v.tipo&&v.tipo!==''&&v.tipo!=='Sem sistema')));
+  const climDivs=Object.entries(_climaDivisoesVivas()).filter(([,v])=>v&&(((v.tipos||[]).filter(t=>t&&t!=='Sem sistema')).length||(v.tipo&&v.tipo!==''&&v.tipo!=='Sem sistema')));
   if(climDivs.length){
     t+='\nClimatização por divisão:\n';
     climDivs.forEach(([div,cd])=>{
@@ -9724,7 +9909,7 @@ function buildTxt(){
     const aqsIndicaCaldeira=aqsTipoL.includes('caldeira');
     const pavRadianteInterligado=temPavRadianteGlobal&&aqsIndicaCaldeira;
 
-    const climDivsArr=Object.entries(D.climaDivisoes||{}).filter(([,v])=>v&&(((v.tipos||[]).filter(t=>t&&t!=='Sem sistema')).length||(v.tipo&&v.tipo!==''&&v.tipo!=='Sem sistema')));
+    const climDivsArr=Object.entries(_climaDivisoesVivas()).filter(([,v])=>v&&(((v.tipos||[]).filter(t=>t&&t!=='Sem sistema')).length||(v.tipo&&v.tipo!==''&&v.tipo!=='Sem sistema')));
     const TIPOS_SEM_UE2=['pavimento radiante','lareira/recuperador','radiadores elétricos'];
     const climDivsLareira=climDivsArr.filter(([,cd])=>(cd.tipos||[cd.tipo]).some(t=>(t||'').toLowerCase()==='lareira/recuperador'));
     const climDivsAC2=climDivsArr.filter(([,cd])=>(cd.tipos||[cd.tipo]).some(t=>!TIPOS_SEM_UE2.includes((t||'').toLowerCase())));
@@ -10031,7 +10216,7 @@ function buildTxt(){
     });
     (dd2.vaos||[]).forEach(ve=>{
       const o=ve.orient||'—';
-      const a=(parseFloat(ve.larg)||0)*(parseFloat(ve.alt)||0);
+      const a=areaVao(ve);
       _vOrient[o]=(_vOrient[o]||0)+a;
     });
   }
@@ -10168,16 +10353,12 @@ function buildTxt(){
       /* O tecto dá TODO para o exterior? Só nesse caso a área da cobertura é a
          área útil. Num piso intermédio o tecto é pavimento do vizinho; num fogo
          de vários pisos, só o último tem cobertura. */
+      /* Tinha aqui uma segunda cópia da regra do último piso, com a mesma
+         comparação errada entre pisoLocal e nº de pisos. Usa-se a função —
+         duas cópias da mesma regra divergem sempre. */
       const _coberturaCobreTudo=()=>{
-        const nFrac=parseInt(D.pisos)||1;
-        if(nFrac>1) return false;                  // duplex: cada piso é diferente
-        if(/moradia/i.test(D.edificioTipo||'')) return true;
-        const nE=parseInt(D.nPisosEdificio)||0;
-        const mor=String(D.moradaCaderneta||'')+' '+String(D.morada||'');
-        const andar=mor.replace(/\b\d{4}-\d{3}\b/g,'').match(/(?:^|[\s,])(\d{1,2})\.?[ºo°]/);
-        if(andar&&nE) return parseInt(andar[1])>=nE-1;
-        const n=parseInt(D.pisoLocal);
-        return !!(n&&nE&&n>=nE);
+        if((parseInt(D.pisos)||1)>1) return false;  // duplex: cada piso é diferente
+        return ehUltimoPiso();
       };
       const _areaUtilTotal=(D.divisoes||[]).reduce((s2,dv)=>{
         const a=parseFloat(String(resolverAreaDivisaoGlobal(dv)||'').replace(',','.'));
@@ -10187,6 +10368,16 @@ function buildTxt(){
          intermédio o tecto é o pavimento do vizinho e não há cobertura
          nenhuma a descrever. */
       const _semCob=/não tem|nao tem|não aplic|nao aplic/i.test(D.coberturaTipoEsc||'');
+      /* NUM ÚLTIMO PISO, A SECÇÃO SAI SEMPRE.
+         Sem resposta, a app não escrevia nada — nem a cobertura nem um aviso.
+         Quem revia o TXT de um fogo com terraço não encontrava a palavra
+         «cobertura» em lado nenhum, e nada dizia que faltava. */
+      if(_coberturaCobreTudo()&&!_semCob&&!D.coberturaTipoEsc&&!(D.coberturaTipos||[]).length){
+        t+=sep('COBERTURA');
+        t+='___ (POR CARACTERIZAR — o fogo é o último piso, logo tem cobertura\n';
+        t+='exterior: tipo, isolamento e área. A ponte térmica «Fachada c/ cobertura»\n';
+        t+='já está contabilizada no quadro das PTL.)\n\n';
+      }
       /* UMA MORADIA TEM SEMPRE COBERTURA.
          Sem resposta à pergunta do tipo, a secção não aparecia — e numa moradia
          a cobertura existe por definição, é o edifício inteiro. Assume-se
@@ -10695,7 +10886,7 @@ function buildTxt(){
   let totVaosArea=0;
   vaosAgrupados.forEach(({div,ve,veGrupo,j})=>{
     const r=calcUw(ve);
-    const area=(parseFloat(ve.larg)||0)*(parseFloat(ve.alt)||0);
+    const area=areaVao(ve);
     totVaosArea+=area;
     // com proteção exterior → só Uwdn; sem proteção → só Uw
     const valStr=(r&&r.uwdn!==null)?r.uwdn.toFixed(2)+' (Uwdn)':(r&&r.uw!==null?r.uw.toFixed(2)+' (Uw)':' — ');
@@ -11077,6 +11268,24 @@ function buildTxt(){
        perda — cada fração conta a metade que lhe pertence. */
     const _rB=String(D.pavPorBaixo||'').toLowerCase();
     const _caveSob=!!((D.enuTipos||{})['Cave']);
+    /* NUM APARTAMENTO, A LOCALIZAÇÃO DO PISO JÁ RESPONDEU A ISTO.
+       Quem diz «piso térreo» está a dizer que o pavimento assenta no solo.
+       Quem diz «piso sobre cave/ENU» está a dizer que o pavimento dá para a
+       cave. Quem diz «último piso» está a dizer que tem cobertura por cima.
+       A app não usava a resposta: ia por pavPorBaixo (que nesses casos nem é
+       perguntada) e por podeTocarOSolo(), e saía ao contrário — um piso sobre
+       cave levava «pavimento térreo» e um térreo levava «pavimento intermédio».
+       Num apartamento a resposta manda. Numa moradia não: um piso pode ter uma
+       parte térrea e outra sobre garagem, e o detalhe por piso trata disso. */
+    const _plAp=(D.edificioTipo==='Apartamento')?String(D.pisoLocal||'').trim():'';
+    const _PAV_POR_PISO={'1':'enu','4':'terreo','2':'intermedio','2*':'intermedio','3':'intermedio'};
+    /* Um pisoLocal que não está na tabela — um ficheiro de outra versão, um
+       valor escrito à mão — não pode cair no caminho de adivinhação: dava DUAS
+       ligações de baixo ao mesmo tempo. Sem correspondência, não se marca
+       nada e o verificador pede a resposta. */
+    const _plConhecido=Object.prototype.hasOwnProperty.call(_PAV_POR_PISO,_plAp);
+    const _pavDoPiso=_PAV_POR_PISO[_plAp]||'';
+    const _plApDesconhecido=!!_plAp&&!_plConhecido;
     const _semCobResp=/não tem|nao tem|não aplic|nao aplic/i.test(D.coberturaTipoEsc||'');
     const _ultimo=_semCobResp?false:ehUltimoPiso();
 
@@ -11103,6 +11312,20 @@ function buildTxt(){
       ptlRows.push({tipo:'Fachada c/ pavimento sobre ENU',
         L:compTotalGlobal,psi:PSI.pavTerreo,
         _nota:'espaço não útil por baixo — mesma linha 0,70 da Tabela 34'});
+    } else if(_pavDoPiso==='enu'){
+      ptlRows.push({tipo:'Fachada c/ pavimento sobre ENU (cave)',
+        L:compTotalGlobal,psi:PSI.pavTerreo,
+        _nota:'piso sobre cave/ENU declarado na localização do piso'});
+    } else if(_pavDoPiso==='terreo'){
+      ptlRows.push({tipo:'Fachada c/ pavimento térreo',
+        L:compTotalGlobal,psi:PSI.pavTerreo,
+        _nota:'piso térreo declarado na localização do piso — pavimento sobre o solo'});
+    } else if(_pavDoPiso==='intermedio'){
+      ptlRows.push({tipo:'Fachada c/ pavimento intermédio (chão — metade)',
+        L:compTotalGlobal,psi:PSI.pavIntermed,
+        _nota:'por baixo há outra fração aquecida'});
+    } else if(_plApDesconhecido){
+      // localização de piso não reconhecida: não se inventa uma ligação
     } else if(_caveSob){
       ptlRows.push({tipo:'Fachada c/ pavimento sobre ENU (cave)',
         L:compTotalGlobal,psi:PSI.pavTerreo});
@@ -11476,7 +11699,7 @@ function buildTxt(){
     t+=`${'─'.repeat(95)}\n`;
     vaosPaste.forEach(({div,ve,veGrupo},idx)=>{
       const linha=760+idx;
-      const area=(parseFloat(ve.larg)||0)*(parseFloat(ve.alt)||0);
+      const area=areaVao(ve);
       const permEstore=ve.caixEstore?'Desconhecida':'Não tem';
       t+=`${String(idx+1).padEnd(6)}${div.padEnd(18)}${veGrupo.padEnd(14)}${(ve.orient||'').padEnd(14)}${area.toFixed(2).replace('.',',').padEnd(13)}${'Não'.padEnd(14)}${permEstore}  (linha ${linha})\n`;
     });
@@ -12259,7 +12482,7 @@ function gerarDescricaoSucinta(){
   // "sistema de aquecimento e arrefecimento... composto por X", o que dava frases
   // erradas — "unidades pavimento radiante" (não é uma unidade), lareira debaixo
   // de "aquecimento E arrefecimento" (só aquece), e tudo misturado numa lista só.
-  const climDivs=Object.entries(D.climaDivisoes||{}).filter(([,v])=>v&&(((v.tipos||[]).filter(t=>t&&t!=='Sem sistema')).length||(v.tipo&&v.tipo!==''&&v.tipo!=='Sem sistema')));
+  const climDivs=Object.entries(_climaDivisoesVivas()).filter(([,v])=>v&&(((v.tipos||[]).filter(t=>t&&t!=='Sem sistema')).length||(v.tipo&&v.tipo!==''&&v.tipo!=='Sem sistema')));
   /* Os dois últimos marcadores da descrição sucinta. Como os outros, ficam
      visíveis em vez de disfarçados de texto — este parágrafo copia-se
      directamente para o portal e ninguém repara em aspas angulares. */
@@ -13121,7 +13344,7 @@ function itecons_tsv(){
     ['B ID','C Divisão','D Designação','E Orientação','F Área (m²)','G Face Ext.','H Caixa Estore'],
     760,
     vaos.map((v,i)=>[String(i+1),v.div,v.veGrupo,v.ve.orient||'',
-      num((parseFloat(v.ve.larg)||0)*(parseFloat(v.ve.alt)||0)),'Não',
+      num(areaVao(v.ve)),'Não',
       v.ve.caixEstore?'Desconhecida':'Não tem']));
   // Espaços úteis — área e pé-direito por divisão
   bloco('ESPAÇOS INTERIORES ÚTEIS',
@@ -14252,7 +14475,7 @@ async function _chamarOCRCompleto(blocosFicheiro){
     '"3291/20080724") e o código de acesso da certidão no cabeçalho (formato XXXX-XXXX-XXXX); a conservatória e a '+
     'freguesia vêm no topo, a composição do prédio a seguir. Ignora titulares, quotas, inscrições, ónus e hipotecas — '+
     'não são precisos. A imagem pode estar cortada em baixo: se um campo não aparecer, devolve null em vez de o inventar. '+
-    'Extrai em JSON (usa null nos campos que não encontrares ou não se apliquem): tipo_documento ("caderneta_predial"|"certidao_permanente"|"outro"), numero_matriz (número de matriz predial urbana, só o número/código, ex: "1234"), numero_fracao (letra ou número de identificação da fração autónoma, ex: "A" ou "12"), morada_completa (morada do prédio/fração tal como consta no documento: rua, número de polícia, andar se aplicável, código postal e localidade, tudo numa só linha), localidade (apenas o nome da localidade/cidade/vila onde se situa o imóvel, ex: "Portimão"), freguesia (nome da freguesia tal como consta no documento), concelho (nome do concelho/município, ex: "Portimão"), ano_inscricao_matriz (ano em que o prédio foi inscrito na matriz predial, só o ano, ex: "1995"), numero_pisos_predio (nº total de pisos do EDIFÍCIO/prédio — este valor serve APENAS para a descrição do prédio; null se não constar), numero_pisos_fracao (nº de pisos da FRAÇÃO/moradia em si, ou seja quantos pisos tem a habitação que está a ser certificada — numa moradia unifamiliar coincide com os pisos do prédio; num apartamento é normalmente 1, ou 2 se for duplex; null se não constar explicitamente), numero_descricao_predial (número de descrição predial — canto superior direito, formato "3291/20080724" → extrai só "3291", nunca a data), numero_certidao_permanente (código de acesso da certidão permanente, formato XXXX-XXXX-XXXX, DIFERENTE do número de descrição predial), codigo_distrito (o número do DISTRITO no cabeçalho da caderneta, ex: em «DISTRITO: 08 - FARO» devolve \"08\"; dois dígitos, com o zero à frente; null se não constar), codigo_concelho (idem para «CONCELHO: 06 - LAGOA» → \"06\"), codigo_freguesia (idem para «FREGUESIA: 08 - UNIÃO DAS FREGUESIAS...» → \"08\"), tipologia (SÓ se o documento a disser de forma explícita — «T2», «tipologia T3», «tipo T1», na descrição da fração ou nas divisões; devolve no formato \"T2\"; null se não constar ou se for preciso deduzir do número de quartos), andar_fracao (o campo «Andar/Divisão» da caderneta, tal como lá está — «RC», «RC/1º», «2º Esq», «3º Dto»; null se não constar), area_bruta_privativa_m2 (área bruta privativa em m², só o número; null se não constar), area_bruta_dependente_m2 (área bruta dependente em m², só o número; null se não constar). Responde APENAS com JSON válido, sem texto adicional e sem blocos de código.';
+    'Extrai em JSON (usa null nos campos que não encontrares ou não se apliquem): tipo_documento ("caderneta_predial"|"certidao_permanente"|"outro"), numero_matriz (número de matriz predial urbana, só o número/código, ex: "1234"), numero_fracao (letra ou número de identificação da fração autónoma, ex: "A" ou "12"), morada_completa (morada do prédio/fração tal como consta no documento: rua, número de polícia, andar se aplicável, código postal e localidade, tudo numa só linha), localidade (apenas o nome da localidade/cidade/vila onde se situa o imóvel, ex: "Portimão"), freguesia (nome da freguesia tal como consta no documento), concelho (nome do concelho/município, ex: "Portimão"), ano_inscricao_matriz (ano em que o prédio foi inscrito na matriz predial, só o ano, ex: "1995"), numero_pisos_predio (nº total de pisos do EDIFÍCIO/prédio — este valor serve APENAS para a descrição do prédio; null se não constar), numero_pisos_fracao (nº de pisos da FRAÇÃO/moradia em si, ou seja quantos pisos tem a habitação que está a ser certificada — numa moradia unifamiliar coincide com os pisos do prédio; num apartamento é normalmente 1, ou 2 se for duplex; null se não constar explicitamente), numero_descricao_predial (número de descrição predial — canto superior direito, formato "3291/20080724" → extrai só "3291", nunca a data), numero_certidao_permanente (código de acesso da certidão permanente, formato XXXX-XXXX-XXXX, DIFERENTE do número de descrição predial), codigo_distrito (o número do DISTRITO no cabeçalho da caderneta, ex: em «DISTRITO: 08 - FARO» devolve \"08\"; dois dígitos, com o zero à frente; null se não constar), codigo_concelho (idem para «CONCELHO: 06 - LAGOA» → \"06\"), codigo_freguesia (idem para «FREGUESIA: 08 - UNIÃO DAS FREGUESIAS...» → \"08\"), codigo_composto (o código de SEIS dígitos que aparece no RODAPÉ de todas as páginas da caderneta, antes do nome da freguesia — ex: em «080607 - UNIÃO DAS FREGUESIAS DE ESTÔMBAR E PARCHAL - U - 4559 - H» devolve \"080607\". É o distrito+concelho+freguesia juntos e serve de recurso quando os três do cabeçalho não se leem; null se não constar), tipologia (SÓ se o documento a disser de forma explícita — «T2», «tipologia T3», «tipo T1», na descrição da fração ou nas divisões; devolve no formato \"T2\"; null se não constar ou se for preciso deduzir do número de quartos), andar_fracao (o campo «Andar/Divisão» da caderneta, tal como lá está — «RC», «RC/1º», «2º Esq», «3º Dto»; null se não constar), area_bruta_privativa_m2 (área bruta privativa em m², só o número; null se não constar), area_bruta_dependente_m2 (área bruta dependente em m², só o número; null se não constar). Responde APENAS com JSON válido, sem texto adicional e sem blocos de código.';
   return comRetry(async(rep)=>{
     const data=await _pedidoIA('documento',{model:'claude-sonnet-4-6',max_tokens:600,
       messages:[{role:'user',content:[...blocosFicheiro,{type:'text',text:PROMPT_OCR}]}]},rep);
@@ -16044,6 +16267,41 @@ async function processarFicheirosDocumento(files){
                E nunca se escolhe entre «2» e «2*»: se há um recuado ou um
                terraço parcial, isso não está na caderneta. Fica no «2», que é
                o caso corrente, e quem tiver cobertura própria corrige. */
+            /* O CÓDIGO COMPOSTO DO RODAPÉ NÃO SÃO OS TRÊS CÓDIGOS.
+               No rodapé da caderneta está «080607 - UNIÃO DAS FREGUESIAS…» —
+               distrito, concelho e freguesia colados. O modelo leu isso e
+               meteu «080607» no campo do distrito, deixando concelho e
+               freguesia vazios. A DV saía com «Distrito: 0 8 0 6 0 7» e os
+               outros dois em branco.
+               Um código de distrito tem DOIS dígitos. Se vierem seis, é o
+               composto: parte-se em 08/06/07. */
+            try{
+              const _lim=v=>String(v==null?'':v).replace(/\D/g,'');
+              let cd=_lim(ocr&&ocr.codigo_distrito),
+                  cc=_lim(ocr&&ocr.codigo_concelho),
+                  cf=_lim(ocr&&ocr.codigo_freguesia);
+              if(cd.length===6&&!cc&&!cf){
+                cf=cd.slice(4,6); cc=cd.slice(2,4); cd=cd.slice(0,2);
+                achados.push('códigos separados do composto '+_lim(ocr.codigo_distrito));
+              }
+              /* RECURSO: O CÓDIGO DO RODAPÉ.
+                 Numa caderneta lida em obra, o modelo trouxe a matriz e a
+                 fração mas NÃO os três códigos do cabeçalho — e a Declaração
+                 de Visita ficou por preencher. O rodapé de todas as páginas
+                 traz os seis dígitos juntos («080607 - UNIÃO DAS FREGUESIAS…»),
+                 que é uma linha muito mais fácil de acertar. Pede-se também
+                 esse, e usa-se quando os outros faltam. */
+              const comp=_lim(ocr&&ocr.codigo_composto);
+              if(comp.length===6&&(cd.length!==2||cc.length!==2||cf.length!==2)){
+                if(cd.length!==2) cd=comp.slice(0,2);
+                if(cc.length!==2) cc=comp.slice(2,4);
+                if(cf.length!==2) cf=comp.slice(4,6);
+                achados.push('códigos do rodapé da caderneta ('+comp+')');
+              }
+              if(cd.length===2) D.dvCodDistrito=cd;
+              if(cc.length===2) D.dvCodConcelho=cc;
+              if(cf.length===2) D.dvCodFreguesia=cf;
+            }catch(e){}
             if(ocr&&ocr.andar_fracao){
               D.dvAndar=String(ocr.andar_fracao).trim();
               achados.push('andar '+D.dvAndar);
@@ -16740,7 +16998,7 @@ function renderUnidExt(wrap){
          nada; a mesma divisão podia ser dada a duas unidades ao mesmo tempo,
          o que não existe; e quando nenhuma estava escolhida não se percebia
          que era preciso escolher. */
-      const divsAC=Object.entries(D.climaDivisoes||{})
+      const divsAC=Object.entries(_climaDivisoesVivas())
         .filter(([,cd])=>cd&&(cd.tipos||[cd.tipo]).some(t=>/split|bomba de calor/i.test(t||'')))
         .map(([d])=>d);
       if(divsAC.length){
@@ -16801,7 +17059,7 @@ function renderUnidExt(wrap){
        todas, e o TXT pedia a chapa que não existe. Marca-se aqui quais não se
        alcançam — o TXT diz que essas ficam pela etiqueta interior. */
     {
-      const divsAC=Object.entries(D.climaDivisoes||{}).filter(([,cd])=>cd&&(cd.tipos||[cd.tipo]).some(t=>/split|bomba de calor/i.test(t||''))).map(([d])=>d);
+      const divsAC=Object.entries(_climaDivisoesVivas()).filter(([,cd])=>cd&&(cd.tipos||[cd.tipo]).some(t=>/split|bomba de calor/i.test(t||''))).map(([d])=>d);
       const servidas=new Set((D.unidadesExtFotos||[]).flatMap(f=>Array.isArray(f.divs)?f.divs:[]));
       const porServir=divsAC.filter(d=>!servidas.has(d));
       if(porServir.length){
