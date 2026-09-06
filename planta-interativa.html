@@ -581,7 +581,7 @@ Ver tudo</button>
   window.addEventListener('online',aviso);
 })();
 "use strict";
-const PLANTA_VERSAO='v1.52.0 (2026-09-05)';
+const PLANTA_VERSAO='v1.53.0 (2026-09-06)';
 /* ══════════════════════════════════════════════════════════════════
    CE Voz · motor de planta interativa
    Fonte de verdade: o levantamento (D). A planta é uma camada de
@@ -759,10 +759,33 @@ function separarPorPiso(folga){
   });
   return feitos;
 }
+/* A rotação inicial. Antes vinha da PRIMEIRA orientação confirmada — no
+   levantamento de Benaciate era "Norte", mas as paredes medidas eram SO, NE e
+   NO. Com rot=0 os blocos ficavam com lados N/E/S/O, nenhuma parede se chamava
+   "SO", e os três vãos (todos a SO) caíam ao chão sem uma palavra.
+   Agora a rotação escolhida é a que põe o maior comprimento de parede medida
+   em lados do bloco com o nome certo: rot em {0,45,…,315}. */
+function rotPelasParedes(D){
+  const soma={};
+  (D.divisoes||[]).forEach(n=>{
+    const c=(D.divisoesDados&&D.divisoesDados[n]||{}).comprimentos||{};
+    Object.entries(c).forEach(([o,v])=>{ if(BEAR[o]!=null) soma[o]=(soma[o]||0)+(parseM(v)||0); });
+  });
+  const ors=Object.keys(soma).filter(o=>soma[o]>0);
+  if(!ors.length) return null;
+  let melhor=null,melhorL=-1;
+  for(let rot=0;rot<360;rot+=45){
+    const lados=[0,90,180,270].map(a=>nomeOrient(rot+a));
+    const L=ors.reduce((s,o)=>s+(lados.includes(nomeOrient(BEAR[o]))?soma[o]:0),0);
+    if(L>melhorL){melhorL=L;melhor=rot;}
+  }
+  return melhor;
+}
 function autoLayout(){
   const D=proj.D;
   const frente=(D.orientacoesConfirmadas||[]).find(o=>BEAR[o]!=null) || 'Norte';
-  const rot=BEAR[frente];
+  const rotMedido=rotPelasParedes(D);
+  const rot=(rotMedido!=null)?rotMedido:BEAR[frente];
   const rel=o=>(((BEAR[o]-rot)%360)+360)%360;   // 0° = topo do desenho
 
   const fichas=divisoes().map(nome=>{
@@ -3264,6 +3287,11 @@ function recolocarVaos(div){
        ainda não está bem colocada. */
     const larg=parseM(ve.larg)||0.6;
     const cands=[];
+    // 1ª passagem: a orientação exacta. 2ª: até 45° de desvio, quando a
+    // planta não tem nenhuma parede com aquele nome (ex.: vão a SO numa
+    // planta desenhada a N/E/S/O). Antes, sem parede exacta, o vão
+    // desaparecia sem aviso — foi o que aconteceu em Benaciate.
+    let desvio=false;
     meus.forEach(b=>paredes(b).forEach(par=>{
       if(par.orient!==ve.orient) return;
       const vl=vaosLivres(par);
@@ -3275,7 +3303,21 @@ function recolocarVaos(div){
         },0);
       cands.push({par,livre:Math.max(0,vl.exterior-jaOcupado),bruto:vl.exterior});
     }));
-    if(!cands.length) return;
+    if(!cands.length&&BEAR[ve.orient]!=null){
+      desvio=true;
+      meus.forEach(b=>paredes(b).forEach(par=>{
+        let d=Math.abs(((par.bear-BEAR[ve.orient])%360+360)%360); if(d>180) d=360-d;
+        if(d>46) return;
+        const vl=vaosLivres(par);
+        cands.push({par,livre:Math.max(0,vl.exterior),bruto:vl.exterior});
+      }));
+    }
+    if(!cands.length){
+      _vaosSemParede.push(div+' vão '+(i+1)+' ('+ve.orient+', '+fmt(larg)+' m) — SEM PAREDE a menos de 45°; roda a planta');
+      return;
+    }
+    if(desvio) _vaosSemParede.push(div+' vão '+(i+1)+' ('+ve.orient+') colocado na parede '+
+      cands.sort((a,b)=>b.livre-a.livre)[0].par.orient+' — a planta não tem parede a '+ve.orient+'; confirma a rotação');
     cands.sort((a,b)=>b.livre-a.livre);
     let alvo=(cands.find(c=>c.livre>=larg*0.9)||cands.find(c=>c.livre>0.15)||cands[0]).par;
     const melhorLivre=cands[0].livre;
