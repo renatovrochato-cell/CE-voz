@@ -312,7 +312,7 @@ body.com-planta #visDivisoria.a-arrastar::after{color:#04140c}
     <button class="btn-next" id="btn-next" onclick="next()">Seguinte →</button>
     <div class="btn-row">
       <button class="btn-sec" onclick="prev()">← Voltar</button>
-      <button class="btn-sec" onclick="skip()">Saltar</button>
+      <button class="btn-sec" onclick="abrirPerguntasSaltadas()">Perguntas</button>
       <button class="btn-sec" onclick="clearAns()">↺ Limpar</button>
       <button class="btn-sec" onclick="guardarAgora()" style="color:var(--ac);border-color:var(--ac)">💾</button>
     </div>
@@ -328,12 +328,12 @@ body.com-planta #visDivisoria.a-arrastar::after{color:#04140c}
   <div class="sum-scroll" id="sum-scroll"></div>
   <div class="bottom">
     <div style="display:flex;gap:8px">
-      <button class="btn-next" style="flex:1" onclick="goExp()">📥 Exportar</button>
+      <button class="btn-next" style="flex:1" onclick="abrirSegundaOpiniao(goExp)">📥 Exportar</button>
       <!-- Atalho: no fim do levantamento o que se quer é o pacote na nuvem.
            Fazia-se Exportar → percorrer o menu → Guardar no OneDrive. Aqui é
            um toque, e o menu continua lá para o resto. -->
       <button class="btn-next" style="flex:1;background:var(--bg3);color:var(--tx)"
-        onclick="exportarDiretoOneDrive()">☁ Exportar p/ OneDrive</button>
+        onclick="abrirSegundaOpiniao(exportarDiretoOneDrive)">☁ Exportar p/ OneDrive</button>
     </div>
     <div class="btn-row"><button class="btn-sec" onclick="voltarInt()">← Continuar</button><button class="btn-sec" onclick="guardarPerfil()">🏢 Guardar perfil</button></div>
   </div>
@@ -571,7 +571,7 @@ const DIVS_BASE=[
 // VERSÃO — fonte única (selo no ecrã inicial + cabeçalho do TXT exportado).
 // Subir aqui a cada alteração ao ficheiro.
 // ═══════════════════════════════════════
-const APP_VERSION='v2026.09.05-FIX263';
+const APP_VERSION='v2026.09.06-FIX268';
 
 /* ══════════════════════════════════════════════════════════════════
    A APP INSTALADA FICAVA PRESA NUMA VERSÃO ANTIGA
@@ -740,7 +740,7 @@ function buildQs(){
      é o mesmo tratamento que a localidade e os pisos já têm. Fica no bloco
      «lido dos documentos» e corrige-se na revisão se estiver mal. */
   qs.push({id:'tipologia',ctx:'Projeto',text:'Qual a tipologia da habitação?',
-    chips:['T0','T1','T2','T3','T4','T5','T6','Serviços','Moradia unifamiliar'],key:'tipologia',
+    chips:['T0','T1','T2','T3','T4','T5','T6','T7','T8','Moradia unifamiliar'],key:'tipologia',
     cond:()=>!(D.tipologiaDeDocumento&&D.tipologia)});
   qs.push({id:'edificio-tipo',ctx:'Projeto',
     text:'É apartamento ou moradia?',
@@ -871,7 +871,8 @@ function buildQs(){
     hint:'Se disseres que sim, abrem-se os pormenores aqui mesmo. Não sabendo, '+
          'responde Não sei — a revisão no escritório corrige.',
     isIsolInline:true,
-    key:'temIsolamento'});
+    key:'temIsolamento',
+    cond:()=>!apartamentoAntesFTH()});
 
   /* CLIMATIZAÇÃO: UMA PERGUNTA ANTES DE TODAS AS OUTRAS.
      Num imóvel sem ar condicionado nenhum — e há muitos — a app perguntava
@@ -1047,7 +1048,8 @@ function buildQs(){
     hint:'Painéis de água quente (AQS). Diferentes dos fotovoltaicos para electricidade.',
     chips:['Sim','Não'],
     isSolarInline:true,
-    key:'solar'});
+    key:'solar',
+    cond:()=>!apartamentoAntesFTH()});
   qs.push({id:'fv-global',ctx:'Energia renovável — Fotovoltaico',
     text:'Existem painéis fotovoltaicos?',
     hint:'Painéis para produção de electricidade.',
@@ -1907,6 +1909,21 @@ const PISO_LOCAL_OPTS=[
   {val:'4',label:'4 — Piso térreo'}
 ];
 /* Um piso intermédio «puro»: por cima e por baixo há outras frações. */
+/* APARTAMENTO ANTERIOR A 2004.
+   A Ficha Técnica de Habitação é de 2004 (DL 68/2004). Antes disso não há
+   documento que descreva a composição das paredes nem os equipamentos, e num
+   apartamento não se abre a parede para ver. Um prédio dos anos 80 ou 90 não
+   tem isolamento na envolvente nem painel solar — o solar térmico só passou a
+   ser obrigatório com o RCCTE de 2006.
+   Perguntar é convidar a responder «não sei» ou, pior, a supor que há
+   isolamento e usar um U favorável que não se pode justificar. As duas
+   perguntas desaparecem e o TXT regista porquê.
+   Numa MORADIA não se aplica: vê-se o desvão, a caixa de ar, o depósito. */
+function apartamentoAntesFTH(){
+  if(D.edificioTipo!=='Apartamento') return false;
+  const ano=parseInt(String(D.anoConstrucao||'').replace(/\D/g,''));
+  return !!(ano&&ano<2004);
+}
 function pisoEntreFracoes(){
   return D.edificioTipo==='Apartamento'&&String(D.pisoLocal||'')==='2';
 }
@@ -2588,8 +2605,15 @@ function renderAqsInline(tipo){
   //   Em 2026, idade 1-20 anos ⇒ instalação sempre depois de 1995; só >20 anos é ambíguo — daí as duas opções.
   // Nota 2 da tabela: manutenção documentada no último ano anula o F_age (editar manualmente se aplicável).
   if(isTermo||isBC||isEsq){
-    const FAGE_BRACKETS={'menos_1':1.00,'1_a_10':0.95,'10_a_20':0.90,'mais_20':0.85,
-      '1_a_20':0.95,'mais_20_pos95':0.95,'mais_20_pre95':0.80};
+    // escalões da Tabela 76 — derivados da tabela única, não copiados
+    const FAGE_BRACKETS={
+      'menos_1':1.00,
+      '1_a_10':fageT76('termoacumulador',new Date().getFullYear()-5).fage,
+      '10_a_20':fageT76('termoacumulador',new Date().getFullYear()-15).fage,
+      'mais_20':fageT76('termoacumulador',new Date().getFullYear()-25).fage,
+      '1_a_20':fageT76('esquentador',new Date().getFullYear()-5).fage,
+      'mais_20_pos95':fageT76('esquentador',1996).fage,
+      'mais_20_pre95':fageT76('esquentador',1995).fage};
     const idadeOpts=isEsq
       ?[['menos_1','< 1 ano'],['1_a_20','1 a 20 anos'],['mais_20_pos95','> 20 anos (depois de 1995)'],['mais_20_pre95','> 20 anos (até 1995)']]
       :[['menos_1','< 1 ano'],['1_a_10','1 a 10 anos'],['10_a_20','10 a 20 anos'],['mais_20','> 20 anos']];
@@ -3397,6 +3421,162 @@ function renderCompInputs(q){
     wrap.appendChild(hint);
   }
 
+  /* A ÁREA VEM ANTES DAS ENVOLVENTES INTERIORES.
+     A ordem era: comprimentos → envolventes interiores → área. Mas a área é
+     o que se mede a seguir aos troços, com o mesmo laser e sem mudar de
+     sítio; as envolventes interiores são outra coisa — olhar para as paredes
+     e dizer com que confinam — e fazem-se no fim. Estar no meio obrigava a
+     interromper a medição para responder e depois voltar a medir. */
+  // ── ÁREA DO COMPARTIMENTO (opcional) — C × L com laser, suporta forma em L ──
+  if(!dd.areaRect) dd.areaRect=[];
+  const areaSec=document.createElement('div');
+  areaSec.style.cssText='margin-top:14px;padding-top:10px;border-top:1px dashed var(--br)';
+  const areaHdr=document.createElement('div');
+  areaHdr.style.cssText='display:flex;justify-content:space-between;align-items:center;margin-bottom:6px';
+  const areaLbl=document.createElement('div');
+  areaLbl.style.cssText='font-size:15px;color:var(--tx2);font-weight:600';
+  areaLbl.textContent='📐 Área do compartimento (opcional)';
+  const _slugArea=String(q.div||'d').replace(/[^a-zA-Z0-9]/g,'_');
+  const areaTotal=document.createElement('div');
+  areaTotal.style.cssText='font-size:16px;color:var(--ac);font-weight:700';
+  areaHdr.appendChild(areaLbl);areaHdr.appendChild(areaTotal);
+  areaSec.appendChild(areaHdr);
+
+  /* ÁREA POR RECTÂNGULOS — COM RIGOR.
+     Uma sala em L ou com recuos leva três ou quatro rectângulos. Só se via o
+     TOTAL: com 12,4 m² a dar 9,8, não havia como saber qual das linhas estava
+     mal. Pior, uma linha com só um dos lados preenchido contava ZERO em
+     silêncio — perdia-se um pedaço da sala sem aviso nenhum.
+     Agora cada linha mostra a sua área, as incompletas ficam assinaladas, e
+     valores fora do plausível são apontados sem impedir nada. */
+  function _validarRect(r){
+    const c=parseFloat(String(r.c||'').replace(',','.')),
+          l=parseFloat(String(r.l||'').replace(',','.'));
+    const temC=isFinite(c)&&c>0, temL=isFinite(l)&&l>0;
+    if(!temC&&!temL) return {estado:'vazio',area:0};
+    if(temC!==temL) return {estado:'incompleto',area:0,
+      falta:temC?'a largura':'o comprimento'};
+    const area=c*l;
+    const suspeito=(c<0.5||l<0.5)?'medida abaixo de 0,50 m'
+                 :(c>25||l>25)?'medida acima de 25 m'
+                 :(area>200)?'mais de 200 m² num só rectângulo':null;
+    return {estado:suspeito?'suspeito':'ok',area,nota:suspeito};
+  }
+  function calcAreaTotal(){
+    let total=0, incompletos=0, suspeitos=0, contados=0;
+    dd.areaRect.forEach(r=>{
+      const v=_validarRect(r);
+      if(v.estado==='incompleto') incompletos++;
+      if(v.estado==='suspeito') suspeitos++;
+      if(v.area>0){ total+=v.area; contados++; }
+    });
+    let txt=total>0?total.toFixed(2)+' m²':'';
+    if(contados>1) txt+=' ('+contados+' rect.)';
+    areaTotal.textContent=txt;
+    areaTotal.style.color=incompletos?'var(--red)':(suspeitos?'var(--am,#e8a33d)':'var(--ac)');
+    dd.areaUtil=total>0?total.toFixed(2):'';
+    // aviso por baixo do total, só quando há alguma coisa a dizer
+    let av=areaSec.querySelector('#area-aviso-'+_slugArea);
+    if(!av){ av=document.createElement('div'); av.id='area-aviso-'+_slugArea;
+      av.style.cssText='font-size:12px;line-height:1.4;margin-top:4px';
+      areaHdr.parentNode.insertBefore(av,areaHdr.nextSibling); }
+    if(incompletos){
+      av.style.color='var(--red)';
+      av.textContent='⚠ '+incompletos+' rectângulo(s) só com um lado — não contam para a área. '+
+        'Preenche os dois lados ou apaga a linha.';
+    } else if(suspeitos){
+      av.style.color='var(--am,#e8a33d)';
+      av.textContent='⚠ '+suspeitos+' medida(s) fora do habitual — confirma antes de seguir.';
+    } else av.textContent='';
+    renderAreaParciais();
+  }
+  // a área de cada linha, ao lado dela: é assim que se descobre qual está errada
+  function renderAreaParciais(){
+    dd.areaRect.forEach((r,i)=>{
+      const el=areaSec.querySelector('#area-parc-'+_slugArea+'-'+i);
+      if(!el) return;
+      const v=_validarRect(r);
+      if(v.estado==='incompleto'){ el.textContent='falta '+v.falta; el.style.color='var(--red)'; }
+      else if(v.area>0){ el.textContent=v.area.toFixed(2)+' m²';
+        el.style.color=v.estado==='suspeito'?'var(--am,#e8a33d)':'var(--tx3)';
+        el.title=v.nota||''; }
+      else { el.textContent=''; }
+    });
+  }
+
+  function renderAreaRects(){
+    // limpar linhas antigas (deixa header)
+    while(areaSec.children.length>1) areaSec.removeChild(areaSec.lastChild);
+    dd.areaRect.forEach((rect,idx)=>{
+      const row=document.createElement('div');
+      row.style.cssText='display:flex;align-items:center;gap:5px;margin-bottom:5px';
+      const cInp=document.createElement('input');
+      cInp.className='comp-inp';cInp.type='number';cInp.step='0.01';cInp.inputMode='decimal';
+      cInp.placeholder='Comp.';cInp.value=rect.c||'';cInp.style.width='72px';
+      /* Marcados para o laser continuar: depois das paredes vem o primeiro
+         rectângulo, sem ter de tocar em nada. */
+      cInp.setAttribute('data-area-rect',String(idx)); cInp.setAttribute('data-area-lado','c');
+      cInp.oninput=()=>{rect.c=cInp.value;calcAreaTotal();};
+      cInp.onfocus=()=>{if(laserAtivo){campoLaserActivo=cInp;cInp.style.outline='2px solid var(--ac)';}};
+      cInp.onblur=()=>{cInp.style.outline='';};
+      const xS=document.createElement('span');xS.textContent='×';xS.style.cssText='color:var(--tx3)';
+      const lInp2=document.createElement('input');
+      lInp2.className='comp-inp';lInp2.type='number';lInp2.step='0.01';lInp2.inputMode='decimal';
+      lInp2.placeholder='Larg.';lInp2.value=rect.l||'';lInp2.style.width='72px';
+      lInp2.setAttribute('data-area-rect',String(idx)); lInp2.setAttribute('data-area-lado','l');
+      lInp2.oninput=()=>{rect.l=lInp2.value;calcAreaTotal();};
+      lInp2.onfocus=()=>{if(laserAtivo){campoLaserActivo=lInp2;lInp2.style.outline='2px solid var(--ac)';}};
+      lInp2.onblur=()=>{lInp2.style.outline='';};
+      const mS=document.createElement('span');mS.textContent='m';mS.style.cssText='font-size:11px;color:var(--tx3)';
+      row.appendChild(cInp);row.appendChild(xS);row.appendChild(lInp2);row.appendChild(mS);
+      const parc=document.createElement('span');
+      parc.id='area-parc-'+_slugArea+'-'+idx;
+      parc.style.cssText='font-size:12px;color:var(--tx3);min-width:64px;text-align:right';
+      row.appendChild(parc);
+      // laser: activa comprimento; após medição o foco salta para largura automaticamente
+      const lzr=document.createElement('button');
+      lzr.className='laser-field-btn';lzr.textContent='📏';
+      lzr.style.cssText='border:1px solid var(--ac);background:none;color:var(--ac);border-radius:6px;padding:5px 9px;font-size:17px;cursor:pointer;display:'+(laserAtivo?'block':'none');
+      lzr.onclick=(e)=>{e.preventDefault();campoLaserActivo=cInp;cInp.style.outline='2px solid var(--ac)';mostrarToastLaser('📏 Mede o comprimento — depois a largura');};
+      row.appendChild(lzr);
+      const clr=document.createElement('button');
+      clr.className='laser-field-btn laser-clear-btn';clr.textContent='✕';
+      clr.style.cssText='border:1px solid var(--red);background:none;color:var(--red);border-radius:6px;padding:5px 9px;font-size:17px;font-weight:700;cursor:pointer;display:'+(laserAtivo?'block':'none');
+      clr.onclick=(e)=>{e.preventDefault();rect.c='';rect.l='';cInp.value='';lInp2.value='';calcAreaTotal();};
+      row.appendChild(clr);
+      if(dd.areaRect.length>1){
+        const del=document.createElement('button');del.textContent='×';
+        del.style.cssText='border:none;background:none;color:var(--red);font-size:16px;cursor:pointer;padding:11px 14px;min-width:44px;min-height:44px;line-height:1';
+        del.onclick=()=>{dd.areaRect.splice(idx,1);renderAreaRects();calcAreaTotal();};
+        row.appendChild(del);
+      }
+      areaSec.appendChild(row);
+    });
+    const addR=document.createElement('button');
+    addR.textContent=dd.areaRect.length?'+ rectângulo (forma em L)':'+ medir área (C × L)';
+    addR.style.cssText='border:1px dashed var(--br);border-radius:8px;background:none;color:var(--tx2);font-size:15px;padding:6px 12px;cursor:pointer';
+    addR.onclick=()=>{
+      let cPrefill='';
+      if(dd.areaRect.length===0){
+        // pré-preencher com o comprimento da primeira parede exterior já medida —
+        // poupa medir a mesma parede duas vezes (comprimento da parede ≈ um dos lados do compartimento)
+        const primeiroComp=Object.values(dd.comprimentos||{}).find(v=>parseFloat(v)>0);
+        if(primeiroComp) cPrefill=parseFloat(primeiroComp).toFixed(2);
+      }
+      dd.areaRect.push({c:cPrefill,l:''});
+      renderAreaRects();
+    };
+    areaSec.appendChild(addR);
+    calcAreaTotal();
+  }
+  renderAreaRects();
+  /* calcAreaTotal outra vez, DEPOIS de as linhas existirem: as áreas parciais
+     escrevem-se em caixas criadas por renderAreaRects, e na primeira pintura
+     ainda não existiam — abria-se o painel e as parciais estavam vazias até
+     se tocar num campo. */
+  calcAreaTotal();
+  wrap.appendChild(areaSec);
+
   // ── ENVOLVENTES INTERIORES — contacto com zonas comuns/adjacentes ──
   if(!dd.envInt) dd.envInt={};
   if(!dd.envIntTrocos) dd.envIntTrocos={};
@@ -3488,152 +3668,6 @@ function renderCompInputs(q){
   }
   wrap.appendChild(envIntSec);
   }
-
-  // ── ÁREA DO COMPARTIMENTO (opcional) — C × L com laser, suporta forma em L ──
-  if(!dd.areaRect) dd.areaRect=[];
-  const areaSec=document.createElement('div');
-  areaSec.style.cssText='margin-top:14px;padding-top:10px;border-top:1px dashed var(--br)';
-  const areaHdr=document.createElement('div');
-  areaHdr.style.cssText='display:flex;justify-content:space-between;align-items:center;margin-bottom:6px';
-  const areaLbl=document.createElement('div');
-  areaLbl.style.cssText='font-size:15px;color:var(--tx2);font-weight:600';
-  areaLbl.textContent='📐 Área do compartimento (opcional)';
-  const _slugArea=String(q.div||'d').replace(/[^a-zA-Z0-9]/g,'_');
-  const areaTotal=document.createElement('div');
-  areaTotal.style.cssText='font-size:16px;color:var(--ac);font-weight:700';
-  areaHdr.appendChild(areaLbl);areaHdr.appendChild(areaTotal);
-  areaSec.appendChild(areaHdr);
-
-  /* ÁREA POR RECTÂNGULOS — COM RIGOR.
-     Uma sala em L ou com recuos leva três ou quatro rectângulos. Só se via o
-     TOTAL: com 12,4 m² a dar 9,8, não havia como saber qual das linhas estava
-     mal. Pior, uma linha com só um dos lados preenchido contava ZERO em
-     silêncio — perdia-se um pedaço da sala sem aviso nenhum.
-     Agora cada linha mostra a sua área, as incompletas ficam assinaladas, e
-     valores fora do plausível são apontados sem impedir nada. */
-  function _validarRect(r){
-    const c=parseFloat(String(r.c||'').replace(',','.')),
-          l=parseFloat(String(r.l||'').replace(',','.'));
-    const temC=isFinite(c)&&c>0, temL=isFinite(l)&&l>0;
-    if(!temC&&!temL) return {estado:'vazio',area:0};
-    if(temC!==temL) return {estado:'incompleto',area:0,
-      falta:temC?'a largura':'o comprimento'};
-    const area=c*l;
-    const suspeito=(c<0.5||l<0.5)?'medida abaixo de 0,50 m'
-                 :(c>25||l>25)?'medida acima de 25 m'
-                 :(area>200)?'mais de 200 m² num só rectângulo':null;
-    return {estado:suspeito?'suspeito':'ok',area,nota:suspeito};
-  }
-  function calcAreaTotal(){
-    let total=0, incompletos=0, suspeitos=0, contados=0;
-    dd.areaRect.forEach(r=>{
-      const v=_validarRect(r);
-      if(v.estado==='incompleto') incompletos++;
-      if(v.estado==='suspeito') suspeitos++;
-      if(v.area>0){ total+=v.area; contados++; }
-    });
-    let txt=total>0?total.toFixed(2)+' m²':'';
-    if(contados>1) txt+=' ('+contados+' rect.)';
-    areaTotal.textContent=txt;
-    areaTotal.style.color=incompletos?'var(--red)':(suspeitos?'var(--am,#e8a33d)':'var(--ac)');
-    dd.areaUtil=total>0?total.toFixed(2):'';
-    // aviso por baixo do total, só quando há alguma coisa a dizer
-    let av=areaSec.querySelector('#area-aviso-'+_slugArea);
-    if(!av){ av=document.createElement('div'); av.id='area-aviso-'+_slugArea;
-      av.style.cssText='font-size:12px;line-height:1.4;margin-top:4px';
-      areaHdr.parentNode.insertBefore(av,areaHdr.nextSibling); }
-    if(incompletos){
-      av.style.color='var(--red)';
-      av.textContent='⚠ '+incompletos+' rectângulo(s) só com um lado — não contam para a área. '+
-        'Preenche os dois lados ou apaga a linha.';
-    } else if(suspeitos){
-      av.style.color='var(--am,#e8a33d)';
-      av.textContent='⚠ '+suspeitos+' medida(s) fora do habitual — confirma antes de seguir.';
-    } else av.textContent='';
-    renderAreaParciais();
-  }
-  // a área de cada linha, ao lado dela: é assim que se descobre qual está errada
-  function renderAreaParciais(){
-    dd.areaRect.forEach((r,i)=>{
-      const el=areaSec.querySelector('#area-parc-'+_slugArea+'-'+i);
-      if(!el) return;
-      const v=_validarRect(r);
-      if(v.estado==='incompleto'){ el.textContent='falta '+v.falta; el.style.color='var(--red)'; }
-      else if(v.area>0){ el.textContent=v.area.toFixed(2)+' m²';
-        el.style.color=v.estado==='suspeito'?'var(--am,#e8a33d)':'var(--tx3)';
-        el.title=v.nota||''; }
-      else { el.textContent=''; }
-    });
-  }
-
-  function renderAreaRects(){
-    // limpar linhas antigas (deixa header)
-    while(areaSec.children.length>1) areaSec.removeChild(areaSec.lastChild);
-    dd.areaRect.forEach((rect,idx)=>{
-      const row=document.createElement('div');
-      row.style.cssText='display:flex;align-items:center;gap:5px;margin-bottom:5px';
-      const cInp=document.createElement('input');
-      cInp.className='comp-inp';cInp.type='number';cInp.step='0.01';cInp.inputMode='decimal';
-      cInp.placeholder='Comp.';cInp.value=rect.c||'';cInp.style.width='72px';
-      cInp.oninput=()=>{rect.c=cInp.value;calcAreaTotal();};
-      cInp.onfocus=()=>{if(laserAtivo){campoLaserActivo=cInp;cInp.style.outline='2px solid var(--ac)';}};
-      cInp.onblur=()=>{cInp.style.outline='';};
-      const xS=document.createElement('span');xS.textContent='×';xS.style.cssText='color:var(--tx3)';
-      const lInp2=document.createElement('input');
-      lInp2.className='comp-inp';lInp2.type='number';lInp2.step='0.01';lInp2.inputMode='decimal';
-      lInp2.placeholder='Larg.';lInp2.value=rect.l||'';lInp2.style.width='72px';
-      lInp2.oninput=()=>{rect.l=lInp2.value;calcAreaTotal();};
-      lInp2.onfocus=()=>{if(laserAtivo){campoLaserActivo=lInp2;lInp2.style.outline='2px solid var(--ac)';}};
-      lInp2.onblur=()=>{lInp2.style.outline='';};
-      const mS=document.createElement('span');mS.textContent='m';mS.style.cssText='font-size:11px;color:var(--tx3)';
-      row.appendChild(cInp);row.appendChild(xS);row.appendChild(lInp2);row.appendChild(mS);
-      const parc=document.createElement('span');
-      parc.id='area-parc-'+_slugArea+'-'+idx;
-      parc.style.cssText='font-size:12px;color:var(--tx3);min-width:64px;text-align:right';
-      row.appendChild(parc);
-      // laser: activa comprimento; após medição o foco salta para largura automaticamente
-      const lzr=document.createElement('button');
-      lzr.className='laser-field-btn';lzr.textContent='📏';
-      lzr.style.cssText='border:1px solid var(--ac);background:none;color:var(--ac);border-radius:6px;padding:5px 9px;font-size:17px;cursor:pointer;display:'+(laserAtivo?'block':'none');
-      lzr.onclick=(e)=>{e.preventDefault();campoLaserActivo=cInp;cInp.style.outline='2px solid var(--ac)';mostrarToastLaser('📏 Mede o comprimento — depois a largura');};
-      row.appendChild(lzr);
-      const clr=document.createElement('button');
-      clr.className='laser-field-btn laser-clear-btn';clr.textContent='✕';
-      clr.style.cssText='border:1px solid var(--red);background:none;color:var(--red);border-radius:6px;padding:5px 9px;font-size:17px;font-weight:700;cursor:pointer;display:'+(laserAtivo?'block':'none');
-      clr.onclick=(e)=>{e.preventDefault();rect.c='';rect.l='';cInp.value='';lInp2.value='';calcAreaTotal();};
-      row.appendChild(clr);
-      if(dd.areaRect.length>1){
-        const del=document.createElement('button');del.textContent='×';
-        del.style.cssText='border:none;background:none;color:var(--red);font-size:16px;cursor:pointer;padding:11px 14px;min-width:44px;min-height:44px;line-height:1';
-        del.onclick=()=>{dd.areaRect.splice(idx,1);renderAreaRects();calcAreaTotal();};
-        row.appendChild(del);
-      }
-      areaSec.appendChild(row);
-    });
-    const addR=document.createElement('button');
-    addR.textContent=dd.areaRect.length?'+ rectângulo (forma em L)':'+ medir área (C × L)';
-    addR.style.cssText='border:1px dashed var(--br);border-radius:8px;background:none;color:var(--tx2);font-size:15px;padding:6px 12px;cursor:pointer';
-    addR.onclick=()=>{
-      let cPrefill='';
-      if(dd.areaRect.length===0){
-        // pré-preencher com o comprimento da primeira parede exterior já medida —
-        // poupa medir a mesma parede duas vezes (comprimento da parede ≈ um dos lados do compartimento)
-        const primeiroComp=Object.values(dd.comprimentos||{}).find(v=>parseFloat(v)>0);
-        if(primeiroComp) cPrefill=parseFloat(primeiroComp).toFixed(2);
-      }
-      dd.areaRect.push({c:cPrefill,l:''});
-      renderAreaRects();
-    };
-    areaSec.appendChild(addR);
-    calcAreaTotal();
-  }
-  renderAreaRects();
-  /* calcAreaTotal outra vez, DEPOIS de as linhas existirem: as áreas parciais
-     escrevem-se em caixas criadas por renderAreaRects, e na primeira pintura
-     ainda não existiam — abria-se o painel e as parciais estavam vazias até
-     se tocar num campo. */
-  calcAreaTotal();
-  wrap.appendChild(areaSec);
 }
 
 // ═══════════════════════════════════════
@@ -3740,12 +3774,19 @@ function renderPeInputs(n){
 // ═══════════════════════════════════════
 const ORIENTS_VE=['Norte','Sul','Este','Oeste','Nordeste','Sudeste','Sudoeste','Noroeste'];
 const VIDRO_OPTS=['Simples','Duplo'];
-const PROT_OPTS=['Persiana','Portada de madeira','Portada metálica','Cortina exterior opaca','Portada interior de madeira','Portada interior metálica','Sem proteção exterior'];
+/* A COR DA PERSIANA ENTRA NO CÁLCULO.
+   A Tabela 13 do ITE50 dá permeabilidades e o fator solar depende da cor da
+   proteção: uma persiana escura absorve mais e deixa passar mais calor para
+   dentro do que uma clara. Havia só «Persiana», e a app assumia uma cor.
+   As portadas herdam a cor da caixilharia — é a mesma pintura, e é o que se
+   vê em obra; quem tiver uma portada de cor diferente corrige. */
+const PROT_OPTS=['Persiana clara','Persiana escura','Portada de madeira','Portada metálica','Cortina exterior opaca','Portada interior de madeira','Portada interior metálica','Sem proteção exterior'];
 const PROT_INT_OPTS=['Cortinas blackout','Cortinas transparentes','Cortinas pouco transparentes','Estore','Outro','Sem proteção interior'];
 const CAIXILHO_COR_OPTS=['Cor clara','Cor escura'];
 const ABERTURA_OPTS=['Correr','Basculante','Fixo'];
 
 function renderVaosInline(div,n){
+  const n0=n;
   const wrap=document.getElementById('ve-inline-wrap');
   if(!wrap) return;
   wrap.innerHTML='';
@@ -3770,12 +3811,32 @@ function renderVaosInline(div,n){
      não os substitui: a mesma cozinha pode ter uma janela para a marquise E
      outra para o exterior. */
   renderVaosInterioresInline(div,wrap);
+  /* VALORES POR DEFEITO — O QUE É QUASE SEMPRE ASSIM.
+     Num levantamento normal a esmagadora maioria dos vãos é de correr, com
+     caixilharia de cor clara e sem sombreamento nenhum. Pô-los já escolhidos
+     poupa três toques por vão, e o que for diferente corrige-se — que é mais
+     depressa do que preencher tudo de raiz.
+     Numa casa de banho a regra é outra: a janela é basculante e não leva
+     persiana nem cortina. */
+  const _ehWC=/^(wc|casa de banho|i\.?s\.?|instala[çc][ãa]o sanit)/i.test(String(div).trim());
   while(arr.length<n){
     const pv=D.perfilVaoTipo||{};
     arr.push({id:`VE${arr.length+1}`,orient:orientUnica,larg:'',alt:'',
-      tipo:pv.tipo||'',prot:pv.prot||'',caixCor:pv.caixCor||'',abertura:pv.abertura||'',
-      caixEstore:pv.caixEstore||false,corteTerm:pv.corteTerm||false,caixMat:pv.caixMat||'Alumínio',caixAr:6,
-      portadaPermeab:pv.portadaPermeab||'',sombAquec:pv.sombAquec||'',sombArref:pv.sombArref||''});
+      tipo:pv.tipo||'',
+      prot:pv.prot||(_ehWC?'Sem proteção exterior':''),
+      protInt:pv.protInt||(_ehWC?'Sem proteção interior':''),
+      caixCor:pv.caixCor||'Cor clara',
+      abertura:pv.abertura||(_ehWC?'Basculante':'De correr'),
+      caixEstore:pv.caixEstore||false,corteTerm:pv.corteTerm||false,
+      caixMat:pv.caixMat||'Alumínio',caixAr:6,
+      portadaPermeab:pv.portadaPermeab||'',
+      sombAquec:pv.sombAquec||'Sem sombreamento',
+      sombArref:pv.sombArref||'Sem sombreamento',
+      /* Todos os vãos novos nascem «por confirmar», incluindo o primeiro de
+         cada divisão: a marca sai quando alguém lhe toca. Sem isto, escolher
+         a cor na Sala não chegava ao primeiro vão da Cozinha — que é
+         precisamente o caso normal, uma janela por divisão. */
+      _porDefeito:true});
   }
   // se n diminuiu, não apagar dados — apenas não renderizar o excesso
   // (o utilizador pode voltar atrás e escolher menos vãos; os dados ficam salvos mas ocultos)
@@ -4099,7 +4160,7 @@ function renderVaosInline(div,n){
         // parte (é óbvio que uma persiana de enrolar precisa de caixa). Liga
         // automaticamente e atualiza os chips da caixa de estore, se já estiverem
         // desenhados (mesmo fecho/closure do cartão deste vão).
-        if(o==='Persiana'&&!ve.caixEstore){
+        if(/^persiana/i.test(o)&&!ve.caixEstore){
           ve.caixEstore=true;
           if(typeof estoreChips!=='undefined'&&estoreChips){
             estoreChips.querySelectorAll('.ve-chip').forEach(x=>{
@@ -4214,9 +4275,27 @@ function renderVaosInline(div,n){
       c.textContent=o;
       c.onclick=()=>{
         ve.caixCor=o;
+        /* A CAIXILHARIA DO PRIMEIRO VÃO VALE PARA OS OUTROS.
+           Numa casa a caixilharia é toda a mesma — foi posta de uma vez. Ao
+           escolher a cor e o material no primeiro vão, os seguintes que ainda
+           estejam no valor por defeito passam a ter o mesmo. Os que já foram
+           tocados à mão não são mexidos: quem corrigiu um vão sabia porquê.
+           Vale entre divisões, não só dentro desta. */
+        D.perfilVaoTipo=Object.assign({},D.perfilVaoTipo||{},{caixCor:o,caixMat:ve.caixMat});
+        let n=0;
+        (D.divisoes||[]).forEach(dv=>{
+          ((D.divisoesDados[dv]||{}).vaos||[]).forEach(outro=>{
+            if(outro===ve) return;
+            if(outro._porDefeito&&outro.caixCor!==o){ outro.caixCor=o; n++; }
+          });
+        });
         caixChips.querySelectorAll('.ve-chip').forEach(x=>x.classList.remove('on'));
         c.classList.add('on');
+        delete ve._porDefeito;          // este foi escolhido à mão
         saveVaosToD(div);
+        try{ autoSave(); }catch(e){}
+        if(n) mostrarToastLaser('Caixilharia «'+o+'» aplicada a mais '+n+' vão(s) ainda por confirmar.',4000);
+        renderVaosInline(div,n0||((D.divisoesDados[div]||{}).vaos||[]).length);
       };
       caixChips.appendChild(c);
     });
@@ -4752,7 +4831,7 @@ function renderQ(){
       continue;
     }
 
-    if(q.cond&&!q.cond()){curQ++;continue;}
+    if(!perguntaVisivel(q)){curQ++;continue;}
     break;
   }
   /* NÃO DEIXAR O CONTADOR FUGIR PARA ALÉM DO FIM.
@@ -5706,7 +5785,7 @@ function prev(){
     const q=qList[curQ];
     if(!q) break;
     if(q.isDivCompletoMarker||q.isPeMarker||q.isDivExtraMarker){curQ--;continue;}
-    if(q.cond&&!q.cond()){curQ--;continue;}
+    if(!perguntaVisivel(q)){curQ--;continue;}
     break;
   }
   renderQ();
@@ -6037,6 +6116,21 @@ function aberToKey(abertura){
 // protParaCalculo). Isto agora só é usado como PADRÃO — se o utilizador respondeu
 // explicitamente à pergunta de permeabilidade da portada (ve.portadaPermeab), essa
 // resposta tem sempre prioridade sobre o material (ver protToKey abaixo).
+/* A COR QUE ENTRA NA TABELA 48 É A DA PROTEÇÃO, NÃO A DA CAIXILHARIA.
+   Havia duas cópias a decidir isto pela cor do caixilho. São coisas
+   diferentes: há caixilharia branca com persiana castanha e o contrário. Uma
+   persiana escura absorve mais e deixa passar mais calor — no vidro duplo,
+   gtot 0,12 contra 0,07 da clara.
+   · persiana: a cor está no próprio nome («Persiana clara»/«escura»)
+   · portada: herda a cor da caixilharia, que é a mesma pintura
+   · cortina interior sem cor declarada: caso desfavorável (escura) */
+function corDaProtecao(ve){
+  const p=String((ve&&ve.prot)||'').toLowerCase();
+  if(/persiana/.test(p)) return /clara/.test(p)?'clara':'escura';
+  if(/portada/.test(p))
+    return String((ve&&ve.caixCor)||'').toLowerCase().includes('clara')?'clara':'escura';
+  return String((ve&&ve.protIntCor)||'').toLowerCase().includes('clara')?'clara':'escura';
+}
 function protToKey(prot,ve){
   if(!prot) return 'sem';
   const p=prot.toLowerCase();
@@ -6097,7 +6191,7 @@ function gerarTextoVE(ve, div){
   const corteTerm=ve.corteTerm||(matStr.includes('pvc'));
   const corteTermStr=corteTerm?'com corte térmico':'sem corte térmico';
   const aber=(ve.abertura||'Fixo').toLowerCase();
-  const cor=(ve.caixCor||'').toLowerCase().includes('clara')?'clara':'escura';
+  const cor=corDaProtecao(ve);
   const prot=ve.prot||'';
   const protL=prot.toLowerCase();
   const caixAr=D.caixaArGlobal||ve.caixAr||6;
@@ -7323,6 +7417,18 @@ function buildSum(){
 
       let cardH=`<div class="sum-card" style="margin-bottom:7px">`;
       cardH+=`<div style="font-size:12px;font-weight:700;color:var(--ac);padding:7px 13px 4px;border-bottom:1px solid var(--br)">${div}</div>`;
+      /* A ÁREA ÚTIL NO RESUMO.
+         O cartão de cada divisão mostrava as paredes e os vãos — e nada da
+         área, que é o número que mais se confere. Uma divisão interior, sem
+         paredes exteriores, ficava com o cartão vazio. Vem de resolverArea…,
+         a mesma função que o TXT usa, para os dois dizerem o mesmo. */
+      {
+        let _a=null; try{ _a=parseFloat(String(resolverAreaDivisaoGlobal(div)||'').replace(',','.')); }catch(e){}
+        const _interior=!!dd.semParedesExt;
+        cardH+=`<div style="padding:5px 13px;font-size:12.5px;color:var(--tx2)">Área útil: <b style="color:var(--tx)">${
+          (isFinite(_a)&&_a>0)?_a.toFixed(2).replace('.',',')+' m²':'—'}</b>${
+          _interior?' · interior, sem parede exterior':''}</div>`;
+      }
 
       if(comps.length){
         // BUG CORRIGIDO: usava sempre o primeiro pé-direito da casa — agora
@@ -7615,6 +7721,209 @@ async function exportarDiretoOneDrive(){
     return;
   }
   return guardarNoOneDrive();
+}
+/* PERGUNTAS QUE NÃO APARECERAM.
+   O botão «Saltar» nunca foi usado — saltar uma pergunta a meio não serve
+   para nada, porque ela volta a aparecer a seguir. O que faz falta é o
+   contrário: ver o que NÃO foi perguntado.
+   A app esconde perguntas por boas razões — um piso intermédio não tem
+   cobertura, um apartamento de 1985 não tem isolamento a declarar — mas às
+   vezes a razão não se aplica: o prédio foi reabilitado e tem capoto, ou há
+   um solar que ninguém esperava. Sem forma de lá chegar, esses casos ficavam
+   por levantar.
+   Aqui listam-se as perguntas ocultas com o motivo, e abre-se a que se
+   quiser. */
+/* Uma pergunta pedida no ecrã «Perguntas» deixa de ser saltada — a condição
+   que a escondia continua a valer para todas as outras. */
+function perguntaForcada(q){
+  return !!(q&&q.id&&Array.isArray(D.perguntasForcadas)&&D.perguntasForcadas.includes(q.id));
+}
+function perguntaVisivel(q){
+  if(!q) return false;
+  if(!q.cond) return true;
+  if(perguntaForcada(q)) return true;
+  try{ return !!q.cond(); }catch(e){ return true; }
+}
+function perguntasOcultas(){
+  const out=[];
+  (qList||[]).forEach((q,i)=>{
+    if(!q||!q.cond||q.isDivCompletoMarker||q.isDivExtraMarker||q.isPeMarker) return;
+    if(perguntaVisivel(q)) return;   // já visível, ou já pedida à mão
+    out.push({i,id:q.id,ctx:q.ctx||'',text:q.text||q.id,motivo:motivoDaOcultacao(q)});
+  });
+  return out;
+}
+function motivoDaOcultacao(q){
+  const id=String(q.id||'');
+  if(id==='isol-yn'||id==='solar-global')
+    return apartamentoAntesFTH()?('apartamento de '+(D.anoConstrucao||'?')+', anterior à FTH de 2004'):'';
+  if(id==='cob-tipo'||id==='pav-baixo'||id==='pav-abrangencia')
+    return pisoEntreFracoes()?'piso intermédio entre frações':'';
+  if(id==='tipologia') return 'lida na caderneta predial';
+  if(id==='ano-construcao') return 'lido nos documentos';
+  if(id==='localizacao') return 'lida nos documentos';
+  if(id==='n-pisos-edificio'||id==='pisos') return 'lido nos documentos';
+  if(/-clima$/.test(id)) return 'o imóvel foi declarado sem climatização';
+  if(/-vaos$/.test(id)) return 'compartimento sem paredes exteriores';
+  return '';
+}
+function abrirPerguntasSaltadas(){
+  const lista=perguntasOcultas();
+  const fundo=document.createElement('div');
+  fundo.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;'+
+    'display:flex;align-items:flex-end;justify-content:center';
+  const cx=document.createElement('div');
+  cx.style.cssText='background:var(--bg);width:100%;max-width:560px;max-height:82vh;overflow-y:auto;'+
+    'border-radius:14px 14px 0 0;padding:16px';
+  const tit=document.createElement('div');
+  tit.style.cssText='font-size:15px;font-weight:700;color:var(--ac);margin-bottom:4px';
+  tit.textContent='Perguntas que não apareceram';
+  cx.appendChild(tit);
+  const sub=document.createElement('div');
+  sub.style.cssText='font-size:12px;color:var(--tx2);margin-bottom:12px;line-height:1.45';
+  sub.textContent=lista.length
+    ? 'A app saltou-as pelo motivo indicado. Toca numa para responder na mesma — '+
+      'um prédio reabilitado pode ter isolamento que a regra não previa.'
+    : 'Nenhuma pergunta foi saltada neste levantamento.';
+  cx.appendChild(sub);
+  lista.forEach(o=>{
+    const b=document.createElement('button');
+    b.type='button';
+    b.style.cssText='width:100%;text-align:left;margin-bottom:7px;padding:11px 12px;border-radius:10px;'+
+      'border:1px solid var(--br);background:var(--bg2);color:var(--tx);font-size:13.5px;cursor:pointer';
+    b.innerHTML='<div style="font-weight:600">'+String(o.text).replace(/</g,'&lt;')+'</div>'+
+      (o.ctx?'<div style="font-size:11px;color:var(--tx3);margin-top:2px">'+o.ctx+'</div>':'')+
+      (o.motivo?'<div style="font-size:11.5px;color:var(--ac);margin-top:3px">saltada: '+o.motivo+'</div>':'');
+    b.onclick=()=>{
+      fundo.remove();
+      /* Marca-se a pergunta como pedida à mão: a condição que a escondia
+         deixa de valer só para esta. */
+      D.perguntasForcadas=Array.isArray(D.perguntasForcadas)?D.perguntasForcadas:[];
+      if(!D.perguntasForcadas.includes(o.id)) D.perguntasForcadas.push(o.id);
+      try{ autoSave(); }catch(e){}
+      curQ=o.i; renderQ();
+    };
+    cx.appendChild(b);
+  });
+  const x=document.createElement('button');
+  x.type='button'; x.textContent='Fechar';
+  x.style.cssText='width:100%;margin-top:6px;padding:11px;border-radius:10px;border:1px solid var(--br);'+
+    'background:var(--bg3);color:var(--tx);font-size:13.5px';
+  x.onclick=()=>fundo.remove();
+  cx.appendChild(x);
+  fundo.appendChild(cx);
+  fundo.onclick=(e)=>{ if(e.target===fundo) fundo.remove(); };
+  document.body.appendChild(fundo);
+}
+/* SEGUNDA OPINIÃO ANTES DE EXPORTAR.
+   O ecrã de exportação mostra o levantamento todo — e ninguém lê um resumo de
+   trinta linhas antes de carregar em exportar. O que decide o cálculo são meia
+   dúzia de coisas: a localização do piso (que manda na cobertura e no
+   pavimento), o ano, o isolamento, a orientação dominante, os sistemas. Se uma
+   delas estiver errada, o certificado sai errado por inteiro.
+   Isto mostra só essas, em letra grande, com os avisos por cima. Dez segundos
+   a ler contra um certificado a refazer. */
+function pontosCriticos(){
+  const P=[];
+  const pl={'1':'Piso sobre cave/ENU','2':'Piso intermédio (entre frações)',
+    '2*':'Piso intermédio com cobertura própria','3':'Último piso','4':'Piso térreo'};
+  P.push(['Tipologia',D.tipologia||'—']);
+  P.push(['Tipo',D.edificioTipo||'—']);
+  if(D.edificioTipo==='Apartamento')
+    P.push(['Localização do piso',pl[D.pisoLocal]||D.pisoLocal||'— POR RESPONDER']);
+  P.push(['Ano de construção',D.anoConstrucao||'— POR RESPONDER']);
+  P.push(['Área útil',(function(){
+    const a=(D.divisoes||[]).reduce((s2,d)=>{
+      const x=parseFloat(String(resolverAreaDivisaoGlobal(d)||'').replace(',','.'));
+      return s2+(isFinite(x)?x:0);},0);
+    return a>0?a.toFixed(2).replace('.',',')+' m² em '+(D.divisoes||[]).length+' divisões':'— POR MEDIR';
+  })()]);
+  // o que está por cima e por baixo
+  try{
+    const ult=ehUltimoPiso();
+    P.push(['Por cima',ult
+      ?('cobertura'+(D.coberturaTipoEsc?' — '+D.coberturaTipoEsc:' — POR CARACTERIZAR'))
+      :'outra fração (laje intermédia)']);
+    const pv={'1':'cave / espaço não útil','4':'o solo (pavimento térreo)'}[String(D.pisoLocal||'')];
+    P.push(['Por baixo',D.edificioTipo==='Apartamento'
+      ?(pv||'outra fração (laje intermédia)')
+      :(D.pavPorBaixo||'— POR RESPONDER')]);
+  }catch(e){}
+  P.push(['Isolamento',apartamentoAntesFTH()
+    ?'sem isolamento (apartamento anterior a 2004)'
+    :(D.temIsolamento==='Sim'
+       ?('sim — '+(D.isolParedeEsp||'?')+' cm '+(D.isolParedeMat||''))
+       :(D.temIsolamento||'— POR RESPONDER'))]);
+  const oris=[...new Set((D.divisoes||[]).flatMap(d=>
+    Object.keys(((D.divisoesDados||{})[d]||{}).comprimentos||{})))];
+  P.push(['Orientações',oris.length?oris.join(', '):'— NENHUMA PAREDE MEDIDA']);
+  const nVaos=(D.divisoes||[]).reduce((n,d)=>n+(((D.divisoesDados||{})[d]||{}).vaos||[])
+    .filter(v=>parseFloat(v.larg)>0).length,0);
+  P.push(['Vãos medidos',String(nVaos)]);
+  P.push(['AQS',D.aqsTipo?(D.aqsTipo+(D.aqsAnoFabrico?' ('+D.aqsAnoFabrico+')':'')):'— POR RESPONDER']);
+  P.push(['Climatização',D.temClimatizacao==='Não'?'nenhuma (declarado)':
+    ((Object.values(D.climaDivisoes||{}).flatMap(c=>c.tipos||[]).filter(Boolean)[0])||'— POR RESPONDER')]);
+  P.push(['Ventilação',D.ventTipo||'— POR RESPONDER']);
+  return P;
+}
+function abrirSegundaOpiniao(depois){
+  let v={lacunas:[],avisos:[],incoerencias:[]};
+  try{ v=verificarLevantamento()||v; }catch(e){}
+  const fundo=document.createElement('div');
+  fundo.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;'+
+    'display:flex;align-items:flex-end;justify-content:center';
+  const cx=document.createElement('div');
+  cx.style.cssText='background:var(--bg);width:100%;max-width:560px;max-height:88vh;overflow-y:auto;'+
+    'border-radius:14px 14px 0 0;padding:16px';
+  const tit=document.createElement('div');
+  tit.style.cssText='font-size:16px;font-weight:700;color:var(--ac);margin-bottom:2px';
+  tit.textContent='Confere antes de exportar';
+  cx.appendChild(tit);
+  const sub=document.createElement('div');
+  sub.style.cssText='font-size:12px;color:var(--tx2);margin-bottom:12px;line-height:1.45';
+  sub.textContent='O que decide o cálculo. Se algo estiver errado aqui, o certificado sai errado.';
+  cx.appendChild(sub);
+  // erros primeiro
+  const graves=[...v.incoerencias.map(x=>['⛔',x]),...v.lacunas.map(x=>['⚠',x])];
+  if(graves.length){
+    const box=document.createElement('div');
+    box.style.cssText='background:var(--bg2);border:1px solid var(--red);border-radius:10px;'+
+      'padding:10px 12px;margin-bottom:12px';
+    box.innerHTML='<div style="font-size:12px;font-weight:700;color:var(--red);margin-bottom:6px">'+
+      graves.length+' ponto(s) por resolver</div>'+
+      graves.slice(0,8).map(([ic,x])=>'<div style="font-size:12.5px;color:var(--tx);line-height:1.5">'+
+        ic+' '+String(x.msg).replace(/</g,'&lt;')+'</div>').join('')+
+      (graves.length>8?'<div style="font-size:11.5px;color:var(--tx3);margin-top:4px">… e mais '+
+        (graves.length-8)+'. Vê em «Verificar antes de emitir».</div>':'');
+    cx.appendChild(box);
+  }
+  const tab=document.createElement('div');
+  tab.style.cssText='border:1px solid var(--br);border-radius:10px;overflow:hidden';
+  pontosCriticos().forEach(([k,val],i)=>{
+    const falta=/POR RESPONDER|POR MEDIR|POR CARACTERIZAR|NENHUMA PAREDE|^—$/.test(String(val));
+    const r=document.createElement('div');
+    r.style.cssText='display:flex;gap:10px;padding:9px 12px;font-size:13.5px;'+
+      (i%2?'background:var(--bg2);':'')+(falta?'color:var(--red);':'color:var(--tx);');
+    r.innerHTML='<div style="flex:0 0 132px;color:var(--tx2);font-size:12px">'+k+'</div>'+
+      '<div style="flex:1;font-weight:600">'+String(val).replace(/</g,'&lt;')+'</div>';
+    tab.appendChild(r);
+  });
+  cx.appendChild(tab);
+  const linha=document.createElement('div');
+  linha.style.cssText='display:flex;gap:8px;margin-top:14px';
+  const bt=(txt,fn,forte)=>{
+    const b=document.createElement('button'); b.type='button'; b.textContent=txt;
+    b.style.cssText='flex:1;padding:12px;border-radius:10px;font-size:14px;cursor:pointer;'+
+      (forte?'border:none;background:var(--ac);color:#04120c;font-weight:600'
+            :'border:1px solid var(--br);background:var(--bg3);color:var(--tx)');
+    b.onclick=fn; linha.appendChild(b);
+  };
+  bt('← Corrigir',()=>fundo.remove());
+  bt('Está certo — exportar',()=>{ fundo.remove(); if(typeof depois==='function') depois(); },true);
+  cx.appendChild(linha);
+  fundo.appendChild(cx);
+  fundo.onclick=(e)=>{ if(e.target===fundo) fundo.remove(); };
+  document.body.appendChild(fundo);
 }
 function goExp(){
   document.getElementById('exp-box').textContent=buildTxt();
@@ -9331,6 +9640,13 @@ function buildTxt(){
   t+=ln('Tipologia',D.tipologia);
   if(D.tipologiaDeDocumento) t+='  (tipologia lida na caderneta predial)\n';
   t+=ln('Tipo edifício',D.edificioTipo);
+  /* Quem revê tem de saber que a ausência de isolamento é uma decisão do
+     levantamento, não um esquecimento. */
+  if(apartamentoAntesFTH())
+    t+='  Apartamento de '+D.anoConstrucao+', anterior à Ficha Técnica de Habitação (2004):\n'+
+       '  sem documento que descreva a envolvente e sem acesso à composição das paredes.\n'+
+       '  Considera-se SEM isolamento; as perguntas do isolamento e do solar térmico\n'+
+       '  foram saltadas. Corrigir se houver informação em contrário.\n';
   if(D.edificioTipo==='Apartamento'){
     const plMap={'1':'Piso sobre cave/ENU',
       '2':'Piso intermédio (entre frações)',
@@ -9810,18 +10126,36 @@ function buildTxt(){
     const temSistemaSemUE=climDivsSemUE.length>0;
     // F_age climatização (Tabela 76 — split/multisplit/VRF/BC, E=2,50): ≤1→1,00 | 1-10→0,95 | 10-20→0,90 | >20→0,85.
     // Nota 1: sem ano de fabrico, usa-se o ano de construção do edifício.
-    let anoStr;
+    let anoStr, anoRefUsado=null;   // o ano que a descrição geral usou
     {
-      const anoRef=parseInt(ocr.ano_fabrico)||parseInt(D.anoConstrucao)||null;
-      const idadeC=anoRef?new Date().getFullYear()-anoRef:null;
-      const fc=idadeC===null?[0.85,'idade superior a 20 anos']
-        :idadeC<=1?[1.00,'idade inferior a 1 ano']
-        :idadeC<=10?[0.95,'idade entre 1 e 10 anos']
-        :idadeC<=20?[0.90,'idade entre 10 e 20 anos']
-        :[0.85,'idade superior a 20 anos'];
+      /* O ANO VEM DA CHAPA QUE O TIVER, NÃO SÓ DA PRIMEIRA.
+         `ocr` é a primeira leitura disponível — a chapa exterior se houver,
+         senão a etiqueta interior. Mas a etiqueta interior muitas vezes não
+         traz ano de fabrico e a chapa exterior traz: nesse caso caía-se no
+         ano de CONSTRUÇÃO do edifício, que num equipamento substituído está
+         vinte anos errado e leva o F_age de 0,95 para 0,85.
+         Procura-se o ano em todas as leituras — exteriores primeiro, que é
+         onde a chapa é mais completa — e só depois se recorre à construção.
+         Entre vários anos, o mais recente: a nota 1 da Tabela 76 manda usar a
+         data mais recente entre fabrico e instalação. */
+      let _anoFonte='';
+      const _anos=[]
+        .concat((ocrUE||[]).map(d=>({a:parseInt((d||{}).ano_fabrico),f:'chapa da unidade exterior'})))
+        .concat((ocrInt||[]).map(d=>({a:parseInt((d||{}).ano_fabrico),f:'etiqueta da unidade interior'})))
+        .filter(x=>x.a>1900&&x.a<=new Date().getFullYear()+1);
+      let anoRef=null;
+      if(_anos.length){
+        const melhor=_anos.reduce((m,x)=>x.a>m.a?x:m,_anos[0]);
+        anoRef=melhor.a; _anoFonte=melhor.f;
+      } else if(parseInt(D.anoConstrucao)){
+        anoRef=parseInt(D.anoConstrucao); _anoFonte='ano de construção do edifício';
+      }
+      anoRefUsado=anoRef;
+      const _f=fageT76('split',anoRef,false);   // split/multi/VRF/BC partilham os escalões
+      const fc=[_f.fage,_f.frase];
       const fcStr=fc[0].toFixed(2).replace('.',',');
-      if(ocr.ano_fabrico){
-        anoStr=`Ano de fabrico: ${ocr.ano_fabrico} (${fc[1]}). O fator de depreciação de ${fcStr} previsto na Tabela 76 do Despacho n.º 6476-H/2021 é considerado na folha de cálculo.`;
+      if(_anoFonte&&_anoFonte!=='ano de construção do edifício'){
+        anoStr=`Ano de fabrico: ${anoRef} (${fc[1]}, lido na ${_anoFonte}). O fator de depreciação de ${fcStr} previsto na Tabela 76 do Despacho n.º 6476-H/2021 foi aplicado ao rendimento do equipamento.`;
       }else if(anoRef){
         anoStr=`Não sendo conhecido o ano de fabrico e na ausência de registo de manutenção, assumiu-se a instalação na data de construção do imóvel (${anoRef}) — ${fc[1]}. O fator de depreciação de ${fcStr} previsto na Tabela 76 do Despacho n.º 6476-H/2021 é considerado na folha de cálculo.`;
       }else{
@@ -9890,8 +10224,15 @@ function buildTxt(){
     // potências diferentes (ex: MUZ-HJ25VA-E2 e MUZ-HJ35VA-E3 no mesmo projeto),
     // não faz sentido descrever tudo com os dados da 1ª unidade só. Cada grupo de
     // especificações distintas fica com o seu próprio parágrafo.
+    /* O ANO DE FABRICO FAZ PARTE DA ASSINATURA.
+       Duas unidades do mesmo modelo mas de anos diferentes — uma trocada, a
+       outra original — eram agrupadas numa só, e o ano da segunda desaparecia
+       do texto. Não são o mesmo equipamento para efeitos de cálculo: o F_age
+       da Tabela 76 depende da idade, e entre 2008 e 2022 vai de 0,85 a 0,95.
+       Com o ano na assinatura, cada uma leva o seu parágrafo e o seu fator. */
     function assinaturaUE(d){
-      return [d.marca,d.modelo,d.potencia_aquecimento_kw,d.potencia_arrefecimento_kw,d.cop,d.eer].map(v=>v||'').join('|');
+      return [d.marca,d.modelo,d.potencia_aquecimento_kw,d.potencia_arrefecimento_kw,
+              d.cop,d.eer,d.ano_fabrico].map(v=>v||'').join('|');
     }
     const gruposUE=[];
     ocrUE.forEach(d=>{
@@ -9916,11 +10257,18 @@ function buildTxt(){
         const eerG=d.eer||'«EER»';
         const marcaG=d.marca||marcaStr||'«marca»';
         const modeloG=d.modelo||'«modelo»';
+        /* Cada grupo escreve o SEU ano quando difere do que a descrição geral
+           usou. A comparação era contra `ocr.ano_fabrico` — a primeira leitura
+           — mas a descrição geral passou a usar o ano MAIS RECENTE de todas as
+           chapas. Com duas unidades do mesmo modelo, a mais antiga ficava sem
+           ano e sem fator próprio. */
         let anoStrG=anoStr;
-        if(d.ano_fabrico&&d.ano_fabrico!==ocr.ano_fabrico){
-          const anoRefG=parseInt(d.ano_fabrico);
-          const idadeG=anoRefG?new Date().getFullYear()-anoRefG:null;
-          const fcG=idadeG===null?[0.85,'idade superior a 20 anos']:idadeG<=1?[1.00,'idade inferior a 1 ano']:idadeG<=10?[0.95,'idade entre 1 e 10 anos']:idadeG<=20?[0.90,'idade entre 10 e 20 anos']:[0.85,'idade superior a 20 anos'];
+        const _anoG=parseInt(d.ano_fabrico);
+        if(_anoG&&_anoG!==anoRefUsado){
+          const anoRefG=_anoG;
+          // quarta cópia dos escalões da Tabela 76 — agora pela tabela única
+          const _fg=fageT76('split',anoRefG,false);
+          const fcG=[_fg.fage,_fg.frase];
           anoStrG=`Ano de fabrico: ${d.ano_fabrico} (${fcG[1]}). O fator de depreciação de ${fcG[0].toFixed(2).replace('.',',')} previsto na Tabela 76 do Despacho n.º 6476-H/2021 é considerado na folha de cálculo.`;
         }
         _textoAC+=`\n\n[Unidade exterior — grupo ${idx+1}/${gruposUE.length}, ${g.n} unidade${g.n!==1?'s':''}] marca ${marcaG} e modelo ${modeloG}. Com base na ficha técnica fornecida pelo fabricante, possui uma potência de aquecimento e arrefecimento de ${pAqG} e ${pArrG}, respetivamente, COP de ${copG} e EER de ${eerG}. O equipamento encontra-se em bom funcionamento e em bom estado de conservação. ${anoStrG}`;
@@ -10404,6 +10752,7 @@ function buildTxt(){
       }
       if(_ui){
         t+=sep('PAREDE EXTERIOR — U SUGERIDO');
+
         const uT=v=>v.toFixed(2).replace('.',',');
         t+='Parede exterior com espessura total de '+_ui.esp.toFixed(2).replace('.',',')+
            ' m, constituída por pano exterior e pano interior de alvenaria de tijolo furado, '+
@@ -10893,7 +11242,7 @@ function buildTxt(){
     const vidro=(ve.tipo||'').toLowerCase().includes('duplo')?'duplo':'simples';
     const gPerp=vidro==='duplo'?0.75:0.85;
     const prot=(protParaCalculo(ve)||'').toLowerCase();
-    const cor=(ve.caixCor||'').toLowerCase().includes('clara')?'clara':'escura';
+    const cor=corDaProtecao(ve);
     // Tabela 48 do Manual SCE (pág. 77), confirmada célula a célula:
     // - Persiana de réguas metálicas ou plásticas (é o que a app assume em "Persiana",
     //   mesma convenção já usada na Tabela 45/ΔR)
@@ -11942,7 +12291,62 @@ function shareIt(){const t=buildTxt();if(navigator.share){navigator.share({title
 //   Esquentador/caldeira a combustível líquido ou gasoso — E=0,75: ≤1 ano→1,00 | depois de 1995→0,95 | até 1995 (inclusive)→0,80
 // Nota 1: sem data de instalação, usar a mais recente entre ano de fabrico e ano de construção do edifício.
 // Nota 2: manutenção documentada no último ano anula o Fage.
+/* TABELA 76 — UMA TABELA SÓ.
+   Havia três cópias dos escalões de F_age: no painel de AQS (FAGE_BRACKETS),
+   no texto do AQS (IDADE_MAP) e inline no texto da climatização. Os valores
+   batiam hoje; amanhã alguém mexia numa e as outras ficavam. É o padrão de
+   erro que mais tem aparecido nesta app.
+   Os escalões da Tabela 76 (Despacho 6476-H/2021), conferidos com a skill:
+   · esquentador / caldeira a gás ou gasóleo: ≤1 ano 1,00 | depois de 1995 0,95
+     | até 1995 inclusive 0,80 — NÃO tem escalões por anos
+   · termoacumulador, bomba de calor, split/multi/VRF, caldeira a combustível
+     sólido, recuperadores e salamandras: ≤1 ano 1,00 | 1–10 0,95 | 10–20 0,90
+     | >20 0,85
+   · resistência eléctrica: 1,00 sempre
+   · manutenção documentada no último ano (nota 2): 1,00 */
+const T76_FAMILIA={
+  esquentador:'gas', 'caldeira a gás':'gas', 'caldeira gás':'gas', 'caldeira a gasóleo':'gas',
+  termoacumulador:'anos', 'bomba de calor':'anos', split:'anos', 'multi-split':'anos',
+  vrf:'anos', 'caldeira a lenha':'anos', 'caldeira a pellets':'anos',
+  recuperador:'anos', salamandra:'anos', lareira:'anos',
+  'resistência':'nenhum', 'radiadores elétricos':'nenhum',
+};
+function familiaT76(tipo){
+  const t=String(tipo||'').toLowerCase();
+  if(/resist|radiador/.test(t)) return 'nenhum';
+  if(/esquentador/.test(t)) return 'gas';
+  if(/caldeira/.test(t)) return /lenha|pellet|biomassa|s[óo]lido/.test(t)?'anos':'gas';
+  if(/termoacum|bomba de calor|split|vrf|recuper|salamandra|lareira|chiller|rooftop/.test(t)) return 'anos';
+  return 'anos';
+}
+/* Devolve {fage, frase, semAno} para um tipo de equipamento e um ano de
+   referência (o mais recente entre fabrico e instalação, nota 1). */
+function fageT76(tipo,anoRef,manutencao){
+  if(manutencao) return {fage:1.00,frase:'manutenção documentada no último ano',semAno:false};
+  const fam=familiaT76(tipo);
+  if(fam==='nenhum') return {fage:1.00,frase:'sem depreciação (Tabela 76)',semAno:false};
+  const ano=parseInt(anoRef);
+  const ANO_ATUAL=new Date().getFullYear();
+  if(!ano){
+    // sem informação nenhuma: o escalão mais desfavorável da família
+    return fam==='gas'
+      ?{fage:0.80,frase:'instalado até 1995 (inclusive)',semAno:true}
+      :{fage:0.85,frase:'idade superior a 20 anos',semAno:true};
+  }
+  const idade=ANO_ATUAL-ano;
+  if(idade<=1) return {fage:1.00,frase:'idade inferior a 1 ano',semAno:false};
+  if(fam==='gas')
+    return ano>1995?{fage:0.95,frase:'instalado depois de 1995',semAno:false}
+                   :{fage:0.80,frase:'instalado até 1995 (inclusive)',semAno:false};
+  if(idade<=10) return {fage:0.95,frase:'idade entre 1 e 10 anos',semAno:false};
+  if(idade<=20) return {fage:0.90,frase:'idade entre 10 e 20 anos',semAno:false};
+  return {fage:0.85,frase:'idade superior a 20 anos',semAno:false};
+}
 function calcularFageAQS(tipo,anoAssumido){
+  // mantém-se por compatibilidade — delega na tabela única
+  return fageT76(tipo==='termoacumulador'?'termoacumulador':'esquentador',anoAssumido,false);
+}
+function _calcularFageAQS_antigo(tipo,anoAssumido){
   const ANO_ATUAL=new Date().getFullYear();
   if(!anoAssumido){
     // sem qualquer informação — cenário mais desfavorável previsto na tabela
@@ -12186,9 +12590,14 @@ function gerarTextoAQS(){
 
   // A idade selecionada no painel tem prioridade sobre o ano assumido (Tabela 76).
   // Termo/BC partilham as faixas (≤1|1-10|10-20|>20); esquentador/caldeira usa as faixas 1995.
+  // os escalões escolhidos no painel passam pela tabela única, com um ano que
+  // cai no escalão certo — assim não há valores copiados à mão
+  const _A=new Date().getFullYear();
+  const _t=(isTermo||isBC)?'termoacumulador':'esquentador';
+  const _m=(ano)=>{ const r=fageT76(_t,ano,false); return [r.fage,r.frase]; };
   const IDADE_MAP=(isTermo||isBC)
-    ?{'menos_1':[1.00,'idade inferior a 1 ano'],'1_a_10':[0.95,'idade entre 1 e 10 anos'],'10_a_20':[0.90,'idade entre 10 e 20 anos'],'mais_20':[0.85,'idade superior a 20 anos']}
-    :{'menos_1':[1.00,'idade inferior a 1 ano'],'1_a_20':[0.95,'instalado depois de 1995'],'mais_20_pos95':[0.95,'instalado depois de 1995'],'mais_20_pre95':[0.80,'instalado até 1995 (inclusive)']};
+    ?{'menos_1':_m(_A),'1_a_10':_m(_A-5),'10_a_20':_m(_A-15),'mais_20':_m(_A-25)}
+    :{'menos_1':_m(_A),'1_a_20':_m(_A-5),'mais_20_pos95':_m(1996),'mais_20_pre95':_m(1995)};
   let fage,frase,semAno=false,idadeSelecionada=false;
   const manutencao=D.aqsManutencao==='sim'; // Nota 2 da Tabela 76 — anula o F_age
   if(manutencao){
@@ -12198,7 +12607,12 @@ function gerarTextoAQS(){
   }else{
     ({fage,frase,semAno}=calcularFageAQS((isTermo||isBC)?'termoacumulador':'esquentador',anoAssumido));
   }
-  D.aqsFatorIdade=fage;
+  /* GERAR O TEXTO NÃO GRAVA NO LEVANTAMENTO.
+     Isto escrevia D.aqsFatorIdade ao gerar o TXT. Se o TXT fosse gerado antes
+     de se responder à idade do equipamento — na revisão, na exportação
+     automática — ficava lá 0,95 com ar de resposta, e o painel passava a
+     mostrá-lo como se tivesse sido escolhido. O texto CALCULA o factor e
+     escreve-o; quem grava é o painel, quando se responde. */
   const fmtFage=fage.toFixed(2).replace('.',',');
 
   // frase final sobre a idade/ano assumido, comum aos vários casos
@@ -14216,7 +14630,7 @@ function abrirMenuPerguntas(){
   let ultimaCtx=null;
   qList.forEach((q,idx)=>{
     if(q.isDivCompletoMarker||q.isPeMarker||q.isDivExtraMarker) return; // marcadores estruturais, não são perguntas navegáveis
-    if(q.cond&&!q.cond()) return; // não aplicável ao estado atual — não mostrar no índice
+    if(!perguntaVisivel(q)) return; // não aplicável ao estado atual — não mostrar no índice
 
     if(q.ctx&&q.ctx!==ultimaCtx){
       ultimaCtx=q.ctx;
@@ -20993,8 +21407,21 @@ function onMedicaoRecebida(event){
 // Numa divisão com 4 paredes poupa 8 toques.
 let _seqMedicao=null;   // {campos:[input], idx, div}
 
+/* A MEDIÇÃO CONTINUA NA ÁREA.
+   A sequência parava na última parede e era preciso ir com o dedo aos campos
+   da área. Mas a área mede-se logo a seguir, com o mesmo laser e do mesmo
+   sítio: depois das paredes vem o comprimento do primeiro rectângulo, depois
+   a largura, e assim por diante se houver mais rectângulos.
+   E o comprimento do primeiro rectângulo não se mede outra vez — é a parede
+   que se acabou de medir. Fica preenchido, e o disparo seguinte é já a
+   largura. */
+function camposDaSequencia(){
+  const paredes=Array.from(document.querySelectorAll('input[data-parede-orient]'));
+  const area=Array.from(document.querySelectorAll('input[data-area-rect]'));
+  return paredes.concat(area);
+}
 function iniciarSequenciaMedicao(div){
-  const campos=Array.from(document.querySelectorAll('input[data-parede-orient]'));
+  const campos=camposDaSequencia();
   if(!campos.length){
     mostrarToastLaser('Marca primeiro as orientações das paredes.',4000);
     return;
@@ -21026,6 +21453,22 @@ function focarCampoSequencia(){
 function avancarSequenciaMedicao(){
   if(!_seqMedicao) return false;
   _seqMedicao.idx++;
+  /* Ao entrar no primeiro rectângulo da área, o comprimento já está medido:
+     é a última parede. Preenche-se e salta-se para a largura. */
+  try{
+    const c=_seqMedicao.campos[_seqMedicao.idx];
+    if(c&&c.getAttribute('data-area-lado')==='c'&&c.getAttribute('data-area-rect')==='0'&&!c.value){
+      const paredes=_seqMedicao.campos.filter(x=>x.hasAttribute('data-parede-orient'));
+      const ultima=paredes.filter(x=>parseFloat(x.value)>0).pop();
+      if(ultima){
+        c.value=parseFloat(ultima.value).toFixed(2);
+        c.dispatchEvent(new Event('input',{bubbles:true}));
+        mostrarToastLaser('Comprimento do 1.º rectângulo: '+c.value+' m (da parede medida). '+
+          'O próximo disparo é a largura.',4500);
+        _seqMedicao.idx++;
+      }
+    }
+  }catch(e){}
   if(_seqMedicao.idx>=_seqMedicao.campos.length){ terminarSequenciaMedicao(true); return true; }
   focarCampoSequencia();
   return true;
@@ -21052,13 +21495,17 @@ function atualizarBarraSequencia(){
   }
   const {campos,idx}=_seqMedicao;
   const c=campos[idx];
-  const orient=c?c.dataset.paredeOrient:'';
-  const troco=c?parseInt(c.dataset.paredeTroco||'0'):0;
+  const ehArea=!!(c&&c.hasAttribute('data-area-rect'));
+  const orient=ehArea
+    ? ('área — rectângulo '+(parseInt(c.getAttribute('data-area-rect'))+1)+', '+
+       (c.getAttribute('data-area-lado')==='c'?'comprimento':'largura'))
+    : (c?c.dataset.paredeOrient:'');
+  const troco=(c&&!ehArea)?parseInt(c.dataset.paredeTroco||'0'):0;
   b.innerHTML='';
   const txt=document.createElement('div');
   txt.style.cssText='flex:1;font-size:13px;color:var(--tx);line-height:1.35';
   txt.innerHTML='<b style="color:var(--ac)">📏 A medir: '+escHtml(orient)+(troco>0?' (troço '+(troco+1)+')':'')+'</b>'+
-    '<br><span style="font-size:11px;color:var(--tx3)">parede '+(idx+1)+' de '+campos.length+' · dispara o laser</span>';
+    '<br><span style="font-size:11px;color:var(--tx3)">'+(ehArea?'':'parede ')+(idx+1)+' de '+campos.length+' · dispara o laser</span>';
   b.appendChild(txt);
   const btSaltar=document.createElement('button');
   btSaltar.textContent='Saltar';
