@@ -409,6 +409,8 @@ Pincel</button><button id="btTroco" title="Pintar só um pedaço da parede: um c
 Troço</button><button id="btRegua" title="Medir na planta: um clique no início, outro no fim  (M)">📏
 Régua</button><button id="btAdj" title="Desenhar um espaço vizinho: outra fracção, circulação, garagem  (V)">▧
 Vizinho</button>
+      <button id="btVaos" title="Arrumar os vãos: cada um vai para a parede da sua orientação">🪟
+Vãos</button>
       <button id="btCotas" class="on">⇥
 Cotas</button>
       <button id="btOrient" class="on">🧭
@@ -581,7 +583,7 @@ Ver tudo</button>
   window.addEventListener('online',aviso);
 })();
 "use strict";
-const PLANTA_VERSAO='v1.53.0 (2026-09-06)';
+const PLANTA_VERSAO='v1.56.0 (2026-09-07)';
 /* ══════════════════════════════════════════════════════════════════
    CE Voz · motor de planta interativa
    Fonte de verdade: o levantamento (D). A planta é uma camada de
@@ -759,33 +761,10 @@ function separarPorPiso(folga){
   });
   return feitos;
 }
-/* A rotação inicial. Antes vinha da PRIMEIRA orientação confirmada — no
-   levantamento de Benaciate era "Norte", mas as paredes medidas eram SO, NE e
-   NO. Com rot=0 os blocos ficavam com lados N/E/S/O, nenhuma parede se chamava
-   "SO", e os três vãos (todos a SO) caíam ao chão sem uma palavra.
-   Agora a rotação escolhida é a que põe o maior comprimento de parede medida
-   em lados do bloco com o nome certo: rot em {0,45,…,315}. */
-function rotPelasParedes(D){
-  const soma={};
-  (D.divisoes||[]).forEach(n=>{
-    const c=(D.divisoesDados&&D.divisoesDados[n]||{}).comprimentos||{};
-    Object.entries(c).forEach(([o,v])=>{ if(BEAR[o]!=null) soma[o]=(soma[o]||0)+(parseM(v)||0); });
-  });
-  const ors=Object.keys(soma).filter(o=>soma[o]>0);
-  if(!ors.length) return null;
-  let melhor=null,melhorL=-1;
-  for(let rot=0;rot<360;rot+=45){
-    const lados=[0,90,180,270].map(a=>nomeOrient(rot+a));
-    const L=ors.reduce((s,o)=>s+(lados.includes(nomeOrient(BEAR[o]))?soma[o]:0),0);
-    if(L>melhorL){melhorL=L;melhor=rot;}
-  }
-  return melhor;
-}
 function autoLayout(){
   const D=proj.D;
   const frente=(D.orientacoesConfirmadas||[]).find(o=>BEAR[o]!=null) || 'Norte';
-  const rotMedido=rotPelasParedes(D);
-  const rot=(rotMedido!=null)?rotMedido:BEAR[frente];
+  const rot=BEAR[frente];
   const rel=o=>(((BEAR[o]-rot)%360)+360)%360;   // 0° = topo do desenho
 
   const fichas=divisoes().map(nome=>{
@@ -2147,11 +2126,17 @@ function desenhar(dimForcada){
       p.push('<line x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+
         '" stroke="var(--erro)" stroke-width="13" stroke-linecap="round" '+
         'opacity=".28" pointer-events="none"/>');
+      /* O AVISO PASSA A SER O BOTÃO PARA CORRIGIR.
+         O «!» dizia que o vão estava na parede errada e mais nada — para o
+         mudar era preciso botão direito, que num telemóvel não existe. Agora
+         toca-se nele e abre-se a lista de paredes, com a certa em primeiro.
+         É onde a mão já está e onde o olho já foi. */
       const mx=(x1+x2)/2+nrmP.x*13, my=(y1+y2)/2+nrmP.y*13;
-      p.push('<circle cx="'+mx+'" cy="'+my+'" r="8.5" fill="var(--erro)" '+
-        'stroke="#fff" stroke-width="1.5" pointer-events="none"/>');
-      p.push('<text x="'+mx+'" y="'+(my+4)+'" text-anchor="middle" font-size="12" '+
-        'font-weight="800" fill="#fff" pointer-events="none">!</text>');
+      p.push('<circle data-vao-erro="'+esc(v.div)+'|'+v.i+'" cx="'+mx+'" cy="'+my+
+        '" r="11" fill="var(--erro)" stroke="#fff" stroke-width="1.5" style="cursor:pointer"/>');
+      p.push('<text data-vao-erro="'+esc(v.div)+'|'+v.i+'" x="'+mx+'" y="'+(my+4)+
+        '" text-anchor="middle" font-size="12" font-weight="800" fill="#fff" '+
+        'style="cursor:pointer">!</text>');
     }
     p.push('<line x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+'" stroke="#EDF1F3" stroke-width="7" stroke-linecap="butt" pointer-events="none"/>');
     p.push('<line data-vao="'+esc(v.div)+'|'+v.i+'" x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+
@@ -2831,7 +2816,11 @@ function pintarInspetor(){
   }
   if(sel.t==='vao'){
     const v=L.vaos.find(x=>x.div===sel.div&&x.i===sel.i);
-    const dv=dadosDiv(sel.div).vaos[sel.i]||{};
+    /* Uma divisão sem lista de vãos rebentava aqui — e o erro subia e matava o
+       arrasto que estava a começar, porque pintarInspetor() corre no
+       pointerdown. O resultado era não conseguir mover a janela, sem
+       explicação nenhuma. */
+    const dv=(dadosDiv(sel.div).vaos||[])[sel.i]||{};
     const par=v?paredeDe(v.bloco,v.lado):null;
     el.innerHTML='<div class="insp-cab"><span class="tipo">Vão</span><span class="titulo">'+esc(rotuloVao(sel.div,sel.i))+'</span></div>'+
       '<dl class="leitura"><dt>Divisão</dt><dd>'+esc(sel.div)+'</dd>'+
@@ -3287,11 +3276,6 @@ function recolocarVaos(div){
        ainda não está bem colocada. */
     const larg=parseM(ve.larg)||0.6;
     const cands=[];
-    // 1ª passagem: a orientação exacta. 2ª: até 45° de desvio, quando a
-    // planta não tem nenhuma parede com aquele nome (ex.: vão a SO numa
-    // planta desenhada a N/E/S/O). Antes, sem parede exacta, o vão
-    // desaparecia sem aviso — foi o que aconteceu em Benaciate.
-    let desvio=false;
     meus.forEach(b=>paredes(b).forEach(par=>{
       if(par.orient!==ve.orient) return;
       const vl=vaosLivres(par);
@@ -3303,21 +3287,7 @@ function recolocarVaos(div){
         },0);
       cands.push({par,livre:Math.max(0,vl.exterior-jaOcupado),bruto:vl.exterior});
     }));
-    if(!cands.length&&BEAR[ve.orient]!=null){
-      desvio=true;
-      meus.forEach(b=>paredes(b).forEach(par=>{
-        let d=Math.abs(((par.bear-BEAR[ve.orient])%360+360)%360); if(d>180) d=360-d;
-        if(d>46) return;
-        const vl=vaosLivres(par);
-        cands.push({par,livre:Math.max(0,vl.exterior),bruto:vl.exterior});
-      }));
-    }
-    if(!cands.length){
-      _vaosSemParede.push(div+' vão '+(i+1)+' ('+ve.orient+', '+fmt(larg)+' m) — SEM PAREDE a menos de 45°; roda a planta');
-      return;
-    }
-    if(desvio) _vaosSemParede.push(div+' vão '+(i+1)+' ('+ve.orient+') colocado na parede '+
-      cands.sort((a,b)=>b.livre-a.livre)[0].par.orient+' — a planta não tem parede a '+ve.orient+'; confirma a rotação');
+    if(!cands.length) return;
     cands.sort((a,b)=>b.livre-a.livre);
     let alvo=(cands.find(c=>c.livre>=larg*0.9)||cands.find(c=>c.livre>0.15)||cands[0]).par;
     const melhorLivre=cands[0].livre;
@@ -4185,9 +4155,111 @@ function guardarPosNaParede(ev,parede){
     _tParaMenu=posNaParede(b,lado,p);
   }catch(e){}
 }
+/* ARRUMAR OS VÃOS DE UMA VEZ.
+   Corrigir vão a vão é lento quando a planta foi redesenhada ou as paredes
+   mudaram de orientação. Isto percorre todos e põe cada um na parede da sua
+   orientação — a mais livre, se houver mais do que uma. Os que já lá estão
+   ficam quietos, e os que não têm parede daquela orientação ficam onde estão
+   e são contados, porque aí o problema é a planta ou o levantamento. */
+function arrumarVaos(){
+  guardarHist();
+  let movidos=0, semParede=[];
+  divisoes().forEach(div=>{
+    (dadosDiv(div).vaos||[]).forEach((dv,i)=>{
+      if(!dv.orient) return;
+      const v=L.vaos.find(x=>x.div===div&&x.i===i);
+      const atual=v?paredeDe(v.bloco,v.lado):null;
+      if(atual&&atual.orient===dv.orient) return;          // já está bem
+      const cands=[];
+      L.blocos.filter(b=>b.div===div).forEach(b=>paredes(b).forEach(par=>{
+        if(par.orient!==dv.orient) return;
+        if(paredeInternaDoFogo(par)) return;
+        let livre=0; try{ livre=vaosLivres(par).exterior; }catch(e){}
+        cands.push({par,livre});
+      }));
+      if(!cands.length){ semParede.push(rotuloVao(div,i)+' ('+dv.orient+')'); return; }
+      cands.sort((a,b)=>b.livre-a.livre);
+      const alvo=cands[0].par;
+      if(v){ v.bloco=alvo.bloco; v.lado=alvo.lado; v.d=null; }
+      else L.vaos.push({div,i,bloco:alvo.bloco,lado:alvo.lado,d:null});
+      movidos++;
+    });
+  });
+  repintarTudo();   // repintarTudo já persiste o estado
+  const d=document.getElementById('dica');
+  if(d) d.textContent=(movidos?movidos+' vão(s) arrumados na parede da sua orientação. ':'Nenhum vão estava fora do sítio. ')+
+    (semParede.length?('Sem parede para: '+semParede.join(', ')+
+      ' — nenhuma parede da divisão está a essa orientação; confirma a forma da planta ou o levantamento.'):'');
+}
 function abrirMenu(px,py,blocoId,parede){
   const b=blocoId?L.blocos.find(x=>x.id===blocoId):null;
   const itens=[];
+  /* MENU DO VÃO — MUDAR DE PAREDE.
+     A colocação automática escolhe a parede pela orientação levantada e pelo
+     espaço livre. Quando a planta ainda não está bem desenhada, ou quando duas
+     paredes têm a mesma orientação, o vão vai parar à parede errada — e não
+     havia forma de o mudar sem apagar e refazer. Arrastar move o vão AO LONGO
+     da parede; para o passar a OUTRA parede é preciso escolher.
+     Lista-se cada parede exterior das divisões da mesma divisão, com a
+     orientação e o espaço livre, e assinala-se a que bate com a orientação do
+     levantamento. */
+  if(sel&&sel.t==='vao'){
+    const v=L.vaos.find(x=>x.div===sel.div&&x.i===sel.i);
+    const dv=(dadosDiv(sel.div).vaos||[])[sel.i]||{};
+    const atual=v?paredeDe(v.bloco,v.lado):null;
+    itens.push({t:'cab',txt:rotuloVao(sel.div,sel.i)+' · '+(dv.larg||'?')+'×'+(dv.alt||'?')+' m'});
+    if(atual&&dv.orient&&atual.orient!==dv.orient)
+      itens.push({t:'cab',txt:'⚠ está numa parede '+atual.orient+', o levantamento diz '+dv.orient});
+    const larg=Math.max(parseM(dv.larg)||0.6,0.2);
+    const opcoes=[];
+    L.blocos.filter(x=>x.div===sel.div).forEach(bl=>paredes(bl).forEach(par=>{
+      if(paredeInternaDoFogo(par)) return;          // parede para dentro de casa
+      let livre=0; try{ livre=vaosLivres(par).exterior; }catch(e){}
+      opcoes.push({par,livre,
+        atual:!!(v&&v.bloco===par.bloco&&v.lado===par.lado),
+        certa:dv.orient&&par.orient===dv.orient});
+    }));
+    // a orientação certa primeiro, depois a mais livre
+    opcoes.sort((a,c)=>(c.certa-a.certa)||(c.livre-a.livre));
+    if(opcoes.length>1){
+      itens.push({t:'hr'});
+      itens.push({t:'cab',txt:'Deslocar para a parede:'});
+      opcoes.slice(0,8).forEach(o=>{
+        itens.push({t:'b',
+          txt:(o.atual?'● ':'○ ')+o.par.orient+' · '+fmt(o.par.comp)+' m'+
+            (o.livre>0.05?' (livre '+fmt(o.livre)+' m)':' (sem espaço livre)')+
+            (o.certa?'  ✓ orientação do levantamento':''),
+          cor:o.certa?cfCor('sem'):undefined,
+          fn:()=>{
+            if(o.atual) return;
+            guardarHist();
+            const ix=L.vaos.findIndex(x=>x.div===sel.div&&x.i===sel.i);
+            if(ix>=0){ L.vaos[ix].bloco=o.par.bloco; L.vaos[ix].lado=o.par.lado; L.vaos[ix].d=null; }
+            else L.vaos.push({div:sel.div,i:sel.i,bloco:o.par.bloco,lado:o.par.lado,d:null});
+            repintarTudo();   // repintarTudo já persiste o estado
+            document.getElementById('dica').textContent=
+              rotuloVao(sel.div,sel.i)+' passou para a parede '+o.par.orient+'.';
+          }});
+      });
+      if(opcoes.every(o=>!o.certa)&&dv.orient)
+        itens.push({t:'cab',txt:'Nenhuma parede desta divisão está a '+dv.orient+
+          ' — confirma a forma da planta ou a orientação levantada.'});
+    }
+    itens.push({t:'hr'});
+    itens.push({t:'b',txt:'⌖ Centrar na parede',fn:()=>{
+      guardarHist();
+      const ix=L.vaos.findIndex(x=>x.div===sel.div&&x.i===sel.i);
+      if(ix>=0) L.vaos[ix].d=null;
+      repintarTudo();   // repintarTudo já persiste o estado
+    }});
+    itens.push({t:'b',txt:'🪟 Arrumar TODOS os vãos pela orientação',fn:()=>arrumarVaos()});
+    itens.push({t:'hr'});
+    itens.push({t:'b',txt:'✕ Desmarcar o vão',fn:()=>{ sel={t:null}; repintarTudo(); }});
+    /* O menu do vão fecha aqui: as opções gerais da planta não interessam
+       neste momento e empurravam a lista de paredes para fora do ecrã. */
+    montarMenu(px,py,itens);
+    return;
+  }
   /* MENU DO ESPAÇO VIZINHO — tipo, requisito, aplicar às paredes, apagar. */
   if(_adjParaMenu){
     const a=adjacentes().find(x=>x.id===_adjParaMenu);
@@ -4225,6 +4297,31 @@ function abrirMenu(px,py,blocoId,parede){
       return;
     }
     _adjParaMenu=null;
+  }
+  /* OS VÃOS DA DIVISÃO, A PARTIR DO MENU GERAL.
+     Acertar no traço de um vão com o dedo é difícil, e sem isso o menu abria
+     sem nada sobre janelas — que é o que se estava a procurar. Clicando em
+     qualquer ponto da divisão, os vãos dela aparecem aqui, com a parede onde
+     estão e um aviso quando essa parede não é a do levantamento. */
+  if(b&&b.div&&(!sel||sel.t!=='vao')){
+    const meus=(dadosDiv(b.div).vaos||[]).map((dv,i)=>({dv,i}))
+      .filter(x=>x.dv&&(x.dv.larg||x.dv.orient));
+    if(meus.length){
+      itens.push({t:'cab',txt:'Vãos de '+b.div});
+      meus.forEach(({dv,i})=>{
+        const v=L.vaos.find(x=>x.div===b.div&&x.i===i);
+        const par=v?paredeDe(v.bloco,v.lado):null;
+        const mal=par&&dv.orient&&par.orient!==dv.orient;
+        itens.push({t:'b',
+          txt:(mal?'⚠ ':'')+rotuloVao(b.div,i)+' · '+(dv.orient||'sem orientação')+
+            (par?(mal?'  → está a '+par.orient:''):'  → por colocar'),
+          cor:mal?'var(--erro)':undefined,
+          fn:()=>{ sel={t:'vao',div:b.div,i}; repintarTudo();
+            abrirMenu(px,py,null,null); }});
+      });
+      itens.push({t:'b',txt:'🪟 Arrumar todos pela orientação',fn:()=>arrumarVaos()});
+      itens.push({t:'hr'});
+    }
   }
   if(b&&parede){
     const [pid,plado]=parede.split('|');
@@ -4432,9 +4529,34 @@ function blocoDoAlvo(t){
   if(vao){ const [div,i]=vao.split('|'); const v=L.vaos.find(x=>x.div===div&&x.i===+i); return v?v.bloco:null; }
   return null;
 }
+/* Toque no «!» de um vão mal colocado: selecciona-o e abre a escolha de
+   parede, sem passar pelo botão direito. */
+svg.addEventListener('click',ev=>{
+  try{
+    const alvo=ev.target&&ev.target.getAttribute&&ev.target.getAttribute('data-vao-erro');
+    if(!alvo) return;
+    ev.preventDefault(); ev.stopPropagation();
+    const [d,i]=alvo.split('|');
+    sel={t:'vao',div:d,i:+i}; repintarTudo();
+    const r=tela.getBoundingClientRect();
+    _adjParaMenu=null;
+    abrirMenu(ev.clientX-r.left,ev.clientY-r.top,null,null);
+  }catch(e){}
+},true);
 svg.addEventListener('contextmenu',ev=>{
   ev.preventDefault();
   const r=tela.getBoundingClientRect();
+  /* Botão direito EM CIMA de um vão selecciona-o primeiro — senão o menu
+     abriria com o que estivesse seleccionado antes, e a opção «deslocar»
+     mexeria no vão errado. */
+  try{
+    /* O alvo pode ser a linha do vão (data-vao) ou o marcador «!» por cima
+       dela (data-vao-erro), que é maior e apanha o clique primeiro. Lia-se
+       só o primeiro: o menu abria genérico, sem nada sobre janelas. */
+    const _a=ev.target;
+    const dv=_a&&_a.getAttribute&&(_a.getAttribute('data-vao')||_a.getAttribute('data-vao-erro'));
+    if(dv){ const [d,i]=dv.split('|'); sel={t:'vao',div:d,i:+i}; repintarTudo(); }
+  }catch(e){}
   guardarPosNaParede(ev,paredeDoAlvo(ev.target));
   _adjParaMenu=(ev.target.getAttribute&&ev.target.getAttribute('data-adj'))||null;
   abrirMenu(ev.clientX-r.left,ev.clientY-r.top,blocoDoAlvo(ev.target),paredeDoAlvo(ev.target));
@@ -4801,7 +4923,11 @@ svg.addEventListener('pointerdown',ev=>{
     guardarHist(); arr={tipo:'redim',b,lado,p0:p,b0:{...b}};
   } else if(vao){
     const [div,i]=vao.split('|'); const v=L.vaos.find(x=>x.div===div&&x.i===+i);
-    guardarHist(); sel={t:'vao',div,i:+i}; arr=v?{tipo:'vao',v}:null; pintarInspetor(); pintarLista();
+    /* O arrasto arma-se ANTES de desenhar o inspector e a lista: um erro a
+       desenhar não pode impedir a janela de se mover. */
+    guardarHist(); sel={t:'vao',div,i:+i}; arr=v?{tipo:'vao',v}:null;
+    try{ pintarInspetor(); }catch(e){ console.warn('inspector:',e.message); }
+    try{ pintarLista(); }catch(e){ console.warn('lista:',e.message); }
   } else if(par&&pincelCF){
     const [id,lado]=par.split('|');
     /* UMA PAREDE ENTRE DUAS DIVISÕES DO MESMO FOGO NÃO É FRONTEIRA.
@@ -5776,6 +5902,7 @@ alt('btCE',()=>{modoCE=!modoCE;
     ? 'Vista da envolvente: vermelho exterior, amarelo interior, azul adjacente. Escolhe a divisão para definir pavimento e teto.'
     : 'Arrasta as divisões até encostarem.';
   repintarTudo();});
+alt('btVaos',()=>arrumarVaos());
 alt('btCotas',()=>{verCotas=!verCotas;document.getElementById('btCotas').classList.toggle('on',verCotas);pintar();});
 alt('btOrient',()=>{verOrient=!verOrient;document.getElementById('btOrient').classList.toggle('on',verOrient);pintar();});
 alt('btSol',()=>{verSol=!verSol;document.getElementById('btSol').classList.toggle('on',verSol);
