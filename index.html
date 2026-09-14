@@ -270,6 +270,13 @@ body.com-planta #visDivisoria.a-arrastar::after{color:#04140c}
       <div style="font-size:11px;margin-top:1px;display:flex;gap:10px">
         <span id="hdr-grav" style="color:var(--tx3)"></span>
         <span id="hdr-nuvem" style="color:var(--tx3)" title="cópia automática no OneDrive"></span>
+        <!-- HORA E TEMPO DECORRIDO.
+             Saber quanto tempo leva um levantamento é o que permite orçamentar
+             o próximo — e a hora à mão evita ter de sair da app para a ver.
+             Ocupa uma linha que já existe, ao lado do estado da gravação. -->
+        <span id="hdr-relogio" style="color:var(--tx3);font-variant-numeric:tabular-nums"
+              title="hora · tempo neste levantamento (toca para ver o detalhe)"
+              onclick="detalheTempo()"></span>
       </div>
     </div>
     <div style="display:flex;gap:6px">
@@ -571,7 +578,7 @@ const DIVS_BASE=[
 // VERSÃO — fonte única (selo no ecrã inicial + cabeçalho do TXT exportado).
 // Subir aqui a cada alteração ao ficheiro.
 // ═══════════════════════════════════════
-const APP_VERSION='v2026.09.07-FIX273';
+const APP_VERSION='v2026.09.08-FIX275';
 
 /* ══════════════════════════════════════════════════════════════════
    A APP INSTALADA FICAVA PRESA NUMA VERSÃO ANTIGA
@@ -1518,6 +1525,7 @@ async function iniciar(_restoreCurQ, _restoreAnswers){
      "a mesma pessoa a continuar" de "a app recarregou e voltou ao início". */
   if(!D._sessao) D._sessao=Date.now().toString(36)+Math.random().toString(36).slice(2,8);
   if(!isRestore) D._sessao=Date.now().toString(36)+Math.random().toString(36).slice(2,8);
+  setTimeout(()=>{ try{ iniciarRelogio(); }catch(e){} },0);
   if(!isRestore){
     const guardados={}; D_MANTER.forEach(k=>{ if(D[k]!==undefined) guardados[k]=D[k]; });
     /* RESET DE UM LEVANTAMENTO NOVO — POR EXCLUSÃO, NÃO POR LISTA.
@@ -1535,6 +1543,7 @@ async function iniciar(_restoreCurQ, _restoreAnswers){
     D_MANTER.forEach(k=>{ if(guardados[k]!==undefined) D[k]=guardados[k]; });
     // o momento do arranque — DEPOIS do reset, senão era apagado com o resto
     D._tsArranque=new Date().toISOString();
+    D._minutosLevantamento=0;   // levantamento novo: o cronómetro recomeça
     // aplicar perfil de edifício se seleccionado
     if(window._perfilPendente){aplicarPerfil(window._perfilPendente);window._perfilPendente=null;}
     // já não é preciso limpar a IndexedDB aqui: os documentos ficam sempre associados
@@ -3296,6 +3305,39 @@ function renderCompInputs(q){
     true
   );
   wrap.appendChild(rosa);
+
+  /* UMA CIRCULAÇÃO PODE TER JANELA.
+     A app deixa de perguntar por vãos numa divisão sem orientações marcadas —
+     o que poupa sete «não» numa T3. Mas há circulações com janela para a rua,
+     e não havia por onde dizer isso sem ir ao ecrã «Perguntas», que ninguém
+     adivinha estar lá.
+     Este botão aparece só nessas divisões e repõe a pergunta, ali mesmo. */
+  if(!semParedes&&!Object.keys(dd.comprimentos||{}).length&&!D.orientacoesPorVer){
+    const temVaos=(dd.vaos||[]).some(v=>parseFloat(v.larg)>0);
+    if(!temVaos){
+      const b=document.createElement('button');
+      b.type='button';
+      b.textContent='🪟 Esta divisão tem vão para o exterior';
+      b.style.cssText='width:100%;margin:8px 0 2px;padding:10px;border-radius:9px;'+
+        'border:1px dashed var(--ac);background:none;color:var(--ac);font-size:13px;cursor:pointer';
+      b.onclick=()=>{
+        D.perguntasForcadas=Array.isArray(D.perguntasForcadas)?D.perguntasForcadas:[];
+        const id='dc-'+q.div+'-vaos';
+        if(!D.perguntasForcadas.includes(id)) D.perguntasForcadas.push(id);
+        delete dd.semParedesExt;
+        try{ autoSave(); }catch(e){}
+        mostrarToastLaser('A pergunta dos vãos de '+q.div+' volta a aparecer. '+
+          'Marca também a orientação da parede onde está a janela.',5000);
+        renderCompInputs(q);
+      };
+      wrap.appendChild(b);
+      const n=document.createElement('div');
+      n.style.cssText='font-size:11.5px;color:var(--tx3);margin-bottom:8px;line-height:1.4';
+      n.textContent='Sem orientações marcadas, esta divisão é tratada como interior '+
+        'e não se pergunta por vãos exteriores.';
+      wrap.appendChild(n);
+    }
+  }
 
   if(semParedes){
     /* Nada de rosa dos ventos nem de comprimentos: a divisão não tem parede
@@ -8024,6 +8066,58 @@ function abrirSegundaOpiniao(depois){
   fundo.onclick=(e)=>{ if(e.target===fundo) fundo.remove(); };
   document.body.appendChild(fundo);
 }
+/* ══════════ RELÓGIO E CRONÓMETRO ══════════
+   O tempo conta-se a partir de D._tsArranque, que já era gravado para a hora
+   da Declaração de Visita. Não há botão de começar nem de parar: o
+   levantamento começa quando se carrega em «Iniciar» e o que interessa é o
+   tempo total, não medir troços.
+   Ao retomar um processo noutro dia, o relógio mostraria dezenas de horas —
+   por isso conta-se só o tempo com a app aberta, somado entre sessões. */
+let _tempoBase=0;        // minutos já acumulados em sessões anteriores
+let _tsSessao=Date.now();
+function _minutosDecorridos(){
+  return _tempoBase+(Date.now()-_tsSessao)/60000;
+}
+function fmtDuracao(min){
+  const m=Math.max(0,Math.round(min));
+  if(m<60) return m+' min';
+  return Math.floor(m/60)+'h'+String(m%60).padStart(2,'0');
+}
+function pintarRelogio(){
+  const el=document.getElementById('hdr-relogio');
+  if(!el) return;
+  const agora=new Date();
+  const hora=String(agora.getHours()).padStart(2,'0')+':'+
+             String(agora.getMinutes()).padStart(2,'0');
+  el.textContent=hora+'  ·  ⏱ '+fmtDuracao(_minutosDecorridos());
+}
+function iniciarRelogio(){
+  _tsSessao=Date.now();
+  _tempoBase=parseFloat(D._minutosLevantamento)||0;
+  pintarRelogio();
+  if(!window._relogioTimer) window._relogioTimer=setInterval(()=>{
+    pintarRelogio();
+    /* Guarda-se o acumulado de vez em quando: se a app for fechada de
+       repente, perde-se no máximo um minuto. */
+    D._minutosLevantamento=Math.round(_minutosDecorridos()*10)/10;
+  },30000);
+}
+/* Ao tocar, o detalhe: início, fim previsto e o que isto vale para orçamentar. */
+function detalheTempo(){
+  const ini=D._tsArranque?new Date(D._tsArranque):null;
+  const min=_minutosDecorridos();
+  const nDiv=(D.divisoes||[]).length;
+  const linhas=[
+    'Tempo neste levantamento: '+fmtDuracao(min),
+    ini?('Começou às '+String(ini.getHours()).padStart(2,'0')+':'+
+         String(ini.getMinutes()).padStart(2,'0')+' de '+ini.toLocaleDateString('pt-PT')):'',
+    nDiv?('Divisões levantadas: '+nDiv+'   ·   '+fmtDuracao(min/nDiv)+' por divisão'):'',
+    '',
+    'O tempo conta só com a app aberta e soma entre sessões — retomar o '+
+    'processo amanhã não conta a noite pelo meio.',
+  ].filter(Boolean);
+  alert(linhas.join('\n'));
+}
 function goExp(){
   document.getElementById('exp-box').textContent=buildTxt();
   document.getElementById('copy-ok').style.display='none';
@@ -12387,6 +12481,16 @@ function buildTxt(){
     t+='\n';
   }
 
+  if(D._minutosLevantamento>0||D._tsArranque){
+    const min=parseFloat(D._minutosLevantamento)||0;
+    if(min>0){
+      t+=sep('TEMPO DE LEVANTAMENTO');
+      t+='  '+fmtDuracao(min)+' com a app aberta';
+      const nd=(D.divisoes||[]).length;
+      if(nd) t+='   ·   '+nd+' divisões   ·   '+fmtDuracao(min/nd)+' por divisão';
+      t+='\n\n';
+    }
+  }
   if(D.usoIA&&D.usoIA.chamadas){
     const c=custoEstimadoIA(D.usoIA);
     t+=sep('RECONHECIMENTO AUTOMÁTICO — CONSUMO');
@@ -14373,12 +14477,22 @@ async function _pedidoIA(tipo,body,repeticao){
     try{ _registarUsoIA({tipo,entrada:0,saida:0,repeticao:false,cache:true}); }catch(e){}
     return _cacheIA.get(chave);
   }
-  const resp=await fetch(ANTHROPIC_PROXY_URL,{
-    method:'POST',headers:{'Content-Type':'application/json','X-App-Secret':APP_SHARED_SECRET},
-    body:JSON.stringify(body)});
-  if(resp.status===401) throw new Error('proxy recusou o pedido (401) — o segredo da app não corresponde ao APP_SHARED_SECRET configurado no Cloudflare Worker');
-  if(!resp.ok) throw new Error('HTTP '+resp.status);
-  const data=await resp.json();
+  /* A REVISÃO FAZ O PEDIDO POR NÓS QUANDO A APP CORRE NUM IFRAME OPACO.
+     A app de revisão monta esta app num iframe srcdoc, que tem origem `null`.
+     Um fetch a partir daí é bloqueado e o browser devolve «Failed to fetch» —
+     mesmo quando há rede e o proxy está de pé. Quando a revisão deixou a sua
+     ponte instalada, pede-se-lhe que faça o pedido a partir da origem dela. */
+  let data;
+  if(typeof window.__fetchPelaRevisao==='function'){
+    data=await window.__fetchPelaRevisao(body);
+  } else {
+    const resp=await fetch(ANTHROPIC_PROXY_URL,{
+      method:'POST',headers:{'Content-Type':'application/json','X-App-Secret':APP_SHARED_SECRET},
+      body:JSON.stringify(body)});
+    if(resp.status===401) throw new Error('proxy recusou o pedido (401) — o segredo da app não corresponde ao APP_SHARED_SECRET configurado no Cloudflare Worker');
+    if(!resp.ok) throw new Error('HTTP '+resp.status);
+    data=await resp.json();   // a variável é a de fora: sem `const` aqui
+  }
   try{
     const us=data.usage||{};
     let ent=us.input_tokens, sai=us.output_tokens;
@@ -19992,6 +20106,7 @@ function retomar(){
     // abrir manualmente o ecrã "Anexar documentos", por isso um projeto retomado
     // parecia não ter documentos nenhuns mesmo estando tudo guardado.
     dbGetAllDocsDoProjeto().then(docs=>{window._docsAnexos=docs;renderDocsThumbs();}).catch(()=>{});
+    try{ iniciarRelogio(); }catch(e){}
     /* A planta do painel da direita também volta. Sem isto, quem retomava um
        processo encontrava o painel vazio e tinha de ir buscar a planta outra
        vez ao OneDrive — o PDF, a rasterização, tudo de novo. */
