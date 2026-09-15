@@ -583,7 +583,7 @@ const DIVS_BASE=[
 // VERSÃO — fonte única (selo no ecrã inicial + cabeçalho do TXT exportado).
 // Subir aqui a cada alteração ao ficheiro.
 // ═══════════════════════════════════════
-const APP_VERSION='v2026.09.15-FIX291';
+const APP_VERSION='v2026.09.15-FIX292';
 
 /* ══════════════════════════════════════════════════════════════════
    A APP INSTALADA FICAVA PRESA NUMA VERSÃO ANTIGA
@@ -21374,6 +21374,19 @@ function avisarPlantaDeMudanca(){
 /* A planta ocupa o ecrã todo, dentro da app. Sai com o mesmo botão ou com Esc.
    Não usa o ecrã inteiro do sistema: assim o botão de sair fica sempre à vista
    e não se depende de permissões do iframe. */
+/* Traz as medidas novas para o desenho. Ao contrário do «Refazer», não apaga
+   nada: as divisões que já foram arrastadas ou redesenhadas ficam onde estão. */
+function actualizarPlantaAgora(){
+  if(!_plantaAberta||!_plantaPronta){
+    alert('A planta ainda não está aberta.'); return;
+  }
+  enviarProjetoParaPlanta();
+  const e2=document.getElementById('pl-planta-estado');
+  if(e2){
+    e2.textContent='Medidas enviadas para o desenho.';
+    setTimeout(()=>{ if(e2) e2.textContent=''; },2500);
+  }
+}
 function alternarPlantaCheia(){
   const on=document.body.classList.toggle('planta-cheia');
   const b=document.getElementById('pl-btCheio');
@@ -21456,6 +21469,15 @@ function abrirPlantaAoLado(){
         /* Refazer de raiz: as divisões voltam às posições automáticas. Existe
            porque a actualização normal só acrescenta — depois de mudar muita
            coisa no levantamento, às vezes é mais rápido recomeçar. */
+        /* ACTUALIZAR SEM PERDER NADA.
+           O «Refazer» apaga tudo e pede confirmação — serve para recomeçar, não
+           para acompanhar o levantamento. Faltava um botão que fosse buscar as
+           medidas novas e as aplicasse ao desenho: acabei de medir a sala em L
+           e quero vê-la aparecer. */
+        '<button onclick="actualizarPlantaAgora()" title="Trazer as medidas novas para o desenho, sem perder o que já ajustaste" '+
+          'style="background:var(--bg3);color:var(--tx);border:1px solid var(--ac);'+
+          'border-radius:8px;padding:7px 12px;font-size:12.5px;font-weight:700;'+
+          'min-height:38px;cursor:pointer;white-space:nowrap">⟳ Actualizar</button>'+
         '<button onclick="refazerPlantaDoLevantamento()" title="Refazer o desenho a partir do levantamento — perde os ajustes feitos à mão" '+
           'style="background:var(--bg3);color:var(--tx2);border:1px solid var(--br);'+
           'border-radius:8px;padding:7px 11px;font-size:12px;min-height:38px;'+

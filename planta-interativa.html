@@ -596,7 +596,7 @@ Ver tudo</button>
   window.addEventListener('online',aviso);
 })();
 "use strict";
-const PLANTA_VERSAO='v1.67.0 (2026-09-15)';
+const PLANTA_VERSAO='v1.68.0 (2026-09-15)';
 /* ══════════════════════════════════════════════════════════════════
    CE Voz · motor de planta interativa
    Fonte de verdade: o levantamento (D). A planta é uma camada de
@@ -3666,6 +3666,10 @@ function fecharPoli(){
   /* Vizinho: guarda-se o polígono e recalcula-se a caixa envolvente, que é o
      que o resto do código usa para saber onde ele está. As paredes que ele
      toca são remarcadas a seguir, como quando se arrasta a caixa. */
+  if(!poli.adj){
+    // contorno desenhado à mão: o levantamento deixa de mandar nesta divisão
+    (L.blocos||[]).filter(b=>b.div===poli.div).forEach(b=>{ b.tocado=true; });
+  }
   if(poli.adj){
     const a=adjacentes().find(x=>x.id===poli.adj);
     if(a){
@@ -5598,6 +5602,10 @@ function largar(){
       ' — a folga que sobrou foi fechada.';
   }
   if(arr&&(arr.tipo==='mover'||arr.tipo==='redim')){
+    /* Mexido à mão: as medidas do levantamento deixam de mandar neste bloco.
+       Sem esta marca, a actualização automática desfazia o arrasto a cada
+       pergunta respondida. */
+    (arr.mover||[arr.b]).forEach(b=>{ if(b) b.tocado=true; });
     const divs=new Set((arr.mover||[arr.b]).map(b=>b.div));
     divs.forEach(d=>normalizarDivisao(d));
   }
@@ -7510,7 +7518,43 @@ function acrescentarDivisoesNovas(proj){
   const D2=(proj&&proj.D)||{};
   const jaTem=new Set((L.blocos||[]).map(b=>b.div));
   const novas=(D2.divisoes||[]).filter(d=>!jaTem.has(d));
-  if(!novas.length){ proj_atualizarDados(D2); return 0; }
+  /* MEDIDAS NOVAS NUMA DIVISÃO QUE JÁ EXISTE.
+     Só se acrescentavam divisões NOVAS: medir a sala em L depois de ela já
+     estar desenhada não mudava nada no desenho. O quadrado ficava do tamanho
+     estimado e o utilizador via a planta parada enquanto media.
+     Agora, uma divisão desenhada AUTOMATICAMENTE (nunca tocada à mão)
+     acompanha as medidas: muda de tamanho e ganha o contorno em L quando ele
+     aparece. Uma divisão que já foi arrastada ou redesenhada não se mexe —
+     esse trabalho é do utilizador e não se desfaz sozinho. */
+  let mexidas=0;
+  (D2.divisoes||[]).forEach(nome=>{
+    const b=(L.blocos||[]).find(x=>x.div===nome&&x.principal&&x.auto&&!x.tocado);
+    if(!b) return;
+    const dd2=(D2.divisoesDados||{})[nome]||{};
+    const rs=(dd2.areaRect||[]).map(r=>({c:parseM(r.c),l:parseM(r.l)})).filter(r=>r.c>0&&r.l>0);
+    if(!rs.length) return;
+    const w2=rs[0].c, h2=rs[0].l;
+    if(Math.abs(b.w-w2)<0.02&&Math.abs(b.h-h2)<0.02&&!b.estimado) return;
+    b.w=w2; b.h=h2; b.estimado=false;
+    /* Dois ou mais rectângulos: o contorno em L, montado a partir do lado
+       declarado («fica à direita do rectângulo 1»). */
+    if(rs.length>1&&rs[1].c>0&&rs[1].l>0){
+      const lado=String(((dd2.areaRect||[])[1]||{}).lado||'').toUpperCase();
+      const c2=rs[1].c, l2=rs[1].l;
+      if(lado==='E')      b.pts=[{x:b.x,y:b.y},{x:b.x+w2,y:b.y},{x:b.x+w2,y:b.y+l2},
+                                 {x:b.x+w2+c2,y:b.y+l2},{x:b.x+w2+c2,y:b.y+h2},{x:b.x,y:b.y+h2}];
+      else if(lado==='S') b.pts=[{x:b.x,y:b.y},{x:b.x+w2,y:b.y},{x:b.x+w2,y:b.y+h2},
+                                 {x:b.x+c2,y:b.y+h2},{x:b.x+c2,y:b.y+h2+l2},{x:b.x,y:b.y+h2+l2}];
+      else b.pts=null;    // lado por dizer: fica o rectângulo principal
+      if(b.pts){
+        const xs=b.pts.map(q=>q.x), ys=b.pts.map(q=>q.y);
+        b.w=Math.max(...xs)-b.x; b.h=Math.max(...ys)-b.y;
+      }
+    } else b.pts=null;
+    mexidas++;
+  });
+  if(mexidas) repintarTudo();
+  if(!novas.length){ proj_atualizarDados(D2); if(mexidas) repintarTudo(); return mexidas?-mexidas:0; }
   /* Colocam-se por baixo do que existe, encostadas à esquerda, para não
      caírem em cima de nada. Depois arrastam-se. */
   const cs=(L.blocos||[]).map(caixa);
@@ -8204,14 +8248,17 @@ const DEMO={"app": "v2026.07.26-FIX124", "exportado": "2026-07-28T12:10:47.218Z"
    Dentro da app não há exemplo nenhum a mostrar: o levantamento é que manda. */
 if(DEMO&&!DENTRO_DA_APP){ nomeFich='URBª MONTE DA BEMPOSTA Lote 19, R C B_levantamento.json'; carregar(DEMO); }
 if(DENTRO_DA_APP){
-  /* PAINEL LATERAL: DENTRO DA APP SÓ O QUE SE USA AO LADO DO LEVANTAMENTO.
-     Aberta ao lado das perguntas, a planta ocupa meia coluna de telemóvel — e
-     o painel da direita enchia-a com o disco do Norte, a planta de fundo e a
-     posição do sol. Nenhuma dessas coisas se faz enquanto se mede: o Norte
-     define-se uma vez, a planta de fundo carrega-se no escritório.
-     Ficam escondidas aqui e continuam todas disponíveis em «⛶ Ecrã todo» e na
-     planta aberta sozinha. */
-  document.querySelectorAll('[data-fora-da-app]').forEach(e=>{ e.hidden=true; });
+  /* DENTRO DA APP, O PAINEL LATERAL SAI TODO DA FRENTE.
+     Ao lado das perguntas, a planta tem meia coluna de telemóvel — e o painel
+     da direita comia-lhe metade disso com o disco do Norte, a planta de fundo,
+     as cores e a posição do sol. Nada disso se faz enquanto se mede: o que faz
+     falta é ver o desenho a crescer.
+     Tudo continua em «⛶ Ecrã todo» e na planta aberta sozinha. */
+  document.body.classList.add('sem-painel');
+  const _est=document.createElement('style');
+  _est.textContent='body.sem-painel aside.dir{display:none !important}'+
+    'body.sem-painel .tela{flex:1 1 auto}';
+  document.head.appendChild(_est);
   /* Repete-se o aviso: se a app já tinha respondido antes desta linha, o
      levantamento está a salvo; se ainda não, este segundo aviso apanha-a. */
   try{ window.parent.postMessage({tipo:'planta:pronta'},'*'); }catch(e){}
