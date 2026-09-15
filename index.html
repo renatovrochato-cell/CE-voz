@@ -583,7 +583,7 @@ const DIVS_BASE=[
 // VERSÃO — fonte única (selo no ecrã inicial + cabeçalho do TXT exportado).
 // Subir aqui a cada alteração ao ficheiro.
 // ═══════════════════════════════════════
-const APP_VERSION='v2026.09.09-FIX288';
+const APP_VERSION='v2026.09.15-FIX290';
 
 /* ══════════════════════════════════════════════════════════════════
    A APP INSTALADA FICAVA PRESA NUMA VERSÃO ANTIGA
@@ -7097,6 +7097,21 @@ function verificarLevantamento(){
      Num levantamento real de um último piso, coberturaTipoEsc ficou por
      responder: a secção COBERTURA não saiu no TXT e o verificador não disse
      nada. Um elemento da envolvente que falta é uma lacuna, não uma opção. */
+  /* COBERTURA POR CARACTERIZAR NUM ÚLTIMO PISO — É ERRO, NÃO LACUNA.
+     Não é um dado em falta como outro qualquer: decide se a envolvente de
+     cima é EXTERIOR ou para ESPAÇO NÃO ÚTIL. São dois cálculos diferentes, e
+     quem transcreve o TXT tem de parar aqui. Um levantamento real saiu com
+     esta resposta em branco e foi lançado como cobertura exterior num fogo
+     com desvão. */
+  try{
+    if(D.edificioTipo==='Apartamento'&&ehUltimoPiso()&&
+       !D.coberturaTipoEsc&&!((D.coberturaTipos||[]).length))
+      E('Cobertura','Último piso sem resposta ao tipo de cobertura: não se sabe se é '+
+        'terraço/inclinada sem desvão (envolvente EXTERIOR) ou com desvão não habitado '+
+        '(envolvente para ESPAÇO NÃO ÚTIL, b_tr da Tabela 22). São cálculos diferentes — '+
+        'não lançar sem confirmar.');
+  }catch(e){}
+
   /* PAREDES OPOSTAS COM MEDIDAS DIFERENTES.
      Num compartimento rectangular a parede Norte e a Sul têm o mesmo
      comprimento, e o mesmo para Este e Oeste. Num levantamento real a
@@ -11203,9 +11218,24 @@ function buildTxt(){
          «cobertura» em lado nenhum, e nada dizia que faltava. */
       if(_coberturaCobreTudo()&&!_semCob&&!D.coberturaTipoEsc&&!(D.coberturaTipos||[]).length){
         t+=sep('COBERTURA');
-        t+='___ (POR CARACTERIZAR — o fogo é o último piso, logo tem cobertura\n';
-        t+='exterior: tipo, isolamento e área. A ponte térmica «Fachada c/ cobertura»\n';
-        t+='já está contabilizada no quadro das PTL.)\n\n';
+        /* NÃO AFIRMAR «COBERTURA EXTERIOR» SEM SABER.
+           O texto dizia «o fogo é o último piso, LOGO TEM COBERTURA EXTERIOR».
+           Não é verdade: um último piso com desvão NÃO HABITADO tem por cima
+           espaço não útil, e a envolvente é a ESTEIRA, com b_tr da Tabela 22 —
+           não uma cobertura exterior.
+           Num caso real, a afirmação foi lida como instrução e o cálculo foi
+           lançado com cobertura exterior num fogo com desvão. O U de referência
+           e as perdas mudam por completo.
+           O TXT passa a dizer o que falta decidir, não a decidir por nós. */
+        t+='___ POR CARACTERIZAR — DECIDE O TIPO DE ENVOLVENTE, NÃO SE PODE ASSUMIR:\n\n';
+        t+='  O fogo é o último piso, logo tem alguma coisa por cima. FALTA SABER O QUÊ:\n';
+        t+='    · terraço ou cobertura inclinada SEM desvão → COBERTURA EXTERIOR\n';
+        t+='    · cobertura inclinada COM desvão não habitado → a envolvente é a\n';
+        t+='      ESTEIRA sob o desvão, para ESPAÇO NÃO ÚTIL (b_tr da Tabela 22),\n';
+        t+='      e NÃO uma cobertura exterior\n\n';
+        t+='  Não lançar como cobertura exterior sem confirmar no local.\n';
+        t+='  Falta ainda: isolamento e área.\n';
+        t+='  A ponte térmica «Fachada c/ cobertura» já está no quadro das PTL.\n\n';
       }
       /* UMA MORADIA TEM SEMPRE COBERTURA.
          Sem resposta à pergunta do tipo, a secção não aparecia — e numa moradia
@@ -21297,6 +21327,7 @@ function _fotoSrcRapida(f){
    Num ecrã largo, a ferramenta de planta abre no painel ao lado, com o
    levantamento já carregado. O que se guarda lá volta para cá pela mesma via —
    não é preciso exportar de um lado e importar do outro. */
+let _duploPelaPlanta=false;   // fomos nós que ligámos o modo de duas colunas?
 let _plantaAberta=false, _plantaPronta=false;
 window.addEventListener('message', ev=>{
   const m=ev.data;
@@ -21377,13 +21408,32 @@ function abrirPlantaAoLado(){
   if(_plantaAberta){                       // fechar e voltar ao painel normal
     _plantaAberta=false; _plantaPronta=false;
     document.body.classList.remove('planta-cheia');
+    /* Só se desliga o modo de duas colunas se foi ESTA função que o ligou —
+       em ecrã largo ele já vinha ligado e é o modo normal de trabalho. */
+    if(_duploPelaPlanta){ document.body.classList.remove('duplo'); _duploPelaPlanta=false; }
     pintarPainelLado();
     return;
   }
+  /* O PAINEL TINHA display:none E NINGUÉM O LIGAVA.
+     O CSS mostra o #painel-lado apenas com `body.duplo` — e essa classe não
+     era posta em lado nenhum do ficheiro. A planta era montada certinha, o
+     iframe criado, o levantamento enviado, e tudo isso dentro de um elemento
+     invisível. O que se via era o ecrã do levantamento a ocupar tudo: o
+     utilizador carregava em «Desenhar aqui» e parecia que nada acontecia.
+     Cinco tentativas minhas falharam por eu andar a corrigir o que vinha
+     DEPOIS deste ponto sem verificar se o painel chegava a ser visível.
+     Em ecrã largo a classe já vinha ligada — daí só falhar no telemóvel e no
+     tablet, que é onde o levantamento se faz. */
   if(!(D.divisoes||[]).length){
     alert('Ainda não há divisões no levantamento.\n\n'+
       'Faz a lista das divisões primeiro — a planta precisa de saber o que desenhar.');
     return;
+  }
+  // só DEPOIS de saber que há o que desenhar: ligar sem abrir deixaria meia
+  // coluna vazia no ecrã
+  if(!document.body.classList.contains('duplo')){
+    document.body.classList.add('duplo');
+    _duploPelaPlanta=true;
   }
   _plantaAberta=true; _plantaPronta=false;
   el.innerHTML=
