@@ -583,7 +583,7 @@ const DIVS_BASE=[
 // VERSÃO — fonte única (selo no ecrã inicial + cabeçalho do TXT exportado).
 // Subir aqui a cada alteração ao ficheiro.
 // ═══════════════════════════════════════
-const APP_VERSION='v2026.09.08-FIX285';
+const APP_VERSION='v2026.09.09-FIX288';
 
 /* ══════════════════════════════════════════════════════════════════
    A APP INSTALADA FICAVA PRESA NUMA VERSÃO ANTIGA
@@ -3976,6 +3976,12 @@ const VIDRO_OPTS=['Simples','Duplo'];
    dentro do que uma clara. Havia só «Persiana», e a app assumia uma cor.
    As portadas herdam a cor da caixilharia — é a mesma pintura, e é o que se
    vê em obra; quem tiver uma portada de cor diferente corrige. */
+/* A ORDEM DOS PISOS — UMA LISTA SÓ.
+   Estava declarada em três sítios com o mesmo conteúdo. Hoje batem; amanhã
+   alguém acrescenta o 5º andar num e esquece os outros dois, e o levantamento
+   passa a ordenar as divisões de maneira diferente conforme o ecrã. É o mesmo
+   padrão que fez o F_age divergir em quatro cópias. */
+const ORDEM_PISOS=['Cave','R/C','1º andar','2º andar','3º andar','4º andar'];
 const PROT_OPTS=['Persiana clara','Persiana escura','Portada de madeira','Portada metálica','Cortina exterior opaca','Portada interior de madeira','Portada interior metálica','Sem proteção exterior'];
 const PROT_INT_OPTS=['Cortinas blackout','Cortinas transparentes','Cortinas pouco transparentes','Estore','Outro','Sem proteção interior'];
 const CAIXILHO_COR_OPTS=['Cor clara','Cor escura'];
@@ -10074,7 +10080,6 @@ function buildTxt(){
 
   // ── TABELA — ÁREA E PÉ-DIREITO POR DIVISÃO ──
   {
-    const ORDEM_PISOS=['Cave','R/C','1º andar','2º andar','3º andar','4º andar'];
     const pisosUsados=[...new Set(D.divisoes.map(dv=>(D.divisoesDados[dv]||{}).piso||'R/C'))]
       .sort((a,b)=>{
         const ia=ORDEM_PISOS.indexOf(a),ib=ORDEM_PISOS.indexOf(b);
@@ -12230,8 +12235,7 @@ function buildTxt(){
       // metades (×2, Nota 1), com o comprimento estimado pela média dos
       // perímetros dos dois pisos que a laje separa — antes, numa moradia de
       // 2 pisos, a laje intermédia desaparecia por completo.
-      const ORDEM_PISOS=['Cave','R/C','1º andar','2º andar','3º andar','4º andar'];
-      const pisosComComp=ORDEM_PISOS.filter(p=>_compPorPiso[p]&&_compPorPiso[p].length);
+        const pisosComComp=ORDEM_PISOS.filter(p=>_compPorPiso[p]&&_compPorPiso[p].length);
       /* O QUE ESTÁ POR BAIXO DO PISO DE BAIXO
          Nem todo o piso inferior assenta no solo. Se houver cave — útil ou não
          útil — o pavimento do piso de baixo dá para ela, e a ligação é
@@ -12745,26 +12749,6 @@ function calcularFageAQS(tipo,anoAssumido){
   // mantém-se por compatibilidade — delega na tabela única
   return fageT76(tipo==='termoacumulador'?'termoacumulador':'esquentador',anoAssumido,false);
 }
-function _calcularFageAQS_antigo(tipo,anoAssumido){
-  const ANO_ATUAL=new Date().getFullYear();
-  if(!anoAssumido){
-    // sem qualquer informação — cenário mais desfavorável previsto na tabela
-    return tipo==='termoacumulador'
-      ?{fage:0.85,frase:'idade superior a 20 anos',semAno:true}
-      :{fage:0.80,frase:'instalado até 1995 (inclusive)',semAno:true};
-  }
-  const idade=ANO_ATUAL-anoAssumido;
-  if(tipo==='termoacumulador'){
-    if(idade<=1) return {fage:1.00,frase:'idade inferior a 1 ano'};
-    if(idade<=10) return {fage:0.95,frase:'idade entre 1 e 10 anos'};
-    if(idade<=20) return {fage:0.90,frase:'idade entre 10 e 20 anos'};
-    return {fage:0.85,frase:'idade superior a 20 anos'};
-  }
-  // esquentador / caldeira a combustível líquido ou gasoso
-  if(idade<=1) return {fage:1.00,frase:'idade inferior a 1 ano'};
-  if(anoAssumido>1995) return {fage:0.95,frase:'instalado depois de 1995'};
-  return {fage:0.80,frase:'instalado até 1995 (inclusive)'};
-}
 
 const TEXTOS_BASE=[{"id":"T01","g":"Esquentadores","f":"AQS","m":["esquentador"],"l":"Esquentador — sem dados, anterior a 1995","r":0.6,"t":"O sistema de preparação de águas quentes sanitárias é composto por um esquentador a gás, marca Junkers, com uma potência de 18,6kW, não foi possível obter os valores de eficiência. Considerou-se para efeitos de cálculo o valor por defeito previsto na Tabela 76 do Despacho n.º 6476-H/2021. Não sendo conhecido o ano de fabrico e considerando a ausência de contrato de manutenção, foi considerado fabricado antes de 1995. Não foi possível aferir se a rede de distribuição de águas quentes sanitárias possui isolamento térmico. Rendimento considerado para efeitos de cálculo foi de 0.60."},{"id":"T02","g":"Esquentadores","f":"AQS","m":["esquentador"],"l":"Esquentador — sem dados, posterior a 1996","r":0.71,"t":"O sistema de preparação de águas quentes sanitárias é composto por um esquentador a gás, marca Junkers, com uma potência de 18,6kW, não foi possível obter os valores de eficiência, O sistema satisfaz 100% das necessidades de produção de águas quentes sanitárias. Considerou-se para efeitos de cálculo o valor por defeito previsto na Tabela 76 do Despacho n.º 6476-H/2021. Não sendo conhecido o ano de fabrico e considerando a ausência de contrato de manutenção, foi considerado fabricado depois de 1995. Rendimento considerado de 0.71. Foi reduzido o rendimento do equipamento em 5% considerando o intervalo de tempo entre superior a 10 anos. Não foi possível aferir se a rede de distribuição de águas quentes sanitárias possui isolamento térmico"},{"id":"T03","g":"Esquentadores","f":"AQS","m":["esquentador"],"l":"Esquentador — com dados técnicos","r":0.86,"t":"Sistema de aquecimento de águas quentes composto por um esquentador com 11 litros de capacidade, marca Junkers modelo Power Control F, a gás propano, com eficiência de 86% e uma potência de 19,2 kW. O sistema satisfaz 100% das necessidades de produção de águas quentes sanitárias do imóvel. Não possui registo de manutenção. O equipamento encontra-se em funcionamento e em bom estado de conservação. Não foi possível aferir se a rede de distribuição de águas quentes sanitárias possui isolamento térmico. Não sendo conhecido o ano de fabrico e considerando a ausência de contrato de manutenção, foi reduzido o rendimento do equipamento em 10% considerando que o mesmo foi instalado depois de 1995."},{"id":"T04","g":"Caldeiras a gás","f":"AQS","m":["caldeira"],"l":"Caldeira sem manutenção e sem data de fabrico","r":0.89,"t":"O sistema de preparação de águas quentes sanitárias e aquecimento central é composto por uma caldeira a gás propano, marca Roca, modelo Vitoria 20/20 com uma potência de 24,0kW, rendimento determinado segundo o catálogo técnico do equipamento de 0,89. O sistema satisfaz 100% das necessidades de produção de águas quentes sanitárias do imóvel. Aquecimento central composto por radiadores distribuídos pelos principais compartimentos do imóvel, nomeadamente sala e quartos. Não foi possível aferir o isolamento das tubagens de águas quentes sanitárias. Equipamento sem contrato de manutenção. Não foi possível determinar a data da sua instalação, foi reduzido o rendimento do equipamento em 5% considerando o intervalo de tempo entre 1 a 10 anos.","no":["gasóleo"]},{"id":"T05","g":"Caldeiras a gás","f":"AQS","m":["caldeira"],"l":"Caldeira com manutenção e com data de fabrico","r":0.89,"t":"O sistema de preparação de águas quentes sanitárias e aquecimento central é composto por uma caldeira a gás propano, marca Roca, modelo Vitoria 20/20 com uma potência de 24,0kW, rendimento determinado segundo o catálogo técnico do equipamento de 0,89. O sistema satisfaz 100% das necessidades de produção de águas quentes sanitárias do imóvel. Aquecimento central composto por radiadores distribuídos pelos principais compartimentos do imóvel, nomeadamente sala e quartos. Não foi possível aferir o isolamento das tubagens de águas quentes sanitárias. Equipamento instalado no ano de «ano», com contrato de manutenção. Foi reduzido o rendimento do equipamento em 5% considerando o intervalo de tempo entre 1 e 10 anos.","no":["gasóleo"]},{"id":"T06","g":"Caldeiras a gasóleo","f":"CLIMA","m":["caldeira","gasóleo"],"l":"Caldeira a gasóleo","r":null,"t":"Sistema de aquecimento ambiente central é composto por uma caldeira a gasóleo, marca Baxi Modelo Geodis 24/30, com uma potência de 24kW e um rendimento segundo o catalogo técnico de 92,9%., sistema está interligado a radiadores distribuídos em todos os compartimentos da moradia."},{"id":"T07","g":"Caldeiras a gasóleo","f":"CLIMA","m":["caldeira","gasóleo"],"l":"Caldeira a gasóleo +aquecimento central","r":null,"t":"Sistema de aquecimento ambiente central é composto por uma caldeira a gasóleo, marca Baxi Modelo Argenta 24GT, com uma potência de 24kW e um rendimento segundo o catalogo técnico de 102%. interligado a radiadores, para aquecimento central distribuídos pelos principais compartimentos do imóvel, nomeadamente sala e quartos. Não foi possível aferir o isolamento das tubagens de águas quentes sanitárias. Equipamento sem manutenção. Não foi possível determinar a data da sua instalação, foi reduzido o rendimento do equipamento em 10% considerando o intervalo de tempo entre 10 a 20 anos."},{"id":"T08","g":"Termoacumuladores eléctricos","f":"AQS","m":["termoacumulador"],"l":"Termoacumulador — Sem Chapa","r":0.72,"t":"Sistema de aquecimento de águas quentes sanitárias composto por termoacumulador elétrico sem chapa de características visível, do qual não foi possível obter as características técnicas. Considerou-se para efeitos de cálculo o valor por defeito previsto na Tabela 76 do Despacho n.º 6476-H/2021 (90%). Não sendo conhecido o ano de fabrico e considerando a ausência de contrato de manutenção, foi reduzido o rendimento do equipamento considerando que o mesmo foi instalado na data de construção do imóvel. Não foi possível aferir se a rede de distribuição de águas quentes sanitárias possui isolamento térmico. Rendimento considerado de 0.72.","no":["gás","gas"]},{"id":"T09","g":"Termoacumuladores eléctricos","f":"AQS","m":["termoacumulador"],"l":"Termoacumulador — com Chapa","r":0.81,"t":"Sistema de aquecimento de águas quentes sanitárias composto por termoacumulador elétrico, marca Equation com 80 litros de capacidade, do qual não foi possível obter os valores de eficiência. Considerou-se para efeitos de cálculo o valor por defeito previsto na Tabela 76 do Despacho n.º 6476-H/2021. A potência foi estimada com base na chapa do equipamento (2 kW). Não sendo conhecido o ano de fabrico e considerando a ausência de contrato de manutenção, foi reduzido o rendimento do equipamento em 10% considerando que o mesmo foi instalado na data de construção do imóvel (entre 10 e 20 anos). Não foi possível aferir se a rede de distribuição de águas quentes sanitárias possui isolamento térmico. Rendimento considerado de 0.81.","no":["gás","gas"]},{"id":"T10","g":"Termoacumuladores eléctricos","f":"AQS","m":["termoacumulador"],"l":"Termoacumulador — com Chapa Novo com fatura","r":0.86,"t":"Sistema de aquecimento de águas quentes sanitárias composto por termoacumulador elétrico, marca Saunier Duval com 150 litros de capacidade, do qual não foi possível obter os valores de eficiência. Considerou-se para efeitos de cálculo o valor por defeito previsto na Tabela 76 do Despacho n.º 6476-H/2021. A potência foi estimada com base na chapa do equipamento (2 kW). Equipamento foi comprado a 11/2/2019 (conforme fatura de compra), rendimento do equipamento foi reduzido em 5% ficando no intervalo de tempo de 1 a 10 anos conforme a legislação em vigor. Não foi possível aferir se a rede de distribuição de águas quentes sanitárias possui isolamento térmico. Rendimento considerado de 0.86.","no":["gás","gas"]},{"id":"T11","g":"Termoacumuladores a gás","f":"AQS","m":["termoacumulador","gás"],"l":"Termoacumulador a gás — rendimento por defeito","r":null,"t":"O sistema de produção de águas quentes sanitárias convencional é composto por um termoacumulador a gás, marca Junkers modelo S160 KP, instalado numa arrecadação, com um rendimento considerado de 0,71, potência de 7,9kW e uma capacidade estimada para 155 litros. Rendimento calculado segundo o Despacho n.º 15793-E/2013, Não foi possível determinar a data da instalação do equipamento. Não foi possível aferir o isolamento térmico nas tubagens de água quente sanitária."},{"id":"T12","g":"Termoacumuladores a gás","f":"AQS","m":["termoacumulador","gás"],"l":"Termoacumulador a gás — rendimento da ficha técnica","r":null,"t":"O sistema de produção de águas quentes sanitárias convencional é composto por um termoacumulador a gás, marca Vaillant modelo tmoSTOR VGH 220, instalado numa arrecadação, com um rendimento considerado de 0,73, potência de 8,2kW e uma capacidade estimada para 220 litros. Rendimento calculado segundo o catalogo técnico, Não foi possível determinar a data da instalação do equipamento. Não foi possível aferir o isolamento térmico nas tubagens de água quente sanitária."},{"id":"T13","g":"Splits e climatização","f":"CLIMA","m":["split"],"l":"Com ficha técnica, ano desconhecido, 1 unidade","r":3.47,"t":"Sistema do tipo Split com permuta ar-ar para aquecimento e arrefecimento, marca Daikin e modelo 3MXS52DVMB constituído por 1 unidade exterior e 1 unidade interior instalada na sala. Este sistema, com base na ficha técnica fornecida pelo fabricante, possui uma potência de aquecimento e arrefecimento de 6,80 kW e 5,20 kW, respectivamente, COP de 4,04 e EER de 3,05. O equipamento encontra-se em funcionamento e em bom estado de conservação. Não sendo conhecido o ano de fabrico do equipamento e considerando a ausência de contrato de manutenção, este teve o seu rendimento reduzido em 10%, considerando o intervalo de tempo entre 10 e 20 anos.","alt":["multi-split","ar condicionado"]},{"id":"T14","g":"Splits e climatização","f":"CLIMA","m":["split"],"l":"Com ficha técnica, ano desconhecido, 2 unidades","r":3.47,"t":"Sistema do tipo Split com permuta ar-ar para aquecimento e arrefecimento, marca Daikin e modelo 3MXS52DVMB constituído por 2 unidades exteriores e 2 unidades interiores instalada nos quartos e sala. Este sistema, com base na ficha técnica fornecida pelo fabricante, possui uma potência de aquecimento e arrefecimento de 6,80 kW e 5,20 kW, respectivamente, COP de 4,04 e EER de 3,05. O equipamento encontra-se em funcionamento e em bom estado de conservação. Não sendo conhecido o ano de fabrico do equipamento e considerando a ausência de contrato de manutenção, este teve o seu rendimento reduzido em 10%, considerando o intervalo de tempo entre 10 e 20 anos.","alt":["multi-split","ar condicionado"]},{"id":"T15","g":"Splits e climatização","f":"CLIMA","m":["split"],"l":"Com ficha técnica, ano conhecido","r":3.47,"t":"Sistema do tipo Split com permuta ar-ar para aquecimento e arrefecimento, marca Daikin e modelo 3MXS52DVMB constituído por 1 unidade exterior e 1 unidade interior instalada na sala. Este sistema, com base na ficha técnica fornecida pelo fabricante, possui uma potência de aquecimento e arrefecimento de 6,80 kW e 5,20 kW, respectivamente, COP de 4,04 e EER de 3,05. O equipamento encontra-se em funcionamento e em bom estado de conservação. Sendo conhecido o ano de fabrico do equipamento no ano de _____ e considerando a ausência de contrato de manutenção, este teve o seu rendimento reduzido em 10%, considerando o intervalo de tempo entre 10 e 20 anos.","alt":["multi-split","ar condicionado"]},{"id":"T16","g":"Splits e climatização","f":"CLIMA","m":["split"],"l":"Sem dados técnicos","r":2.25,"t":"Sistema de aquecimento e arrefecimento ambiente do tipo split, composto por uma unidade exterior e uma unidade interior, instalado na sala. Não foi possível determinar as potências de aquecimento e arrefecimento. O rendimento do equipamento considerando que o mesmo foi instalado na data de construção do imóvel segundo a Tabela 76 do Despacho n.º 6476-H/2021 são: eficiência de aquecimento (COP) de 2,25 e arrefecimento (EER) de 2,25. Não foi possível determinar se existe manutenção do equipamento. Sistema em bom estado de conservação.","alt":["multi-split","ar condicionado"]},{"id":"T17","g":"Splits e climatização","f":"CLIMA","m":["split"],"l":"Previsto em projecto","r":null,"t":"Sistema de aquecimento e arrefecimento ambiente previsto em projecto do tipo split, composto por uma unidade unidade interior, instalados na sala, com base na ficha técnica fornecida pelo fabricante, possui uma potência de aquecimento e arrefecimento de 5,80 kW e 5,00 kW, respectivamente, COP de 5,1 e EER de 4,60.","alt":["multi-split","ar condicionado"]},{"id":"T18","g":"Splits e climatização","f":"CLIMA","m":["split"],"l":"Novo, previsto em projecto","r":null,"t":"Sistema de aquecimento e arrefecimento ambiente previsto em projeto do tipo split, composto por uma unidade interior, instalada na sala de estar. Com um rendimento mínimo segundo a por falta de dados técnicos da constituição das paredes utilizou-se soluções por defeito do Manual SCE, classe energética classe A de aquecimento (COP) com 3,70 e arrefecimento classe A (EER) de 3.21.","alt":["multi-split","ar condicionado"]},{"id":"T19","g":"Lareiras, recuperadores e salamandras","f":"CLIMA","m":["lareira"],"l":"Recuperador de calor","r":0.68,"t":"Sistema de aquecimento ambiente é composto por uma lareira com recuperador de calor que utiliza fonte de energia lenha (biomassa), instalado na sala. Rendimento do equipamento determinado segundo a valor por defeito previsto na Tabela 76 do Despacho n.º 6476-H/2021. Não sendo conhecido o ano de fabrico e considerando a ausência de contrato de manutenção, foi reduzido o rendimento do equipamento em 5% considerando que o mesmo foi instalado na data de construção do imóvel (entre 10 e 20 anos). Rendimento considerado de 0.68.","alt":["salamandra","recuperador"]},{"id":"T20","g":"Lareiras, recuperadores e salamandras","f":"CLIMA","m":["lareira"],"l":"Salamandra","r":0.68,"t":"Sistema de aquecimento ambiente é composto por uma salamandra que utiliza fonte de energia lenha (biomassa), instalado na sala. Não sendo conhecido o ano de fabrico, foi reduzido o rendimento do equipamento considerando que o mesmo foi instalado na data de construção do imóvel. Rendimento do equipamento determinado segundo a Tabela 76 do Despacho n.º 6476-H/2021, foi reduzido em 5% considerando que o mesmo foi instalado na data de construção do imóvel (entre 10 e 20 anos). Rendimento considerado de 0.68","alt":["salamandra","recuperador"]},{"id":"T21","g":"Lareiras, recuperadores e salamandras","f":"CLIMA","m":["lareira"],"l":"Recuperador novo","r":0.75,"t":"Sistema de aquecimento ambiente é composto por uma lareira com recuperador de calor que utiliza fonte de energia lenha (biomassa), instalado na sala. Com uma potência de 12kW e um rendimento mínimo de 0,75, determinado segundo a Tabela 76 do Despacho n.º 6476-H/2021.","alt":["salamandra","recuperador"]},{"id":"T22","g":"Lareiras, recuperadores e salamandras","f":"CLIMA","m":["lareira"],"l":"Lareira com pavimento radiante","r":null,"t":"Sistema de aquecimento ambiente é composto por uma lareira com recuperador de calor que utiliza fonte de energia lenha (biomassa), instalado na sala, interligado a deposito para aquecimento de pavimento radiante. Rendimento do equipamento determinado segundo a valor por defeito previsto na Tabela 76 do Despacho n.º 6476-H/2021. Não sendo conhecido o ano de fabrico e considerando a ausência de contrato de manutenção, foi reduzido o rendimento do equipamento em 5% considerando que o mesmo foi instalado na data de construção do imóvel (entre 10 e 20 anos).","alt":["salamandra","recuperador"]},{"id":"T23","g":"Solar térmico","f":"AQS","m":["solar"],"l":"Solar circulação forçada — moradia","r":null,"t":"A moradia possui um sistema solar térmico individual circulação forçada para aquecimento de águas quentes sanitárias, marca Wikora, com 2 coletores solares com uma área aproximada de 4,00m2, instalados na cobertura orientado para Sul, instalado há cerca de 10 anos, com depósito em separado marca Wikora modelo WBO 302, com capacidade para cerca de 300 litros. Não foi apresentado contrato de manutenção com técnicos ou firma credenciada pela DGGE, a contribuição considerada para efeitos de cálculo é de 2804kwh/ano. Valor determinado segundo o programa SCE.ER - Dados e cálculos padronizados para sistemas de aproveitamento de Energias Renováveis​"},{"id":"T24","g":"Solar térmico","f":"AQS","m":["solar"],"l":"Solar circulação forçada","r":null,"t":"A fracção possui um sistema solar térmico individual circulação forçada para aquecimento de águas quentes sanitárias, marca Wikora, com 2 coletores solares com uma área aproximada de 4,00m2, instalados na cobertura do edifício orientado para Sul, instalado há cerca de 10 anos, com depósito em separado marca Wikora modelo WBO 302, com capacidade para cerca de 300 litros. Não foi apresentado contrato de manutenção com técnicos ou firma credenciada pela DGGE, a contribuição considerada para efeitos de cálculo é de 2804kwh/ano. Valor determinado segundo o programa SCE.ER - Dados e cálculos padronizados para sistemas de aproveitamento de Energias Renováveis​"},{"id":"T25","g":"Solar térmico","f":"AQS","m":["solar"],"l":"Solar Termossifão","r":null,"t":"A moradia possui um sistema solar térmico individual termossifão para aquecimento de águas quentes sanitárias, marca Baxi, modelo STS 300 LP, com 2 coletores solares com uma área aproximada de 3,84m2, instalados na cobertura orientado para Sul, depósito com resistência elétrica com capacidade para cerca de 300 litros. Não foi apresentado contrato de manutenção com técnicos ou firma credenciada pela DGGE, a contribuição considerada para efeitos de cálculo é de 1863kwh/ano. Valor determinado segundo o programa SCE.ER - Dados e cálculos padronizados para sistemas de aproveitamento de Energias Renováveis​"},{"id":"T26","g":"Solar térmico","f":"AQS","m":["solar"],"l":"Solar mais Aquecimento central","r":null,"t":"A moradia possui um sistema solar térmico individual para aquecimento de águas quentes sanitárias e aquecimento central, marca Chromagen, modelo PR, com 3 coletores solares com uma área aproximada de 5,31m2, instalados na cobertura orientado para Sul, depósito em separado com capacidade para cerca de 300 litros. Sistema de apoio composto por uma bomba de calor. Sistema de aquecimento central composto por radiadores instalados em todos os compartimentos da moradia. Não foi apresentado contrato de manutenção com técnicos ou firma credenciada pela DGGE, a contribuição foi de 2021kwh/ano. Valor determinado segundo o programa SCE.ER - Dados e cálculos padronizados para sistemas de aproveitamento de Energias Renováveis​"},{"id":"T27","g":"Solar térmico","f":"AQS","m":["solar"],"l":"Solar circulação forçada Projeto","r":null,"t":"Sistema de AQS será composto por um conjunto de painéis solares de instalação obrigatória circulação forçada com as seguintes características, marca Baxi modelo Slim 250 (ou equivalente) painel certificado, permita fornecer uma energia total anual mínima de 3161kWh/ano, com três colectores com área de 7,20m2 depósito em separado com capacidade com volume de 400 litros, o painel deverá ser montado e instalado por técnicos credenciados com orientação para Sul. Sistema de apoio ao painel solar será composto pela resistência elétrica incorporada no painel solar. Valor determinado segundo o programa SCE.ER - Dados e cálculos padronizados para sistemas de aproveitamento de Energias Renováveis​"},{"id":"T28","g":"Solar térmico","f":"AQS","m":["solar"],"l":"Solar termodinâmico","r":null,"t":"A fração possui um sistema bomba de calor solar termodinâmico para aquecimento de águas quentes sanitárias, marca Energie, modelo Eco 300, com 1 coletor solar, instalados na cobertura orientado para Sul, depósito 300 litros em separado. Não foi apresentado contrato de manutenção com técnicos ou firma credenciada pela DGGE, a contribuição foi de 1734,78kwh/ano."},{"id":"T29","g":"Solar térmico","f":"AQS","m":["solar"],"l":"Solar coletivo predio","r":null,"t":"A fracção possui um sistema solar térmico coletivo circulação forçada para aquecimento de águas quentes sanitárias, com 15 coletores solares com uma área aproximada de 33,80m2, instalados na cobertura do edifício orientado para Sul, cada fracção tem um deposito com capacidade para 160 litros, apoio é feito por deposito acumulador com capacidade para 80 litros e uma resistencia com 2kW. Não foi apresentado contrato de manutenção com técnicos ou firma credenciada pela DGGE, a contribuição considerada para efeitos de cálculo é de 2038kwh/ano. Valor determinado segundo o programa SCE.ER - Dados e cálculos padronizados para sistemas de aproveitamento de Energias Renováveis​"},{"id":"T30","g":"Bombas de calor","f":"AMBOS","m":["bomba de calor"],"l":"Bomba de calor — Climatização","r":4.3,"t":"Sistema do tipo Bomba de Calor interligada a um depósito com depósito de 80 litros, a eletricidade, para aquecimento ambiente, marca Baxi modelo AWHP 16 TR 2 composto por 1 unidade com eficiência (COP) de 4,22 e uma potência de 14,65kW para aquecimento ambiente, com base na informação do catalogo técnico do equipamento. O sistema satisfaz 100% do aquecimento ambiente através de pavimento radiante. O sistema contribui com 2443 kWh/ano de energia renovável (Eren). O sistema tem tido manutenção. O equipamento encontra-se em funcionamento e em bom estado de conservação. O sistema foi reduzido o rendimento do equipamento em 5% considerando que o mesmo foi instalado entre a 1 a 10 anos."},{"id":"T31","g":"Bombas de calor","f":"AMBOS","m":["bomba de calor"],"l":"Bomba de calor — AQS","r":3.53,"t":"Sistema do tipo Bomba de Calor com depósito de 265 litros, a eletricidade, para preparação de águas quentes sanitárias, marca Vaillant modelo Arostor VWL BM 270/5, composto por 1 unidade com eficiência (COP) de 3,53 e uma potência de 1,2 kW para aquecimento, com base na informação do catalogo técnico do equipamento. O sistema satisfaz 100% das necessidades de águas quentes sanitárias. O sistema contribui com 2443 kWh/ano de energia renovável (Eren). Instalado em 2020. O equipamento encontra-se em funcionamento e em bom estado de conservação. Não foi possível aferir isolamento das tubagens de águas quentes sanitárias."},{"id":"T32","g":"Chiller","f":"CLIMA","m":["chiller"],"l":"CHILLER","r":null,"t":"Sistema de arrefecimento ambiente é composto por um chiller de bombas de calor Ar Água marca Aquasnap modelo 30RA021, com uma potencia de 21kW, com uma potência absorvida de 8,68kw que perfaz um rendimento de 2,49, o sistema está interligado a condutas embutidas do teto/parede nos principais compartimentos da moradia."},{"id":"T33","g":"Fotovoltaico","f":"OUTRO","m":["fotovolt"],"l":"Fotovoltaico","r":null,"t":"Sistema de produção de energia para autoconsumo marca AstoSemi Polycrystalline PV Module, modelo 280Wp, composto por 4 com uma área de 6,6m2, painéis com uma eficiência de 16,9%, com uma degradação anual inferior a 0,5%, sem baterias. Produção de energia para autoconsumo 708kWh/ano,"}];
 
@@ -13185,7 +13169,6 @@ function resolverPeDireitoPiso(div,pisoLabel){
   const pd=D.peDireitos||{};
   if(pd[div]) return parseFloat(pd[div])||0;
   if(pd[pisoLabel]) return parseFloat(pd[pisoLabel])||0;
-  const ORDEM_PISOS=['Cave','R/C','1º andar','2º andar','3º andar','4º andar'];
   const pisosUsados=[...new Set((D.divisoes||[]).map(dv=>(D.divisoesDados[dv]||{}).piso||'R/C'))]
     .sort((a,b)=>{
       const ia=ORDEM_PISOS.indexOf(a),ib=ORDEM_PISOS.indexOf(b);
@@ -19694,6 +19677,11 @@ document.addEventListener('fullscreenchange',atualizarBotaoEcraInteiro);
 instalarManifest();
 setTimeout(atualizarBotaoEcraInteiro,300);
 
+/* O ENDEREÇO DO SITE NUM SÍTIO SÓ.
+   Estava escrito em dois pontos — o botão «abrir no site» e a queda automática
+   do iframe. Mudar o domínio parte um deles em silêncio. */
+const URL_SITE='https://renatovrochato-cell.github.io/CE-voz/';
+const URL_PLANTA_SITE=URL_SITE+'planta-interativa.html';
 const ANTHROPIC_PROXY_URL='https://ce-voz-proxy.renatovrochato-0a0.workers.dev';
 // Segredo partilhado com o Worker — não é segurança absoluta (código público é sempre legível),
 // mas impede abuso casual por quem apenas descubra o URL sem inspecionar o código-fonte.
@@ -21375,6 +21363,14 @@ window.addEventListener('message',ev=>{
   if(ev.data&&ev.data.tipo==='planta:pedir-cheio') alternarPlantaCheia();
 });
 
+/* A planta do site, em separador próprio. O levantamento vai pelo
+   sessionStorage — o mesmo canal que a planta já lê quando é aberta sozinha. */
+function abrirPlantaNoSite(){
+  try{
+    sessionStorage.setItem('ce_planta_projeto',JSON.stringify({app:APP_VERSION,D}));
+  }catch(e){}
+  window.open(URL_PLANTA_SITE,'_blank','noopener');
+}
 function abrirPlantaAoLado(){
   const el=document.getElementById('painel-lado');
   if(!el) return;
@@ -21416,16 +21412,71 @@ function abrirPlantaAoLado(){
         'line-height:1.4">A abrir… O levantamento é enviado sozinho. '+
         'Quando guardares na planta, volta para aqui.</div>'+
     '</div>'+
-    '<iframe id="pl-planta-frame" src="planta-interativa.html" '+
+    '<iframe id="pl-planta-frame" '+
       'style="flex:1;width:100%;border:1px solid var(--br);border-radius:12px;'+
       'background:var(--bg2);min-height:60vh"></iframe>';
-  // se a planta não responder (ficheiro em falta), dizer porquê
+  /* CONFIRMAR QUE O FICHEIRO EXISTE ANTES DE O METER NO IFRAME.
+     O iframe apontava directamente para `planta-interativa.html`. Quando esse
+     ficheiro não está ao lado da app — versão antiga em cache, index guardado
+     sozinho, ficheiro por actualizar — o browser mostra um quadrado branco com
+     um ícone de imagem partida e mais nada. Um iframe não dispara erro num
+     404, por isso a app ficava à espera para sempre.
+     Agora pergunta-se primeiro. Se o ficheiro local não responder, usa-se o do
+     site, que está sempre lá — sem o utilizador ter de fazer nada. */
+  (function(){
+    const fr=document.getElementById('pl-planta-frame');
+    if(!fr) return;
+    const local='planta-interativa.html';
+    const doSite=URL_PLANTA_SITE;
+    const e2=document.getElementById('pl-planta-estado');
+    const usar=(url,nota)=>{
+      if(!_plantaAberta) return;
+      fr.src=url;
+      if(nota&&e2) e2.innerHTML=nota;
+    };
+    if(!/^https?:$/.test(location.protocol)){
+      // a correr de um ficheiro no disco: o fetch não serve para testar, tenta-se o local
+      usar(local); return;
+    }
+    /* Sem fetch disponível (browser antigo, ambiente restrito), tenta-se o
+       local à mesma — e o aviso dos 4 segundos apanha o caso. */
+    if(typeof fetch!=='function'){ usar(local); return; }
+    Promise.resolve().then(()=>fetch(local,{method:'HEAD'}))
+      .then(r=>{
+        if(r.ok) usar(local);
+        else usar(doSite,'<span style="color:var(--am)">O ficheiro '+
+          '<b>planta-interativa.html</b> não está ao lado da app — abri a versão do site.</span>');
+      })
+      .catch(()=>usar(doSite,'<span style="color:var(--am)">Não encontrei a planta ao lado da app — '+
+        'abri a versão do site.</span>'));
+  })();
+  /* QUANDO A PLANTA NÃO ABRE, DIZER O QUE FAZER — E DAR UMA SAÍDA.
+     O iframe carrega `planta-interativa.html` da pasta ao lado. Se esse
+     ficheiro não estiver lá — app instalada como PWA de uma versão antiga,
+     index guardado sozinho no disco, ficheiro por actualizar — o iframe fica
+     branco e o painel diz «A abrir…» para sempre. Nada explode, nada aparece:
+     parece que o botão não faz nada.
+     Passados 4 segundos diz-se o que se passa, com o caminho que tentou, e
+     dá-se um botão para abrir a planta em separador próprio a partir do site,
+     que é onde ela está de certeza. */
   setTimeout(()=>{
     if(_plantaAberta&&!_plantaPronta){
       const e2=document.getElementById('pl-planta-estado');
-      if(e2) e2.innerHTML='<span style="color:var(--am)">Não consegui abrir a planta. '+
-        'Confirma que o ficheiro <b>planta-interativa.html</b> está na mesma pasta '+
-        'que esta app.</span>';
+      if(!e2) return;
+      let alvo='planta-interativa.html';
+      try{ alvo=new URL('planta-interativa.html',location.href).href; }catch(e){}
+      e2.innerHTML='<span style="color:var(--am)">A planta não respondeu.</span><br>'+
+        '<span style="font-size:11.5px;color:var(--tx3)">Tentei abrir:<br>'+
+        alvo.replace(/</g,'&lt;')+'</span><br>'+
+        '<span style="font-size:12px">O ficheiro <b>planta-interativa.html</b> tem de estar '+
+        'na mesma pasta que esta app — e ser a versão actual.</span>'+
+        '<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">'+
+        '<button onclick="abrirPlantaNoSite()" style="background:var(--ac);color:#04140c;'+
+        'border:none;border-radius:8px;padding:8px 12px;font-size:12.5px;font-weight:700;'+
+        'cursor:pointer">Abrir a planta no site</button>'+
+        '<button onclick="abrirPlantaAoLado()" style="background:var(--bg3);color:var(--tx2);'+
+        'border:1px solid var(--br);border-radius:8px;padding:8px 12px;font-size:12.5px;'+
+        'cursor:pointer">Fechar</button></div>';
     }
   },4000);
 }
