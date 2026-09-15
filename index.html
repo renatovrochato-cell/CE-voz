@@ -216,7 +216,7 @@ body.com-planta #visDivisoria.a-arrastar::after{color:#04140c}
 <body>
 <div id="app">
 <button id="btVisPlanta" onclick="alternarVisPlanta()"
-  title="Ver a planta ao lado (PDF ou imagem)"
+  title="Ver a planta de projeto ao lado (PDF ou imagem). Para desenhar, usa 📐 no painel."
   style="position:fixed;top:8px;right:56px;z-index:60;background:var(--bg3);color:var(--tx);
          border:1px solid var(--br);border-radius:9px;padding:8px 12px;font-size:13px;
          font-weight:700;cursor:pointer;min-height:40px;display:inline-flex;
@@ -522,6 +522,11 @@ body.com-planta #visDivisoria.a-arrastar::after{color:#04140c}
     <button onclick="visPlantaRodar(-90)" title="Rodar para a esquerda">⟲</button>
     <button onclick="visPlantaRodar(90)" title="Rodar para a direita">⟳</button>
     <button id="vpNorte" onclick="visPlantaNorte()" title="Onde fica o Norte nesta planta">🧭</button>
+    <!-- ATALHO PARA A PLANTA INTERATIVA.
+         Esta barra é toda de ver uma IMAGEM de planta: abrir, rodar, ampliar.
+         Quem chegava aqui sem planta de projeto não tinha por onde passar ao
+         desenho — o botão está no painel do resumo, que este painel tapa. -->
+    <button onclick="irParaPlantaInterativa()" title="Desenhar a planta a partir do levantamento">📐</button>
     <span id="vpPag" style="font-size:11.5px;color:var(--tx2);margin-left:auto"></span>
     <button onclick="visPlantaPag(-1)" title="Página anterior">‹</button>
     <button onclick="visPlantaPag(1)" title="Página seguinte">›</button>
@@ -578,7 +583,7 @@ const DIVS_BASE=[
 // VERSÃO — fonte única (selo no ecrã inicial + cabeçalho do TXT exportado).
 // Subir aqui a cada alteração ao ficheiro.
 // ═══════════════════════════════════════
-const APP_VERSION='v2026.09.08-FIX275';
+const APP_VERSION='v2026.09.08-FIX285';
 
 /* ══════════════════════════════════════════════════════════════════
    A APP INSTALADA FICAVA PRESA NUMA VERSÃO ANTIGA
@@ -2028,10 +2033,30 @@ function renderVaosServicoInline(wrap){
     c.style.cssText='font-size:13px;padding:9px 13px;min-height:0';
     c.textContent=(tem?'🪟 ':'')+d;
     c.onclick=()=>{
-      D.vaosServicoCom=tem?D.vaosServicoCom.filter(x=>x!==d):D.vaosServicoCom.concat(d);
+      D.vaosServicoCom=tem?D.vaosServicoCom.filter(x=>x!==d)
+        :D.vaosServicoCom.filter(x=>x!==d).concat(d);   // nunca duplica
+      /* Dizer aqui que TEM janela vale como resposta em toda a app: a pergunta
+         individual dessa divisão volta a aparecer mesmo que ela não tenha
+         orientações marcadas. Sem isto, marcar a circulação aqui não servia de
+         nada — a regra da FIX272 continuava a escondê-la. */
+      D.perguntasForcadas=Array.isArray(D.perguntasForcadas)?D.perguntasForcadas:[];
+      const idP='dc-'+d+'-vaos';
+      if(!tem){
+        if(!D.perguntasForcadas.includes(idP)) D.perguntasForcadas.push(idP);
+        const _dd=(D.divisoesDados||{})[d]; if(_dd) delete _dd.semParedesExt;
+      } else {
+        D.perguntasForcadas=D.perguntasForcadas.filter(x=>x!==idP);
+      }
       /* Marcar ou desmarcar muda quais das perguntas seguintes existem —
          reconstrói-se a lista para o contador de passos ficar certo. */
-      autoSave(); reconstruirDivisoesSeNecessario(); renderVaosServicoInline(wrap);
+      /* `reconstruirDivisoesSeNecessario` não existe — a chamada rebentava aqui
+         e o resto do clique nunca corria: o painel não era redesenhado, e o
+         segundo toque no mesmo chip voltava a ACRESCENTAR a divisão em vez de
+         a tirar, deixando-a duplicada na lista. A função certa é a que expande
+         as perguntas por divisão. */
+      autoSave();
+      try{ expandDivCompleto(); }catch(e){}
+      renderVaosServicoInline(wrap);
     };
     row.appendChild(c);
   });
@@ -3537,6 +3562,58 @@ function renderCompInputs(q){
                  :(area>200)?'mais de 200 m² num só rectângulo':null;
     return {estado:suspeito?'suspeito':'ok',area,nota:suspeito};
   }
+  /* VER A FORMA QUE SAIU.
+     Os chips dizem onde encaixa cada pedaço, mas escolher «abaixo» e não ver
+     nada é escolher às cegas — e um engano só aparece na planta, depois de
+     sair da obra. Este esquema desenha a forma com as medidas que estão nos
+     campos: se sair um L ao contrário, vê-se logo ali e corrige-se num toque.
+     É só o desenho — as medidas continuam a ser as dos campos. */
+  function desenharForma(){
+    let cx=areaSec.querySelector('#area-forma-'+_slugArea);
+    const rs=(dd.areaRect||[]).map(r=>({
+      c:parseFloat(String(r.c||'').replace(',','.')),
+      l:parseFloat(String(r.l||'').replace(',','.')),
+      lado:r.lado||''})).filter(r=>r.c>0&&r.l>0);
+    if(rs.length<2){ if(cx) cx.remove(); return; }
+    if(!cx){
+      cx=document.createElement('div'); cx.id='area-forma-'+_slugArea;
+      cx.style.cssText='margin:6px 0 2px';
+      areaSec.appendChild(cx);
+    }
+    /* Posições em metros, a partir do primeiro rectângulo na origem. Cada um
+       encaixa no ANTERIOR, que é como as medidas são tiradas. */
+    const pos=[{x:0,y:0,c:rs[0].c,l:rs[0].l}];
+    for(let i=1;i<rs.length;i++){
+      const a=pos[i-1], r=rs[i];
+      let x=a.x, y=a.y;
+      if(r.lado==='N') y=a.y-r.l;
+      else if(r.lado==='S') y=a.y+a.l;
+      else if(r.lado==='O') x=a.x-r.c;
+      else if(r.lado==='E') x=a.x+a.c;
+      else { y=a.y+a.l; }          // sem resposta: o palpite, marcado a tracejado
+      pos.push({x,y,c:r.c,l:r.l,palpite:!r.lado});
+    }
+    const x0=Math.min(...pos.map(p=>p.x)), y0=Math.min(...pos.map(p=>p.y));
+    const x1=Math.max(...pos.map(p=>p.x+p.c)), y1=Math.max(...pos.map(p=>p.y+p.l));
+    const W=x1-x0, H=y1-y0;
+    if(!(W>0&&H>0)) return;
+    const esc=Math.min(240/W,120/H);
+    const svgW=Math.round(W*esc)+2, svgH=Math.round(H*esc)+2;
+    const partes=pos.map((p,i)=>{
+      const rx=1+(p.x-x0)*esc, ry=1+(p.y-y0)*esc, rw=p.c*esc, rh=p.l*esc;
+      const cor=p.palpite?'var(--tx3)':'var(--ac)';
+      return '<rect x="'+rx.toFixed(1)+'" y="'+ry.toFixed(1)+'" width="'+rw.toFixed(1)+
+        '" height="'+rh.toFixed(1)+'" fill="'+cor+'" fill-opacity="'+(p.palpite?'.10':'.18')+
+        '" stroke="'+cor+'" stroke-width="1"'+(p.palpite?' stroke-dasharray="4 3"':'')+'/>'+
+        (rw>34&&rh>16?'<text x="'+(rx+rw/2).toFixed(1)+'" y="'+(ry+rh/2+3).toFixed(1)+
+          '" text-anchor="middle" font-size="9.5" fill="var(--tx2)">'+i+'</text>':'');
+    }).join('');
+    const semLado=pos.some(p=>p.palpite);
+    cx.innerHTML='<div style="font-size:11px;color:var(--tx3);margin-bottom:3px">Forma que sai</div>'+
+      '<svg width="'+svgW+'" height="'+svgH+'" viewBox="0 0 '+svgW+' '+svgH+'">'+partes+'</svg>'+
+      (semLado?'<div style="font-size:11px;color:var(--tx3);margin-top:2px">'+
+        'a tracejado: posição adivinhada — diz de que lado fica</div>':'');
+  }
   function calcAreaTotal(){
     let total=0, incompletos=0, suspeitos=0, contados=0;
     dd.areaRect.forEach(r=>{
@@ -3550,6 +3627,7 @@ function renderCompInputs(q){
     areaTotal.textContent=txt;
     areaTotal.style.color=incompletos?'var(--red)':(suspeitos?'var(--am,#e8a33d)':'var(--ac)');
     dd.areaUtil=total>0?total.toFixed(2):'';
+    desenharForma();
     // aviso por baixo do total, só quando há alguma coisa a dizer
     let av=areaSec.querySelector('#area-aviso-'+_slugArea);
     if(!av){ av=document.createElement('div'); av.id='area-aviso-'+_slugArea;
@@ -3626,6 +3704,37 @@ function renderCompInputs(q){
         row.appendChild(del);
       }
       areaSec.appendChild(row);
+      /* ONDE FICA ESTE RECTÂNGULO EM RELAÇÃO AO ANTERIOR.
+         Um rectângulo era só «C × L» — dois números sem posição. Numa
+         circulação em L, o segundo pedaço pode ficar para cima, para baixo,
+         para a esquerda ou para a direita do primeiro, e a área dá o mesmo nos
+         quatro casos. A planta tinha de adivinhar, e adivinhava mal: um pedaço
+         que era para baixo saiu em cima, e a divisão ficou espelhada.
+         Dois toques a dizer o lado resolvem, e o desenho sai certo à primeira. */
+      if(idx>0){
+        const lados=[['N','↑ acima'],['S','↓ abaixo'],['O','← à esquerda'],['E','→ à direita']];
+        const rowL=document.createElement('div');
+        rowL.style.cssText='display:flex;gap:5px;align-items:center;margin:2px 0 6px 4px;flex-wrap:wrap';
+        const lbl=document.createElement('span');
+        lbl.style.cssText='font-size:11px;color:var(--tx3)';
+        lbl.textContent='fica';
+        rowL.appendChild(lbl);
+        lados.forEach(([k,rot])=>{
+          const c=document.createElement('div');
+          c.className='chip'+(rect.lado===k?' on':'');
+          c.style.cssText='font-size:11.5px;padding:4px 8px;min-height:0';
+          c.textContent=rot;
+          c.onclick=()=>{ rect.lado=(rect.lado===k?'':k); saveVaosToD(q.div);
+            try{ autoSave(); }catch(e){} renderCompInputs(q); };
+          rowL.appendChild(c);
+        });
+        const nl=document.createElement('span');
+        nl.style.cssText='font-size:10.5px;color:var(--tx3)';
+        nl.textContent=rect.lado?'do rectângulo '+idx:'do rectângulo '+idx+' — por dizer';
+        if(!rect.lado) nl.style.color='var(--ac)';
+        rowL.appendChild(nl);
+        areaSec.appendChild(rowL);
+      }
     });
     const addR=document.createElement('button');
     addR.textContent=dd.areaRect.length?'+ rectângulo (forma em L)':'+ medir área (C × L)';
@@ -7034,6 +7143,21 @@ function verificarLevantamento(){
         A('Áreas',tp+' com '+area.toFixed(2).replace('.',',')+' m² de área útil — '+
           'acima do habitual para esta tipologia, confirma as medidas e a tipologia');
     }
+  }catch(e){}
+
+  /* SEM SABER ONDE ENCAIXA, A PLANTA ADIVINHA — E ERRA.
+     Um segundo rectângulo sem lado indicado obriga a planta a adivinhar pela
+     forma do primeiro. Numa circulação em L medida ao contrário, o pedaço que
+     era para baixo saiu em cima e a divisão ficou espelhada. */
+  try{
+    (D.divisoes||[]).forEach(dv=>{
+      const rects=((D.divisoesDados||{})[dv]||{}).areaRect||[];
+      const semLado=rects.map((r,i)=>({r,i}))
+        .filter(({r,i})=>i>0&&parseFloat(r.c)>0&&parseFloat(r.l)>0&&!r.lado);
+      if(semLado.length)
+        A('Áreas',dv+': '+semLado.length+' rectângulo(s) sem indicação de onde encaixam — '+
+          'a planta vai adivinhar. Diz se ficam acima, abaixo, à esquerda ou à direita.');
+    });
   }catch(e){}
 
   /* RECTÂNGULOS ABAIXO DA REGRA DOS 100 CM.
@@ -10821,7 +10945,13 @@ function buildTxt(){
     divsComArea.forEach(div=>{
       const dd=D.divisoesDados[div];
       const rects=dd.areaRect.filter(r=>(parseFloat(r.c)||0)*(parseFloat(r.l)||0)>0);
-      const medStr=rects.map(r=>`${parseFloat(r.c).toFixed(2)}×${parseFloat(r.l).toFixed(2)}`).join(' + ');
+      /* O lado diz a FORMA, não só a área: «3,20×2,10 ↓» é um L com o segundo
+         pedaço por baixo do primeiro. Sem isto, quem revê vê dois rectângulos
+         e não sabe como encaixam. */
+      const _seta={N:'↑',S:'↓',O:'←',E:'→'};
+      const medStr=rects.map((r,i)=>
+        `${parseFloat(r.c).toFixed(2)}×${parseFloat(r.l).toFixed(2)}`+
+        (i>0&&_seta[r.lado]?' '+_seta[r.lado]:'')).join(' + ');
       const area=rects.reduce((s,r)=>s+(parseFloat(r.c)||0)*(parseFloat(r.l)||0),0);
       apavTotal+=area;
       // BUG CORRIGIDO: o volume somava área total × um único pé-direito global —
@@ -14893,54 +15023,313 @@ function parseJsonIA(texto){
 }
 
 // ── MENU DE NAVEGAÇÃO — ir diretamente para qualquer pergunta pelo título/secção ──
+/* ══════════ MENU DE PERGUNTAS — POR DIVISÃO ══════════
+   Era uma lista corrida de 46 perguntas com cabeçalhos: «WC 1 — paredes
+   exteriores», «WC 2 — paredes exteriores», «Quarto 2 — paredes exteriores».
+   Para voltar à Sala era preciso ler linha a linha, e as perguntas gerais
+   estavam misturadas com as das divisões.
+   Passa a ter três níveis: primeiro o que define o levantamento (que divisões
+   e por que ordem), depois um balão por divisão, e ao tocar numa abre-se o
+   que ver lá dentro — paredes, envidraçados, climatização. As perguntas
+   gerais ficam no fim, mais pequenas, que são as que raramente se revisitam. */
+/* Nome curto de uma pergunta geral, para caber numa pastilha. O `ctx` é o
+   grupo («Projeto») e repete-se entre perguntas diferentes; o `text` é a
+   pergunta inteira e é comprido de mais. */
+const _NOMES_CURTOS={
+  'docs-inicio':'Documentos', tipologia:'Tipologia', 'edificio-tipo':'Apartamento ou moradia',
+  localizacao:'Localização', 'ano-construcao':'Ano', 'n-pisos-edificio':'Pisos do prédio',
+  'lev-paredes':'Medir paredes', pisos:'Pisos do fogo', 'prep-orientacoes':'Orientações',
+  'vaos-servico':'Quais têm janela', 'isol-yn':'Isolamento', 'clima-global':'Climatização',
+  'aqs-fallback':'AQS', 'vent-tudo':'Ventilação', 'vent-obst':'Obstáculos',
+  'cob-tipo':'Cobertura', 'pav-baixo':'Por baixo', 'pav-abrangencia':'Área por baixo',
+  'esp-parede':'Espessura da parede', 'esp-vidros':'Vidros', 'unid-ext':'Unidades exteriores',
+  'solar-global':'Solar térmico', 'fv-global':'Fotovoltaico', 'vistoria-final':'Vistoria final',
+  'fotos-revisao':'Fotos', dv:'Declaração de Visita', obs:'Observações',
+  'div-extra-yn':'Falta algum compartimento', 'div-extra-nome':'Compartimento extra',
+};
+function _nomeCurtoPergunta(q){
+  if(!q) return '';
+  if(_NOMES_CURTOS[q.id]) return _NOMES_CURTOS[q.id];
+  if(/-aqs$/.test(q.id||'')) return 'AQS';
+  const t2=String(q.text||q.ctx||q.id||'').replace(/\?$/,'');
+  return t2.length>26?t2.slice(0,25)+'…':t2;
+}
+function _qIndice(id){ return qList.findIndex(q=>q&&q.id===id); }
+function _qVisivelPorId(id){
+  const i=_qIndice(id);
+  return i>=0&&perguntaVisivel(qList[i]);
+}
+/* Ícone por tipo de divisão. Ajuda a encontrar a divisão de relance: numa
+   lista de dez, procura-se a forma antes de ler o nome. */
+function _iconeDivisao(div){
+  const d=String(div||'').toLowerCase();
+  if(/^(wc|w\.c|i\.?s\b|casa de banho|banho|instala[çc][ãa]o sanit)/.test(d)) return '🚿';
+  if(/^(cozinha|kitchen)/.test(d)) return '🍳';
+  if(/^(quarto|suite|suíte)/.test(d)) return '🛏';
+  if(/^(sala|living|salão)/.test(d)) return '🛋';
+  if(/^(circula|corredor|hall|vestíbulo|vestibulo|entrada)/.test(d)) return '🚪';
+  if(/^(despensa|arrum|lavandaria)/.test(d)) return '📦';
+  if(/^(escrit|gabinete)/.test(d)) return '💼';
+  if(/^(varanda|terra|marquise)/.test(d)) return '🌤';
+  return '▫';
+}
+/* Quantas das perguntas desta divisão já têm resposta. É o que dá a barra de
+   progresso — «2 de 3» diz mais do que «por medir». */
+function _progressoDivisao(div){
+  const dd2=(D.divisoesDados||{})[div]||{};
+  const qs=qList.filter(q=>q&&q.div===div&&perguntaVisivel(q));
+  let feitas=0;
+  qs.forEach(q=>{
+    if(/-comp$/.test(q.id)){
+      if(dd2.semParedesExt||Object.keys(dd2.comprimentos||{}).length) feitas++;
+    } else if(/-vaos$/.test(q.id)){
+      if((dd2.vaos||[]).some(v=>parseFloat(v.larg)>0)||dd2.nVaos===0) feitas++;
+    } else if(/-clima$/.test(q.id)){
+      if((((D.climaDivisoes||{})[div]||{}).tipos||[]).length) feitas++;
+    } else if(answers&&answers[qList.indexOf(q)]!=null&&answers[qList.indexOf(q)]!=='') feitas++;
+  });
+  return {feitas,total:qs.length};
+}
+/* O que já está respondido nesta divisão — é o que se lê sem entrar. */
+function _estadoDivisao(div){
+  const dd2=(D.divisoesDados||{})[div]||{};
+  /* Curto: no menu lê-se de relance, não se estuda. «2 paredes · 1 janela ·
+     20,00 m²» diz tudo em cinco palavras. */
+  const partes=[];
+  const nOri=Object.keys(dd2.comprimentos||{}).length;
+  if(dd2.semParedesExt) partes.push('interior');
+  else if(nOri) partes.push(nOri+(nOri!==1?' paredes':' parede'));
+  const nV=(dd2.vaos||[]).filter(v=>parseFloat(v.larg)>0).length;
+  if(nV) partes.push(nV+(nV!==1?' janelas':' janela'));
+  const a=parseFloat(String(dd2.areaUtil||'').replace(',','.'));
+  if(a>0) partes.push(a.toFixed(2).replace('.',',')+' m²');
+  /* Uma área sozinha não é «medido»: a área pode vir da caderneta ou de um
+     palpite, e as paredes é que dão o trabalho. Sem paredes nem vãos, a
+     divisão está por medir — mesmo que já tenha área. */
+  const temTrabalho=nOri>0||nV>0||dd2.semParedesExt;
+  if(!temTrabalho) return a>0?(a.toFixed(2).replace('.',',')+' m² · por medir'):'por medir';
+  return partes.join(' · ');
+}
+function _irPara(idx,modal){
+  if(idx<0) return;
+  curQ=idx;
+  try{ document.body.removeChild(modal); }catch(e){}
+  show('scr-int'); renderQ();
+}
 function abrirMenuPerguntas(){
   const modal=document.createElement('div');
-  modal.style.cssText='position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.85);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+  modal.style.cssText='position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.85);'+
+    'z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
   const box=document.createElement('div');
-  box.style.cssText='background:var(--bg2);border-radius:14px;padding:18px;width:100%;max-width:440px;max-height:80vh;display:flex;flex-direction:column;gap:4px';
-  const tit=document.createElement('div');
-  tit.style.cssText='font-size:14px;font-weight:700;color:var(--ac);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;flex-shrink:0';
-  tit.textContent='☰ Ir para pergunta…';
-  box.appendChild(tit);
-
-  const lista=document.createElement('div');
-  lista.style.cssText='overflow-y:auto;display:flex;flex-direction:column;gap:2px';
-
-  let ultimaCtx=null;
-  qList.forEach((q,idx)=>{
-    if(q.isDivCompletoMarker||q.isPeMarker||q.isDivExtraMarker) return; // marcadores estruturais, não são perguntas navegáveis
-    if(!perguntaVisivel(q)) return; // não aplicável ao estado atual — não mostrar no índice
-
-    if(q.ctx&&q.ctx!==ultimaCtx){
-      ultimaCtx=q.ctx;
-      const secLbl=document.createElement('div');
-      secLbl.style.cssText='font-size:10px;font-weight:700;color:var(--tx3);text-transform:uppercase;letter-spacing:.06em;margin-top:8px;padding:2px 4px';
-      secLbl.textContent=q.ctx;
-      lista.appendChild(secLbl);
-    }
-    const item=document.createElement('div');
-    item.style.cssText='padding:8px 10px;border-radius:8px;cursor:pointer;display:flex;gap:8px;align-items:baseline'+(idx===curQ?';background:var(--bg3)':'');
-    const num=document.createElement('span');num.style.cssText='font-size:11px;color:var(--tx3);flex-shrink:0;min-width:26px';num.textContent=(idx+1)+'.';
-    const txt=document.createElement('span');txt.style.cssText='font-size:13px;color:var(--tx)';txt.textContent=q.text;
-    item.appendChild(num);item.appendChild(txt);
-    item.onclick=()=>{
-      curQ=idx;
-      document.body.removeChild(modal);
-      show('scr-int');
-      renderQ();
-    };
-    lista.appendChild(item);
-  });
-  box.appendChild(lista);
-
-  const fechar=document.createElement('button');
-  fechar.textContent='Fechar';
-  fechar.style.cssText='margin-top:10px;padding:10px;border-radius:8px;border:none;background:var(--bg3);color:var(--tx);font-size:14px;cursor:pointer;flex-shrink:0';
-  fechar.onclick=()=>document.body.removeChild(modal);
-  box.appendChild(fechar);
-
+  box.style.cssText='background:var(--bg2);border-radius:14px;padding:18px;width:100%;'+
+    'max-width:460px;max-height:84vh;display:flex;flex-direction:column';
   modal.appendChild(box);
-  modal.onclick=(e)=>{if(e.target===modal)document.body.removeChild(modal);};
+  modal.onclick=(e)=>{ if(e.target===modal) document.body.removeChild(modal); };
+
+  const tit=document.createElement('div');
+  tit.style.cssText='font-size:14px;font-weight:700;color:var(--ac);text-transform:uppercase;'+
+    'letter-spacing:.06em;margin-bottom:12px;flex-shrink:0';
+  const lista=document.createElement('div');
+  lista.style.cssText='overflow-y:auto;display:flex;flex-direction:column;gap:7px;flex:1';
+  const rodape=document.createElement('div');
+  rodape.style.cssText='margin-top:10px;flex-shrink:0';
+  box.appendChild(tit); box.appendChild(lista); box.appendChild(rodape);
+
+  /* Um balão. `sub` é o estado, que se lê sem entrar. */
+  const balao=(txt,sub,fn,cor)=>{
+    const b=document.createElement('button');
+    b.type='button';
+    b.style.cssText='width:100%;text-align:left;padding:14px 16px;border-radius:12px;'+
+      'border:1px solid '+(cor||'var(--br)')+';background:'+(cor?'var(--acl)':'var(--bg3)')+';'+
+      'color:'+(cor?'var(--acd)':'var(--tx)')+';cursor:pointer;min-height:56px';
+    b.innerHTML='<div style="font-size:15px;font-weight:700">'+escHtml(txt)+'</div>'+
+      (sub?'<div style="font-size:12px;opacity:.8;margin-top:2px">'+escHtml(sub)+'</div>':'');
+    b.onclick=fn;
+    return b;
+  };
+  /* O BALÃO DE UMA DIVISÃO.
+     Eram todos iguais e cinzentos, ao lado de dois balões verdes: a lista das
+     divisões — que é o que se vem procurar — era a parte mais apagada do
+     ecrã. Agora cada um traz o ícone do tipo de divisão, uma barra que mostra
+     o que falta, e a cor muda com o estado: verde quando está completa,
+     amarelo a meio, neutro por começar. Numa lista de dez encontra-se pela
+     cor e pela forma, sem ler. */
+  const balaoDivisao=(div,prog)=>{
+    const p=prog||_progressoDivisao(div);
+    const frac=p.total?p.feitas/p.total:0;
+    const completa=p.total>0&&p.feitas>=p.total;
+    const comecada=p.feitas>0;
+    /* A COR TEM DE ESTAR NO FUNDO, NÃO SÓ NA MOLDURA.
+       Uma linha de 1 px à volta de um rectângulo escuro não se lê a um metro
+       de distância, com o telemóvel na mão e sol de lado. O fundo é que dá a
+       leitura: verde-claro completo, amarelo-claro a meio, neutro por
+       começar. */
+    const corBorda=completa?'var(--ac)':(comecada?'#e8a33d':'var(--br)');
+    const corFundo=completa?'var(--acl)':(comecada?'rgba(232,163,61,.16)':'var(--bg3)');
+    const corTexto=completa?'var(--acd)':'var(--tx)';
+    const b=document.createElement('button');
+    b.type='button';
+    b.style.cssText='width:100%;text-align:left;padding:0;border-radius:12px;'+
+      'border:1.5px solid '+corBorda+';background:'+corFundo+';color:'+corTexto+';'+
+      'cursor:pointer;min-height:62px;overflow:hidden;position:relative';
+    const marca=completa?'✓':(comecada?'◐':'');
+    b.innerHTML=
+      '<div style="display:flex;align-items:center;gap:11px;padding:12px 14px 10px">'+
+        '<div style="font-size:19px;line-height:1;width:24px;text-align:center;flex-shrink:0">'+
+          _iconeDivisao(div)+'</div>'+
+        '<div style="flex:1;min-width:0">'+
+          '<div style="font-size:15.5px;font-weight:700">'+escHtml(div)+'</div>'+
+          '<div style="font-size:12px;opacity:.75;margin-top:2px">'+
+            escHtml(_estadoDivisao(div))+'</div>'+
+        '</div>'+
+        (p.total?'<div style="font-size:12.5px;font-weight:700;opacity:'+
+          (completa||comecada?'1':'.45')+';flex-shrink:0;text-align:right">'+
+          (marca?'<span style="font-size:14px">'+marca+'</span> ':'')+
+          p.feitas+'/'+p.total+'</div>':'')+
+      '</div>'+
+      /* Barra fina em baixo: o que falta vê-se sem ler. */
+      '<div style="height:4px;background:rgba(128,128,128,.25)">'+
+        '<div style="height:100%;width:'+Math.round(frac*100)+'%;'+
+        'background:'+(completa?'var(--ac)':'#e8a33d')+'"></div></div>';
+    b.onclick=()=>nivelDentroDaDivisao(div);
+    return b;
+  };
+  const rotulo=t2=>{
+    const d=document.createElement('div');
+    d.style.cssText='font-size:10.5px;font-weight:700;color:var(--tx3);text-transform:uppercase;'+
+      'letter-spacing:.06em;margin:8px 0 1px';
+    d.textContent=t2; return d;
+  };
+  const botaoFundo=(txt,fn)=>{
+    const b=document.createElement('button');
+    b.type='button'; b.textContent=txt;
+    b.style.cssText='width:100%;padding:11px;border-radius:9px;border:1px solid var(--br);'+
+      'background:var(--bg3);color:var(--tx);font-size:14px;cursor:pointer;min-height:46px';
+    b.onclick=fn; return b;
+  };
+
+  /* ── NÍVEL 1: divisões ── */
+  function nivelDivisoes(){
+    tit.textContent='☰ Ir para…';
+    lista.innerHTML=''; rodape.innerHTML='';
+
+    /* O QUE DEFINE O LEVANTAMENTO VEM PRIMEIRO.
+       Quais são as divisões e por que ordem se percorrem: é daqui que sai
+       tudo o resto, e é o que se vai mudar quando aparece um compartimento
+       que não estava na lista. */
+    const iDiv=_qIndice('divisoes'), iOrd=_qIndice('ordem-divisoes');
+    if(iDiv>=0||iOrd>=0){
+      lista.appendChild(rotulo('Levantamento'));
+      /* Títulos curtos: no menu não se lê uma frase, procura-se uma palavra. */
+      if(iDiv>=0) lista.appendChild(balao('Divisões',
+        (D.divisoes||[]).length?(D.divisoes||[]).join(', '):'por escolher',
+        ()=>_irPara(iDiv,modal),'var(--ac)'));
+      if(iOrd>=0&&_qVisivelPorId('ordem-divisoes'))
+        lista.appendChild(balao('Ordem',
+          (D.divisoes||[]).length?'começa em '+D.divisoes[0]:'',
+          ()=>_irPara(iOrd,modal),'var(--ac)'));
+    }
+
+    /* AS PERGUNTAS POR DIVISÃO SÓ NASCEM MAIS À FRENTE.
+       `qList` só ganha as perguntas de cada divisão quando o levantamento lá
+       chega — antes disso não existe nenhuma com `.div`. O menu filtrava por
+       elas e, no princípio do levantamento, a lista das divisões saía VAZIA:
+       ficavam só as perguntas gerais, como se as divisões não existissem.
+       Expandem-se aqui, que é o que a app faz de qualquer maneira ao avançar.
+       Se ainda assim não houver perguntas para uma divisão, ela aparece na
+       mesma — é a lista do levantamento, não a lista do que já foi criado. */
+    try{ expandDivCompleto(); }catch(e){}
+    const divs=(D.divisoes||[]).slice();
+    if(divs.length){
+      const prog=divs.map(d=>_progressoDivisao(d));
+      const feitasTot=prog.filter(p=>p.total&&p.feitas>=p.total).length;
+      lista.appendChild(rotulo('Divisões  ·  '+feitasTot+'/'+divs.length+' feitas'));
+      divs.forEach((d,k)=>lista.appendChild(balaoDivisao(d,prog[k])));
+    }
+
+    /* As gerais no fim: são as que raramente se revisitam. */
+    const gerais=qList.map((q,i)=>({q,i})).filter(({q})=>
+      q&&!q.div&&!q.isDivCompletoMarker&&!q.isPeMarker&&!q.isDivExtraMarker&&
+      q.id!=='divisoes'&&q.id!=='ordem-divisoes'&&perguntaVisivel(q));
+    if(gerais.length){
+      lista.appendChild(rotulo('Gerais'));
+      const g=document.createElement('div');
+      g.style.cssText='display:flex;flex-wrap:wrap;gap:6px';
+      gerais.forEach(({q,i})=>{
+        const b=document.createElement('button');
+        b.type='button';
+        /* O `ctx` repetia-se: três pastilhas «Projeto», duas «Revisão», duas
+           «Ventilação» — nenhuma dizia qual era qual. O nome vem agora da
+           própria pergunta, encurtado. */
+        b.textContent=_nomeCurtoPergunta(q);
+        b.title=q.text||q.ctx||'';
+        b.style.cssText='padding:8px 12px;border-radius:8px;border:1px solid var(--br);'+
+          'background:var(--bg3);color:var(--tx2);font-size:12.5px;cursor:pointer;min-height:38px';
+        b.onclick=()=>_irPara(i,modal);
+        g.appendChild(b);
+      });
+      lista.appendChild(g);
+    }
+    rodape.appendChild(botaoFundo('Fechar',()=>document.body.removeChild(modal)));
+  }
+
+  /* ── NÍVEL 2: o que ver dentro da divisão ── */
+  function nivelDentroDaDivisao(div){
+    tit.textContent='☰ '+div;
+    lista.innerHTML=''; rodape.innerHTML='';
+    const dd2=(D.divisoesDados||{})[div]||{};
+    const daDiv=qList.map((q,i)=>({q,i})).filter(({q})=>q&&q.div===div&&perguntaVisivel(q));
+    if(!daDiv.length){
+      const v=document.createElement('div');
+      v.style.cssText='font-size:13px;color:var(--tx3);padding:10px 2px;line-height:1.5';
+      v.textContent='Esta divisão ainda não tem perguntas — o levantamento não chegou aqui, '+
+        'ou ela foi dada como interior e sem climatização.';
+      lista.appendChild(v);
+    }
+    /* Nome curto e estado — «Sala — Paredes exteriores» dentro do ecrã da
+       Sala é repetir o que já está no título. */
+    daDiv.forEach(({q,i})=>{
+      let nome=(q.ctx||'').replace(new RegExp('^'+div.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\s*—\\s*'),'')||q.text;
+      let sub='';
+      /* Uma palavra chega: «Paredes», «Janelas», «Climatização». O ecrã já
+         diz de que divisão se trata. */
+      if(/-comp$/.test(q.id)){
+        nome='Paredes';
+        const n=Object.keys(dd2.comprimentos||{}).length;
+        sub=dd2.semParedesExt?'interior'
+          :(n?n+(n!==1?' orientações':' orientação'):'por medir');
+      } else if(/-vaos$/.test(q.id)){
+        nome='Janelas';
+        const n=(dd2.vaos||[]).filter(v=>parseFloat(v.larg)>0).length;
+        sub=n?n+(n!==1?' medidas':' medida'):'por responder';
+      } else if(/-clima$/.test(q.id)){
+        nome='Climatização';
+        const c=((D.climaDivisoes||{})[div]||{}).tipos||[];
+        sub=c.length?c.join(', '):'por responder';
+      }
+      /* Dentro da divisão, a mesma leitura: quem já está respondido leva ✓ e
+         fica em verde; o que falta fica neutro e destaca-se por contraste. */
+      const feito=!/por responder|por medir/.test(sub);
+      const b=document.createElement('button');
+      b.type='button';
+      b.style.cssText='width:100%;text-align:left;padding:13px 15px;border-radius:12px;'+
+        'border:1px solid '+(feito?'var(--ac)':'var(--br)')+';'+
+        'background:'+(feito?'var(--acl)':'var(--bg3)')+';'+
+        'color:'+(feito?'var(--acd)':'var(--tx)')+';cursor:pointer;min-height:58px';
+      b.innerHTML='<div style="display:flex;align-items:center;gap:10px">'+
+        '<div style="flex:1;min-width:0">'+
+          '<div style="font-size:15px;font-weight:700">'+escHtml(nome)+'</div>'+
+          '<div style="font-size:12px;opacity:.8;margin-top:2px">'+escHtml(sub)+'</div>'+
+        '</div>'+
+        '<div style="font-size:15px;flex-shrink:0;opacity:'+(feito?'1':'.35')+'">'+
+          (feito?'✓':'○')+'</div></div>';
+      b.onclick=()=>_irPara(i,modal);
+      lista.appendChild(b);
+    });
+      rodape.appendChild(botaoFundo('‹ Divisões',nivelDivisoes));
+  }
+
+  nivelDivisoes();
   document.body.appendChild(modal);
 }
 
@@ -20126,9 +20515,17 @@ function retomar(){
 /* Divisões onde a ausência de janela é o caso normal: casas de banho,
    instalações sanitárias, despensas, arrumos, lavandarias. A circulação fica
    de fora — um hall com janela é frequente e a marquise tem regra própria. */
+/* CIRCULAÇÕES E HALLS TAMBÉM ENTRAM.
+   A lista tinha só WC, despensa, arrumos e lavandaria. Uma circulação ficava
+   de fora: não aparecia em «quais destas têm janela», e como também não tinha
+   orientação marcada, a pergunta individual ficava escondida pela regra da
+   FIX272. Resultado: não era perguntada em lado nenhum — nem no geral nem no
+   pormenor —, e uma circulação com janela para a rua passava em silêncio.
+   São exactamente as divisões em que a janela é a excepção: é para elas que
+   esta pergunta existe. */
 function divisoesDeServico(){
   return (D.divisoes||[]).filter(d=>
-    /^(wc|w\.c|i\.?s\b|instala[çc][ãa]o sanit|casa de banho|banho|despensa|arrum|lavandaria)/i
+    /^(wc|w\.c|i\.?s\b|instala[çc][ãa]o sanit|casa de banho|banho|despensa|arrum|lavandaria|circula[çc][ãa]o|corredor|hall|vestíbulo|vestibulo|entrada)/i
       .test(String(d).trim()));
 }
 /* Uma divisão de serviço que ficou por marcar em «quais têm janela» é uma
@@ -20524,6 +20921,12 @@ async function visPlantaRestaurar(){
 // deslocamento da imagem dentro do painel, em pixels de ecrã
 let _vpX=0, _vpY=0;
 
+/* Passa da planta-imagem para a planta interativa: fecha este painel e abre o
+   desenho ao lado. São dois modos do mesmo sítio no ecrã. */
+function irParaPlantaInterativa(){
+  if(document.body.classList.contains('com-planta')) alternarVisPlanta();
+  abrirPlantaAoLado();
+}
 function alternarVisPlanta(){
   const on=document.body.classList.toggle('com-planta');
   if(on) document.body.classList.remove('duplo');
@@ -20561,6 +20964,33 @@ function visPlantaEscolherOrigem(){
   t.style.cssText='font-size:13px;color:var(--tx2);margin-bottom:10px';
   t.textContent='De onde vem a planta?';
   box.appendChild(t);
+  /* A PLANTA INTERATIVA É UMA DAS ORIGENS.
+     Este ecrã oferecia só OneDrive e ficheiros do telemóvel — as duas formas
+     de anexar uma IMAGEM de planta. Quem não tem planta de projeto ficava sem
+     saída: o painel abria com este diálogo por cima e a planta interativa,
+     que é exactamente o que serve nesse caso, não estava aqui.
+     São dois modos, não um: com planta de projeto anexa-se a imagem; sem ela,
+     desenha-se. */
+  {
+    const b0=document.createElement('button');
+    b0.type='button';
+    b0.style.cssText='display:block;width:100%;text-align:left;margin-bottom:8px;'+
+      'padding:12px 14px;border-radius:11px;border:1px solid var(--ac);'+
+      'background:var(--acl);color:var(--acd);cursor:pointer;min-height:48px';
+    b0.innerHTML='<div style="font-size:14px;font-weight:700">📐 Desenhar aqui (planta interativa)</div>'+
+      '<div style="font-size:11.5px;opacity:.85;margin-top:2px">'+
+      'quando não há planta de projeto — usa as medidas do levantamento</div>';
+    b0.onclick=()=>{
+      box.style.display='none';
+      if(document.body.classList.contains('com-planta')) alternarVisPlanta();
+      abrirPlantaAoLado();
+    };
+    box.appendChild(b0);
+    const sep=document.createElement('div');
+    sep.style.cssText='font-size:11.5px;color:var(--tx3);margin:10px 0 6px';
+    sep.textContent='ou anexar uma planta de projeto:';
+    box.appendChild(sep);
+  }
   const bt=(txt,sub,fn,forte)=>{
     const b=document.createElement('button'); b.type='button';
     b.innerHTML=txt+'<br><span style="font-size:11.5px;opacity:.75">'+sub+'</span>';
@@ -20895,13 +21325,32 @@ window.addEventListener('message', ev=>{
     }catch(e){}
   }
 });
-function enviarProjetoParaPlanta(){
+function enviarProjetoParaPlanta(recarregar){
   const f=document.getElementById('pl-planta-frame');
   if(!f||!f.contentWindow||!_plantaPronta) return;
   try{
     f.contentWindow.postMessage({tipo:'ce-voz:projeto',
-      proj:{D:JSON.parse(JSON.stringify(D))}},'*');
+      proj:{D:JSON.parse(JSON.stringify(D))},recarregar:!!recarregar},'*');
   }catch(e){}
+}
+/* A PLANTA ACOMPANHA O LEVANTAMENTO.
+   O levantamento era enviado UMA vez, quando a planta abria. Medir mais uma
+   parede a seguir não chegava lá: a planta ao lado ficava desactualizada e só
+   voltava a bater ao fechar e abrir.
+   Agora reenvia-se a cada gravação, com meio segundo de travão para não
+   inundar o iframe a cada tecla. A planta acrescenta as divisões novas e não
+   mexe no que já foi arrastado — por isso isto não desfaz trabalho. */
+function refazerPlantaDoLevantamento(){
+  if(!confirm('Refazer o desenho a partir do levantamento?\n\n'+
+    'As divisões voltam às posições automáticas. Os vizinhos que desenhaste, '+
+    'as envolventes pintadas e os ajustes feitos à mão perdem-se.')) return;
+  enviarProjetoParaPlanta(true);
+}
+let _tmrPlanta=null;
+function avisarPlantaDeMudanca(){
+  if(!_plantaAberta||!_plantaPronta) return;
+  clearTimeout(_tmrPlanta);
+  _tmrPlanta=setTimeout(()=>enviarProjetoParaPlanta(false),500);
 }
 /* A planta ocupa o ecrã todo, dentro da app. Sai com o mesmo botão ou com Esc.
    Não usa o ecrã inteiro do sistema: assim o botão de sair fica sempre à vista
@@ -20950,6 +21399,13 @@ function abrirPlantaAoLado(){
           'style="background:var(--ac);color:#04140c;border:none;border-radius:8px;'+
           'padding:7px 12px;font-size:12.5px;font-weight:800;min-height:38px;'+
           'cursor:pointer;white-space:nowrap">⛶ Ecrã todo</button>'+
+        /* Refazer de raiz: as divisões voltam às posições automáticas. Existe
+           porque a actualização normal só acrescenta — depois de mudar muita
+           coisa no levantamento, às vezes é mais rápido recomeçar. */
+        '<button onclick="refazerPlantaDoLevantamento()" title="Refazer o desenho a partir do levantamento — perde os ajustes feitos à mão" '+
+          'style="background:var(--bg3);color:var(--tx2);border:1px solid var(--br);'+
+          'border-radius:8px;padding:7px 11px;font-size:12px;min-height:38px;'+
+          'cursor:pointer;white-space:nowrap">↻ Refazer</button>'+
         '<button onclick="if(document.body.classList.contains(\'planta-cheia\'))alternarPlantaCheia();abrirPlantaAoLado()" '+
           'style="background:var(--bg3);color:var(--tx);'+
           'border:1px solid var(--br);border-radius:8px;padding:7px 11px;font-size:12px;'+
@@ -21022,6 +21478,7 @@ function pintarPainelLado(){
 }
 
 function autoSave(){
+  try{ avisarPlantaDeMudanca(); }catch(e){}
   let snap,peso;
   try{
     snap={nome:D.nome,morada:D.morada,ts:new Date().toLocaleString('pt-PT'),
