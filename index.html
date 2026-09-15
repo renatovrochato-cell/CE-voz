@@ -583,7 +583,7 @@ const DIVS_BASE=[
 // VERSÃO — fonte única (selo no ecrã inicial + cabeçalho do TXT exportado).
 // Subir aqui a cada alteração ao ficheiro.
 // ═══════════════════════════════════════
-const APP_VERSION='v2026.09.15-FIX290';
+const APP_VERSION='v2026.09.15-FIX291';
 
 /* ══════════════════════════════════════════════════════════════════
    A APP INSTALADA FICAVA PRESA NUMA VERSÃO ANTIGA
@@ -21379,6 +21379,14 @@ function alternarPlantaCheia(){
   const b=document.getElementById('pl-btCheio');
   if(b){ b.textContent=on?'⤡ Reduzir':'⛶ Ecrã todo';
          b.title=on?'Voltar ao painel ao lado':'Pôr a planta a ocupar o ecrã todo'; }
+  /* Em ecrã todo há espaço para tudo: o Norte, a planta de fundo e o sol
+     voltam. Ao lado do levantamento ficam escondidos, que é onde a meia coluna
+     de telemóvel não chega para eles. */
+  try{
+    const f0=document.getElementById('pl-planta-frame');
+    const d=f0&&f0.contentWindow&&f0.contentWindow.document;
+    if(d) d.querySelectorAll('[data-fora-da-app]').forEach(e=>{ e.hidden=!on; });
+  }catch(e){}
   // dar tempo ao layout antes de a planta se redimensionar
   setTimeout(()=>{
     const f=document.getElementById('pl-planta-frame');
@@ -21534,6 +21542,15 @@ function abrirPlantaAoLado(){
 function pintarPainelLado(){
   const el=document.getElementById('painel-lado');
   if(!el||!document.body.classList.contains('duplo')) return;
+  /* COM A PLANTA ABERTA, O PAINEL É DELA.
+     Esta função é chamada a cada «Seguinte» para actualizar o resumo — e
+     reescrevia o painel inteiro, levando com ele o iframe da planta. A planta
+     desaparecia a cada pergunta e era preciso abri-la outra vez, perdendo o
+     desenho a meio.
+     Em vez de repintar, manda-se o levantamento actualizado para dentro: é
+     para isso que a ponte existe, e é assim que o quadrado que se acabou de
+     medir aparece na planta sem ela piscar. */
+  if(_plantaAberta){ try{ enviarProjetoParaPlanta(); }catch(e){} return; }
   const divs=(D.divisoes||[]);
   const dd=n=>D.divisoesDados[n]||{};
   const medidasDe=n=>Object.entries(dd(n).trocos||{})
