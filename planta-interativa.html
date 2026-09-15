@@ -583,7 +583,7 @@ Ver tudo</button>
   window.addEventListener('online',aviso);
 })();
 "use strict";
-const PLANTA_VERSAO='v1.56.0 (2026-09-07)';
+const PLANTA_VERSAO='v1.63.0 (2026-09-08)';
 /* ══════════════════════════════════════════════════════════════════
    CE Voz · motor de planta interativa
    Fonte de verdade: o levantamento (D). A planta é uma camada de
@@ -645,6 +645,9 @@ let modoCE=false;
 let pincelCF=null;   // condição fronteira activa para pintar paredes
 let pincelParcial=false;  // pintar só um troço da parede, entre dois cliques
 let legendaForaDoDesenho=false;  // no PDF a legenda vai por baixo, não por cima
+/* Altura reservada em baixo da imagem para o carimbo, em píxeis. Zero no ecrã;
+   na exportação, a faixa onde ele fica sem tapar o desenho. */
+let _altCarimbo=0;
 let _legendaCE=[];               // o que a legenda diria, para o PDF a montar
 let _trocoEmCurso=null;   // {bloco,lado,a} enquanto se espera o segundo clique
 /* RÉGUA — medir distâncias na planta.
@@ -769,7 +772,7 @@ function autoLayout(){
 
   const fichas=divisoes().map(nome=>{
     const d=dadosDiv(nome);
-    let rects=(d.areaRect||[]).map(r=>({c:parseM(r.c),l:parseM(r.l)})).filter(r=>r.c>0&&r.l>0);
+    let rects=(d.areaRect||[]).map(r=>({c:parseM(r.c),l:parseM(r.l),lado:r.lado||''})).filter(r=>r.c>0&&r.l>0);
     let estimado=false;
     if(!rects.length){
       // sem retângulos medidos: quadrado com a área declarada, ou 6 m² se nem
@@ -840,8 +843,39 @@ function autoLayout(){
       // blocos secundários (divisões em L): se o principal ficou estreito e fundo,
       // o resto encaixa POR BAIXO — pô-lo ao lado tapava justamente a parede
       // comprida que dá para a lateral (o corredor ao pé da caixa de escadas)
-      const empilhar=h>w;
+      /* ONDE ENCAIXA CADA PEDAÇO DE UMA DIVISÃO EM L.
+         A app não guardava a posição dos rectângulos — só C × L — e aqui
+         adivinhava-se pela forma do principal: se era mais fundo do que largo,
+         empilhava-se por baixo. Numa circulação em L medida ao contrário, o
+         pedaço que era para baixo saiu em cima e a divisão ficou espelhada.
+         Desde a FIX276 a app pergunta de que lado fica cada rectângulo. Quando
+         essa resposta existe, é ela que manda; sem ela, mantém-se o palpite de
+         sempre para não partir levantamentos antigos. */
+      const empilharAuto=h>w;
       f.rects.slice(1).forEach(r=>{
+        const lado=r.lado||'';
+        if(lado==='N'){        // acima do anterior
+          blocos.push({id:'b'+(k++),div:f.nome,x:x-w,y:(alinharBaixo?(yTopo-h):y)-r.l,
+            w:r.c,h:r.l,principal:false,auto:true,estimado:f.estimado});
+          return;
+        }
+        if(lado==='S'){        // abaixo
+          blocos.push({id:'b'+(k++),div:f.nome,x:x-w,y:(alinharBaixo?(yTopo-h):y)+h,
+            w:r.c,h:r.l,principal:false,auto:true,estimado:f.estimado});
+          return;
+        }
+        if(lado==='O'){        // à esquerda
+          blocos.push({id:'b'+(k++),div:f.nome,x:x-w-r.c,y:alinharBaixo?(yTopo-r.l):yTopo,
+            w:r.c,h:r.l,principal:false,auto:true,estimado:f.estimado});
+          return;
+        }
+        if(lado==='E'){        // à direita
+          blocos.push({id:'b'+(k++),div:f.nome,x,y:alinharBaixo?(yTopo-r.l):yTopo,
+            w:r.c,h:r.l,principal:false,auto:true,estimado:f.estimado});
+          x+=r.c;
+          return;
+        }
+        const empilhar=empilharAuto;
         if(empilhar){
           blocos.push({id:'b'+(k++),div:f.nome,x:x-w,y:(alinharBaixo?(yTopo-h):y)+h,w:r.c,h:r.l,principal:false,auto:true,estimado:f.estimado});
         } else {
@@ -1988,14 +2022,23 @@ function desenhar(dimForcada){
      área útil. */
   adjacentes().forEach(a=>{
     const cor=adjCor(a);
-    p.push('<rect data-adj="'+a.id+'" x="'+sx(a.x)+'" y="'+sy(a.y)+
-      '" width="'+(a.w*view.ppm)+'" height="'+(a.h*view.ppm)+
-      '" fill="'+cor+'" fill-opacity=".13" stroke="'+cor+'" stroke-width="2" '+
-      'stroke-dasharray="8 5" style="cursor:move"/>');
+    /* Com contorno desenhado, pinta-se o polígono; sem ele, o rectângulo de
+       sempre. O data-adj fica igual nos dois, para o arrasto e o menu
+       continuarem a funcionar. */
+    if(Array.isArray(a.pts)&&a.pts.length>=3){
+      const d=a.pts.map((q,i)=>(i?'L':'M')+sx(q.x)+' '+sy(q.y)).join(' ')+' Z';
+      p.push('<path data-adj="'+a.id+'" d="'+d+'" fill="'+cor+'" fill-opacity=".13" '+
+        'stroke="'+cor+'" stroke-width="2" stroke-dasharray="8 5" style="cursor:move"/>');
+    } else {
+      p.push('<rect data-adj="'+a.id+'" x="'+sx(a.x)+'" y="'+sy(a.y)+
+        '" width="'+(a.w*view.ppm)+'" height="'+(a.h*view.ppm)+
+        '" fill="'+cor+'" fill-opacity=".13" stroke="'+cor+'" stroke-width="2" '+
+        'stroke-dasharray="8 5" style="cursor:move"/>');
+    }
     /* PEGAS PARA REDIMENSIONAR — uma por lado.
        Criar a caixa e não a poder ajustar não servia de nada: um vizinho tem de
        encostar à parede toda, e o tamanho por omissão nunca é o certo. */
-    if(sel&&sel.t==='adj'&&sel.id===a.id){
+    if(sel&&sel.t==='adj'&&sel.id===a.id&&!(Array.isArray(a.pts)&&a.pts.length>=3)){
       const pg=[['N',a.x+a.w/2,a.y],['S',a.x+a.w/2,a.y+a.h],
                 ['O',a.x,a.y+a.h/2],['E',a.x+a.w,a.y+a.h/2]];
       pg.forEach(([lado,mx,my])=>{
@@ -2132,13 +2175,24 @@ function desenhar(dimForcada){
          toca-se nele e abre-se a lista de paredes, com a certa em primeiro.
          É onde a mão já está e onde o olho já foi. */
       const mx=(x1+x2)/2+nrmP.x*13, my=(y1+y2)/2+nrmP.y*13;
+      /* O marcador está AFASTADO da parede (13 px pela normal) para não tapar
+         o vão — quem quer arrastar acerta no traço, quem quer corrigir acerta
+         no «!». */
       p.push('<circle data-vao-erro="'+esc(v.div)+'|'+v.i+'" cx="'+mx+'" cy="'+my+
-        '" r="11" fill="var(--erro)" stroke="#fff" stroke-width="1.5" style="cursor:pointer"/>');
+        '" r="10" fill="var(--erro)" stroke="#fff" stroke-width="1.5" style="cursor:pointer"/>');
       p.push('<text data-vao-erro="'+esc(v.div)+'|'+v.i+'" x="'+mx+'" y="'+(my+4)+
         '" text-anchor="middle" font-size="12" font-weight="800" fill="#fff" '+
         'style="cursor:pointer">!</text>');
     }
     p.push('<line x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+'" stroke="#EDF1F3" stroke-width="7" stroke-linecap="butt" pointer-events="none"/>');
+    /* FAIXA DE TOQUE — O TRAÇO DO VÃO É FINO DEMAIS PARA O DEDO.
+       O alvo mais grosso tinha 4 px de largura. Num telemóvel um dedo cobre
+       uns 40 px: acertar nele é sorte, e falhar significa arrastar a planta
+       inteira em vez do vão. Uma faixa invisível de 22 px por cima resolve —
+       é a técnica normal para alvos finos em SVG. Fica ANTES das linhas
+       visíveis para não as tapar, e não pinta nada. */
+    p.push('<line data-vao="'+esc(v.div)+'|'+v.i+'" x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+
+      '" stroke="transparent" stroke-width="22" stroke-linecap="round" style="cursor:ew-resize"/>');
     p.push('<line data-vao="'+esc(v.div)+'|'+v.i+'" x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+
       '" stroke="'+cor+'" stroke-width="4" stroke-linecap="butt" style="cursor:ew-resize"/>');
     p.push('<line data-vao="'+esc(v.div)+'|'+v.i+'" x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+
@@ -2501,12 +2555,24 @@ function desenhar(dimForcada){
     const cw=Math.max(230,Math.min(430,
       Math.max(...linhas.map(t2=>t2.length))*6.1+22));
     const ch=13+linhas.length*15;
-    const cx2=W-cw-14, cy2=H-ch-14;
-    p.push('<rect x="'+cx2+'" y="'+cy2+'" width="'+cw+'" height="'+ch+
-      '" rx="5" fill="#FFFFFF" fill-opacity=".92" stroke="#B9C6CE" '+
-      'stroke-width="1" pointer-events="none"/>');
+    /* Com faixa reservada, o carimbo vai para lá — encostado à esquerda, a
+       toda a largura, separado do desenho por um traço. Sem faixa (no ecrã),
+       fica no canto como antes. */
+    const naFaixa=_altCarimbo>0;
+    const cx2=naFaixa?0:(W-cw-14);
+    const cy2=naFaixa?(H-_altCarimbo):(H-ch-14);
+    if(naFaixa){
+      p.push('<rect x="0" y="'+cy2+'" width="'+W+'" height="'+_altCarimbo+
+        '" fill="#FFFFFF" pointer-events="none"/>');
+      p.push('<line x1="0" y1="'+cy2+'" x2="'+W+'" y2="'+cy2+
+        '" stroke="#B9C6CE" stroke-width="1" pointer-events="none"/>');
+    } else {
+      p.push('<rect x="'+cx2+'" y="'+cy2+'" width="'+cw+'" height="'+ch+
+        '" rx="5" fill="#FFFFFF" fill-opacity=".92" stroke="#B9C6CE" '+
+        'stroke-width="1" pointer-events="none"/>');
+    }
     linhas.forEach((t2,i)=>{
-      p.push('<text x="'+(cx2+11)+'" y="'+(cy2+18+i*15)+'" font-size="'+
+      p.push('<text x="'+(cx2+14)+'" y="'+(cy2+18+i*15)+'" font-size="'+
         (i===0?12:10.5)+'" font-weight="'+(i===0?700:400)+
         '" fill="'+(i===0?'#16202A':'#46586A')+
         '" pointer-events="none">'+esc(t2)+'</text>');
@@ -2522,9 +2588,14 @@ function desenhar(dimForcada){
     const passos=[0.5,1,2,5,10,20,50];
     const m=passos.find(x=>x>=alvo)||passos[passos.length-1];
     const larg=m*view.ppm;
-    const ex=16, ey=H-24;
-    p.push('<rect x="'+(ex-6)+'" y="'+(ey-20)+'" width="'+(larg+70)+
-      '" height="30" rx="5" fill="#EDF1F3" fill-opacity=".85" pointer-events="none"/>');
+    /* Com faixa de carimbo, a escala vai para lá também — à direita, ao lado
+       da identificação. No ecrã fica onde estava, no canto de baixo. */
+    const naFaixaE=_altCarimbo>0;
+    const ex=naFaixaE?(W-larg-96):16;
+    const ey=naFaixaE?(H-_altCarimbo+34):(H-24);
+    if(!naFaixaE)
+      p.push('<rect x="'+(ex-6)+'" y="'+(ey-20)+'" width="'+(larg+70)+
+        '" height="30" rx="5" fill="#EDF1F3" fill-opacity=".85" pointer-events="none"/>');
     // barra aos quartos, preto e branco alternados, como nas peças desenhadas
     for(let i=0;i<4;i++){
       p.push('<rect x="'+(ex+i*larg/4)+'" y="'+(ey-9)+'" width="'+(larg/4)+
@@ -3487,6 +3558,10 @@ function espExterior(){
    · divisória, entre divisões do fogo  0,15 */
 const ESP_MEACAO=null;   // = a da fachada; nomeado para se ver a intenção
 function espDaParede(par){
+  /* Mesmo caso da cor: uma parede curta que a janela ocupa quase toda ficava
+     sem espaço «livre» e era desenhada com espessura de meação, mais fina do
+     que a fachada que é. Se tem vão exterior, é fachada. */
+  if(L.vaos.some(v=>v.bloco===par.bloco&&v.lado===par.lado)) return espExterior();
   if(vaosLivres(par).exterior>.05) return espExterior();
   /* Uma parede com vão interior para a marquise continua a ser parede de
      compartimentação: leva a espessura de meação, não a de divisória. Sem
@@ -3542,6 +3617,24 @@ function fecharPoli(){
   const div=poli.div;
   if(poli.pts.length<3){ document.getElementById('dica').textContent='Faltam pontos para fechar.'; return; }
   guardarHist();
+  /* Vizinho: guarda-se o polígono e recalcula-se a caixa envolvente, que é o
+     que o resto do código usa para saber onde ele está. As paredes que ele
+     toca são remarcadas a seguir, como quando se arrasta a caixa. */
+  if(poli.adj){
+    const a=adjacentes().find(x=>x.id===poli.adj);
+    if(a){
+      const pts=poli.pts.slice();
+      a.pts=pts;
+      a.x=Math.min(...pts.map(q=>q.x)); a.y=Math.min(...pts.map(q=>q.y));
+      a.w=Math.max(...pts.map(q=>q.x))-a.x; a.h=Math.max(...pts.map(q=>q.y))-a.y;
+      poli=null; poliPrev=null;
+      const n=aplicarAdjacenteAsParedes(a);
+      document.getElementById('dica').textContent='Vizinho redesenhado'+
+        (n?' — '+n+' parede(s) marcadas.':'. Arrasta-o até encostar às paredes.');
+      repintarTudo();
+      return;
+    }
+  }
   // se o contorno for todo ortogonal usa-se a decomposição em rectângulos (mais
   // simples de editar); se tiver diagonais ou arcos guarda-se o polígono tal e qual
   const orto=fecharOrtogonal(poli.pts);
@@ -3609,6 +3702,15 @@ function cfParede(par){
   const eo=envObj(par.bloco,par.lado);
   if(eo&&eo.tipo===DIVISORIA) return null;
   if(eo) return cfDoTipo(eo.tipo,eo.btr);
+  /* UMA PAREDE COM VÃO DÁ PARA FORA — SEMPRE.
+     `vaosLivres().exterior` é o espaço da parede LIVRE de vizinhos. Numa
+     parede curta que a janela ocupa quase toda, sobra menos de 5 cm e a
+     parede ficava sem cor nenhuma: nem vermelha nem amarela, como se não
+     fosse envolvente. Mas uma janela não dá para uma divisão do próprio
+     fogo — se ali está um vão, aquilo é fachada.
+     Duas regras noutros pontos do ficheiro já impediam essa parede de ser
+     marcada como interior; faltava dizer o que ela é. */
+  if(L.vaos.some(v=>v.bloco===par.bloco&&v.lado===par.lado)) return 'ext';
   return vaosLivres(par).exterior>.05?'ext':null;
 }
 function ceCorParede(par){ const k=cfParede(par); return k?cfCor(k):null; }
@@ -3701,7 +3803,38 @@ function criarAdjacente(){
     y=Math.min(...cs.map(c=>c.y0));
     h=Math.max(2,Math.min(6,Math.max(...cs.map(c=>c.y1))-y));
   }
-  novoAdjacente(x,y,3,h,'fraccao',false);
+  /* CADA VIZINHO NOVO NASCE EM SÍTIO LIVRE.
+     Todos nasciam na MESMA posição — encostados à direita, em cima uns dos
+     outros. A partir do terceiro, o que se via era sempre o mesmo rectângulo:
+     parecia que a app tinha bloqueado e não deixava criar mais.
+     Procura-se um sítio que não se sobreponha aos que já existem: primeiro
+     desce pela direita, depois passa para baixo do fogo e desce à esquerda.
+     Se tudo estiver ocupado, desloca-se um pouco — melhor sobrepor-se de lado
+     do que ficar exactamente por cima. */
+  const ocupado=(px,py,pw,ph)=>adjacentes().some(o=>
+    px<o.x+o.w-0.05 && px+pw>o.x+0.05 && py<o.y+o.h-0.05 && py+ph>o.y+0.05);
+  const LARG=3;
+  if(ocupado(x,y,LARG,h)){
+    let achou=false;
+    // 1) descer pelo lado direito
+    for(let k=1;k<40&&!achou;k++){
+      const ny=y+k*0.5;
+      if(!ocupado(x,ny,LARG,h)){ y=ny; achou=true; }
+    }
+    // 2) por baixo do fogo, da esquerda para a direita
+    if(!achou&&L.blocos.length){
+      const cs=L.blocos.map(caixa);
+      const baixo=Math.max(...cs.map(c=>c.y1));
+      const esq=Math.min(...cs.map(c=>c.x0));
+      for(let k=0;k<40&&!achou;k++){
+        const nx=esq+k*0.5;
+        if(!ocupado(nx,baixo,LARG,Math.min(h,3))){ x=nx; y=baixo; h=Math.min(h,3); achou=true; }
+      }
+    }
+    // 3) desistiu de achar sítio limpo: afasta-se, para não ficar escondido
+    if(!achou){ x+=adjacentes().length*0.4; y+=adjacentes().length*0.4; }
+  }
+  novoAdjacente(x,y,LARG,h,'fraccao',false);
   const a=adjacentes()[adjacentes().length-1];
   sel={t:'adj',id:a.id};
   /* Aplica logo: nasce encostado, por isso as paredes desse lado ficam
@@ -3733,13 +3866,29 @@ function aplicarAdjacenteAsParedes(a){
   let n=0;
   const cf=adjCF(a);
   const f=0.36;                       // folga da espessura da parede
+  /* COM CONTORNO DESENHADO, OS LADOS SÃO OS DO POLÍGONO.
+     A marcação olhava só para os quatro lados da CAIXA envolvente. Num vizinho
+     em L, os lados de dentro do L ficam no meio da caixa e nunca marcavam
+     nada — que é metade da razão para desenhar o contorno.
+     Com `pts`, recolhem-se as linhas verticais e horizontais do polígono. */
+  let linhasV=null, linhasH=null;
+  if(Array.isArray(a.pts)&&a.pts.length>=3){
+    linhasV=[]; linhasH=[];
+    a.pts.forEach((q,i)=>{
+      const r=a.pts[(i+1)%a.pts.length];
+      if(Math.abs(q.x-r.x)<0.05) linhasV.push(q.x);
+      if(Math.abs(q.y-r.y)<0.05) linhasH.push(q.y);
+    });
+  }
   L.blocos.forEach(b=>paredes(b).forEach(par=>{
     if(paredeInternaDoFogo(par)) return;
     const dx=(par.p2.x-par.p1.x)/par.comp, dy=(par.p2.y-par.p1.y)/par.comp;
     /* A parede é paralela a um lado da caixa e está encostada a ele? */
     const vert=Math.abs(dx)<0.05;     // parede vertical → encosta a O ou E
     const linha=vert?par.p1.x:par.p1.y;
-    const lados=vert?[a.x,a.x+a.w]:[a.y,a.y+a.h];
+    const lados=vert
+      ?(linhasV&&linhasV.length?linhasV:[a.x,a.x+a.w])
+      :(linhasH&&linhasH.length?linhasH:[a.y,a.y+a.h]);
     if(!lados.some(v=>Math.abs(linha-v)<=f)) return;
     /* Sobreposição no comprimento: é o troço em contacto. */
     const p0=vert?par.p1.y:par.p1.x, p1=vert?par.p2.y:par.p2.x;
@@ -4161,6 +4310,23 @@ function guardarPosNaParede(ev,parede){
    orientação — a mais livre, se houver mais do que uma. Os que já lá estão
    ficam quietos, e os que não têm parede daquela orientação ficam onde estão
    e são contados, porque aí o problema é a planta ou o levantamento. */
+/* Distância entre orientações, em casas da rosa dos ventos. A planta calcula
+   a orientação real de cada parede a partir do desenho: uma divisão um pouco
+   rodada dá «SO» onde o levantamento diz «Sul». Aceita-se até 45°. */
+const ROSA_ORI=['Norte','NE','Este','SE','Sul','SO','Oeste','NO'];
+function _idxOri(o){
+  const t=String(o||'').trim().toLowerCase();
+  const i=ROSA_ORI.findIndex(r=>r.toLowerCase()===t);
+  if(i>=0) return i;
+  const longos={norte:0,nordeste:1,este:2,sudeste:3,sul:4,sudoeste:5,oeste:6,noroeste:7};
+  return (t in longos)?longos[t]:-1;
+}
+function _distOri(a,b){
+  const x=_idxOri(a), y=_idxOri(b);
+  if(x<0||y<0) return 99;
+  const d=Math.abs(x-y)%8;
+  return Math.min(d,8-d);
+}
 function arrumarVaos(){
   guardarHist();
   let movidos=0, semParede=[];
@@ -4169,16 +4335,27 @@ function arrumarVaos(){
       if(!dv.orient) return;
       const v=L.vaos.find(x=>x.div===div&&x.i===i);
       const atual=v?paredeDe(v.bloco,v.lado):null;
-      if(atual&&atual.orient===dv.orient) return;          // já está bem
+      // «já está bem» com a mesma tolerância de 45° usada na escolha
+      if(atual&&_distOri(atual.orient,dv.orient)<=1) return;
+      /* A ORIENTAÇÃO NÃO TEM DE BATER AO GRAU.
+         A planta calcula a orientação real de cada parede a partir do desenho:
+         se a divisão está um pouco rodada, a parede fica «SO» e o vão diz
+         «Sul». Exigir igualdade exacta fazia com que nada acontecesse — o
+         botão parecia partido, quando na verdade não achava nenhuma parede.
+         Passa a aceitar a mais próxima: primeiro a igual, depois a que está a
+         45° (uma casa na rosa dos ventos), e só se falhar tudo é que desiste.
+         Mais de 45° já é outra fachada e não se adivinha. */
       const cands=[];
       L.blocos.filter(b=>b.div===div).forEach(b=>paredes(b).forEach(par=>{
-        if(par.orient!==dv.orient) return;
         if(paredeInternaDoFogo(par)) return;
+        const dd2=_distOri(dv.orient,par.orient);
+        if(dd2>1) return;                 // mais de 45° de diferença: outra fachada
         let livre=0; try{ livre=vaosLivres(par).exterior; }catch(e){}
-        cands.push({par,livre});
+        cands.push({par,livre,desvio:dd2});
       }));
       if(!cands.length){ semParede.push(rotuloVao(div,i)+' ('+dv.orient+')'); return; }
-      cands.sort((a,b)=>b.livre-a.livre);
+      // a mais alinhada primeiro; entre iguais, a mais livre
+      cands.sort((a,b)=>(a.desvio-b.desvio)||(b.livre-a.livre));
       const alvo=cands[0].par;
       if(v){ v.bloco=alvo.bloco; v.lado=alvo.lado; v.d=null; }
       else L.vaos.push({div,i,bloco:alvo.bloco,lado:alvo.lado,d:null});
@@ -4186,10 +4363,28 @@ function arrumarVaos(){
     });
   });
   repintarTudo();   // repintarTudo já persiste o estado
+  /* DIZER SEMPRE ALGUMA COISA.
+     Quando não havia nada a mover, a barra ficava com «Nenhum vão estava fora
+     do sítio» — que é verdade mas parece que o botão não fez nada. E se os
+     vãos não tinham orientação nenhuma no levantamento, não se dizia porquê.
+     Agora a mensagem distingue os três casos. */
   const d=document.getElementById('dica');
-  if(d) d.textContent=(movidos?movidos+' vão(s) arrumados na parede da sua orientação. ':'Nenhum vão estava fora do sítio. ')+
-    (semParede.length?('Sem parede para: '+semParede.join(', ')+
-      ' — nenhuma parede da divisão está a essa orientação; confirma a forma da planta ou o levantamento.'):'');
+  if(!d) return;
+  const semOrient=[];
+  divisoes().forEach(div=>(dadosDiv(div).vaos||[]).forEach((dv,i)=>{
+    if(!dv.orient&&(dv.larg||dv.alt)) semOrient.push(rotuloVao(div,i));
+  }));
+  let msg='';
+  if(movidos) msg=movidos+' vão(s) arrumados na parede da sua orientação. ';
+  else if(semParede.length||semOrient.length) msg='Nenhum vão foi movido. ';
+  else msg='✓ Todos os vãos já estão na parede certa. ';
+  if(semParede.length)
+    msg+='Sem parede para: '+semParede.join(', ')+' — nenhuma parede dessa divisão está '+
+         'a essa orientação (nem a 45°); confirma a forma da planta ou o levantamento. ';
+  if(semOrient.length)
+    msg+='Sem orientação no levantamento: '+semOrient.join(', ')+
+         ' — marca a orientação na app e volta a tentar.';
+  d.textContent=msg;
 }
 function abrirMenu(px,py,blocoId,parede){
   const b=blocoId?L.blocos.find(x=>x.id===blocoId):null;
@@ -4208,7 +4403,7 @@ function abrirMenu(px,py,blocoId,parede){
     const dv=(dadosDiv(sel.div).vaos||[])[sel.i]||{};
     const atual=v?paredeDe(v.bloco,v.lado):null;
     itens.push({t:'cab',txt:rotuloVao(sel.div,sel.i)+' · '+(dv.larg||'?')+'×'+(dv.alt||'?')+' m'});
-    if(atual&&dv.orient&&atual.orient!==dv.orient)
+    if(atual&&dv.orient&&_distOri(atual.orient,dv.orient)>1)
       itens.push({t:'cab',txt:'⚠ está numa parede '+atual.orient+', o levantamento diz '+dv.orient});
     const larg=Math.max(parseM(dv.larg)||0.6,0.2);
     const opcoes=[];
@@ -4217,7 +4412,7 @@ function abrirMenu(px,py,blocoId,parede){
       let livre=0; try{ livre=vaosLivres(par).exterior; }catch(e){}
       opcoes.push({par,livre,
         atual:!!(v&&v.bloco===par.bloco&&v.lado===par.lado),
-        certa:dv.orient&&par.orient===dv.orient});
+        certa:dv.orient&&_distOri(par.orient,dv.orient)<=1});
     }));
     // a orientação certa primeiro, depois a mais livre
     opcoes.sort((a,c)=>(c.certa-a.certa)||(c.livre-a.livre));
@@ -4311,7 +4506,7 @@ function abrirMenu(px,py,blocoId,parede){
       meus.forEach(({dv,i})=>{
         const v=L.vaos.find(x=>x.div===b.div&&x.i===i);
         const par=v?paredeDe(v.bloco,v.lado):null;
-        const mal=par&&dv.orient&&par.orient!==dv.orient;
+        const mal=par&&dv.orient&&_distOri(par.orient,dv.orient)>1;
         itens.push({t:'b',
           txt:(mal?'⚠ ':'')+rotuloVao(b.div,i)+' · '+(dv.orient||'sem orientação')+
             (par?(mal?'  → está a '+par.orient:''):'  → por colocar'),
@@ -4333,7 +4528,13 @@ function abrirMenu(px,py,blocoId,parede){
     } else {
       CF.forEach(([k,n])=>{
         if(k==='solo') return;                     // o solo é do pavimento, não da parede
-        itens.push({t:'b',txt:CF_NOME[k],cor:cfCor(k),
+        itens.push({t:'b',txt:'✏ Redesenhar contorno deste vizinho',fn:()=>{
+        sel={t:'adj',id:a.id}; porModo('poli');
+        document.getElementById('dica').textContent=
+          'Clica canto a canto o contorno do vizinho. Enter ou ⊠ fecha.';
+      }});
+      itens.push({t:'hr'});
+      itens.push({t:'b',txt:CF_NOME[k],cor:cfCor(k),
           fn:()=>{guardarHist();aplicarCF(pid,plado,k);porPincel(k);sel={t:'parede',bloco:pid,lado:plado};}});
       });
       /* TROÇO PARCIAL PELO BOTÃO DIREITO
@@ -4852,10 +5053,21 @@ svg.addEventListener('pointerdown',ev=>{
     return;
   }
   if(desenhando){
+    /* REDESENHAR O CONTORNO DE UM VIZINHO.
+       O contorno à mão só servia para divisões do fogo. Mas um vizinho
+       raramente é um rectângulo — uma circulação comum em L, uma fracção que
+       envolve o fogo por dois lados — e só havia a caixa rectangular, que
+       obrigava a criar três ou quatro vizinhos para desenhar um. */
+    const adjSel=(sel.t==='adj')?adjacentes().find(a=>a.id===sel.id):null;
     const div=poli?poli.div:(sel.t==='div'?sel.div:(sel.t==='bloco'?(L.blocos.find(b=>b.id===sel.id)||{}).div:null));
-    if(!div){document.getElementById('dica').textContent='Escolhe primeiro a divisão na lista à esquerda.';return;}
+    const alvoAdj=poli?poli.adj:(adjSel?adjSel.id:null);
+    if(!div&&!alvoAdj){
+      document.getElementById('dica').textContent=
+        'Escolhe primeiro a divisão na lista à esquerda, ou toca no vizinho que queres redesenhar.';
+      return;
+    }
     const q=pontoPoli(p);
-    if(!poli){ poli={div,pts:[q]}; dicaPoli(); pintar(); return; }
+    if(!poli){ poli={div,adj:alvoAdj,pts:[q]}; dicaPoli(); pintar(); return; }
     // clicar em cima do primeiro ponto fecha
     if(poli.pts.length>=3&&Math.hypot(q.x-poli.pts[0].x,q.y-poli.pts[0].y)<=Math.max(.25,14/view.ppm)){
       fecharPoli(); return;
@@ -4908,7 +5120,7 @@ svg.addEventListener('pointerdown',ev=>{
   const adjAlvo=t.getAttribute&&t.getAttribute('data-adj');
   if(adjAlvo&&!regua&&!pincelCF){
     const a=adjacentes().find(x=>x.id===adjAlvo);
-    if(a){ guardarHist(); sel={t:'adj',id:a.id}; arr={tipo:'adj',a,p0:p,a0:{...a}};
+    if(a){ guardarHist(); sel={t:'adj',id:a.id}; arr={tipo:'adj',a,p0:p,a0:Object.assign({},a,{pts:a.pts?a.pts.map(q=>({x:q.x,y:q.y})):null})};
       pintarInspetor(); repintarTudo(); return; }
   }
   if(regua){
@@ -5169,6 +5381,12 @@ svg.addEventListener('pointermove',ev=>{
     const a=arr.a, o=arr.a0;
     a.x=snapA(o.x+(p.x-arr.p0.x));
     a.y=snapA(o.y+(p.y-arr.p0.y));
+    /* Com contorno desenhado, os pontos acompanham a caixa — senão o polígono
+       ficava para trás e o vizinho aparecia partido em dois sítios. */
+    if(Array.isArray(o.pts)&&o.pts.length>=3){
+      const ddx=a.x-o.x, ddy=a.y-o.y;
+      a.pts=o.pts.map(q=>({x:q.x+ddx,y:q.y+ddy}));
+    }
     pintar(); return;
   }
   if(arr.tipo==='vao'){
@@ -6115,7 +6333,8 @@ function alinharParedes(tol){
   // que coordenadas são de parede exterior (não têm vizinho do outro lado)
   const pesos={x:new Map(),y:new Map()};
   L.blocos.forEach(b=>paredes(b).forEach(par=>{
-    const ext=vaosLivres(par).exterior>.05;
+    const ext=vaosLivres(par).exterior>.05||
+      L.vaos.some(v=>v.bloco===par.bloco&&v.lado===par.lado);
     const eixo=(par.lado==='N'||par.lado==='S')?'y':'x';
     const v=eixo==='y'?par.p1.y:par.p1.x;
     pesos[eixo].set(v.toFixed(4),Math.max(pesos[eixo].get(v.toFixed(4))||0,ext?3:1));
@@ -7186,15 +7405,68 @@ window.addEventListener('message', ev=>{
   if(!m||typeof m!=='object') return;
   try{
     if(m.tipo==='ce-voz:projeto'&&m.proj){
-      carregar(JSON.parse(JSON.stringify(m.proj)),true);
-      const d=document.getElementById('dica');
-      if(d) d.textContent='Levantamento recebido da app: '+
-        ((m.proj.D&&m.proj.D.divisoes||[]).length)+' divisões. '+
-        'O que guardares aqui volta para lá.';
+      /* ACTUALIZAR SEM DESFAZER O QUE JÁ FOI AJUSTADO À MÃO.
+         `carregar` refaz o desenho todo: as divisões voltam às posições
+         automáticas, os vizinhos desaparecem, as envolventes pintadas
+         perdem-se. Servia quando a planta era aberta uma vez, no fim. Com a
+         app a reenviar o levantamento a cada medição, isso apagaria o trabalho
+         de arrastar e encostar a cada parede medida.
+         Quando já há desenho, só se acrescentam as divisões NOVAS. O resto
+         fica como está — quem mexeu à mão sabia o que estava a fazer. */
+      const primeiraVez=!(L&&(L.blocos||[]).length);
+      if(primeiraVez||m.recarregar){
+        carregar(JSON.parse(JSON.stringify(m.proj)),true);
+        const d=document.getElementById('dica');
+        if(d) d.textContent='Levantamento recebido da app: '+
+          ((m.proj.D&&m.proj.D.divisoes||[]).length)+' divisões. '+
+          'O que guardares aqui volta para lá.';
+      } else {
+        const n=acrescentarDivisoesNovas(m.proj);
+        if(n){
+          const d=document.getElementById('dica');
+          if(d) d.textContent=n+' divisão(ões) nova(s) acrescentada(s). '+
+            'O resto do desenho ficou como estava.';
+        }
+      }
     }
     if(m.tipo==='ce-voz:pedir-layout'){ enviarLayoutParaApp(); }
   }catch(e){}
 });
+/* Acrescenta ao desenho as divisões que a app tem e a planta ainda não.
+   Devolve quantas foram acrescentadas. Não toca em nada do que já existe:
+   nem posições, nem vizinhos, nem envolventes, nem vãos. */
+function acrescentarDivisoesNovas(proj){
+  const D2=(proj&&proj.D)||{};
+  const jaTem=new Set((L.blocos||[]).map(b=>b.div));
+  const novas=(D2.divisoes||[]).filter(d=>!jaTem.has(d));
+  if(!novas.length){ proj_atualizarDados(D2); return 0; }
+  /* Colocam-se por baixo do que existe, encostadas à esquerda, para não
+     caírem em cima de nada. Depois arrastam-se. */
+  const cs=(L.blocos||[]).map(caixa);
+  let y=cs.length?Math.max(...cs.map(c=>c.y1))+0.6:0;
+  let x=cs.length?Math.min(...cs.map(c=>c.x0)):0;
+  novas.forEach(nome=>{
+    const dd2=(D2.divisoesDados||{})[nome]||{};
+    const rs=(dd2.areaRect||[]).map(r=>({c:parseM(r.c),l:parseM(r.l)})).filter(r=>r.c>0&&r.l>0);
+    const a=parseM(dd2.areaUtil)||6;
+    const w=rs.length?rs[0].c:Math.sqrt(a), h=rs.length?rs[0].l:Math.sqrt(a);
+    L.blocos.push({id:'n'+Date.now().toString(36)+Math.random().toString(36).slice(2,5),
+      div:nome,x,y,w,h,principal:true,auto:true,estimado:!rs.length});
+    x+=w+0.4;
+  });
+  proj_atualizarDados(D2);
+  repintarTudo();
+  return novas.length;
+}
+/* Os DADOS do levantamento (medidas, vãos, envolventes declaradas) são sempre
+   os mais recentes — o que não se mexe é o DESENHO. */
+function proj_atualizarDados(D2){
+  try{
+    proj=proj||{}; proj.D=proj.D||{};
+    Object.assign(proj.D,JSON.parse(JSON.stringify(D2)));
+    _numCache=null;
+  }catch(e){}
+}
 function enviarLayoutParaApp(){
   if(!DENTRO_DA_APP) return false;
   try{
@@ -7523,7 +7795,16 @@ function planoParaExportar(ppm){
     x0=Math.min(x0,f.x); y0=Math.min(y0,f.y);
     x1=Math.max(x1,f.x+f.w); y1=Math.max(y1,f.y+f.h);
   });
-  const W=Math.round((x1-x0+2*M)*PPM), H=Math.round((y1-y0+2*M)*PPM);
+  /* FAIXA PARA O CARIMBO, POR BAIXO DO DESENHO.
+     O carimbo — nome, morada, área, data — era desenhado no canto inferior
+     direito, DENTRO da imagem, e tapava o que lá estivesse. Numa planta em L
+     tapa logo um quarto inteiro, e num desenho técnico o que fica escondido é
+     precisamente o que se precisa de ver.
+     Acrescenta-se altura à imagem só para ele: o desenho fica inteiro em cima,
+     o carimbo em baixo, sem se tocarem. */
+  const ALT_CARIMBO=legendaForaDoDesenho?76:0;
+  _altCarimbo=ALT_CARIMBO;
+  const W=Math.round((x1-x0+2*M)*PPM), H=Math.round((y1-y0+2*M)*PPM)+ALT_CARIMBO;
   const guarda={...view};
   view.ppm=PPM; view.ox=-(x0-M)*PPM; view.oy=-(y0-M)*PPM;
   const oFundos=(L.fundos&&L.fundos.length)?L.fundos.slice():(L.fundo?[L.fundo]:[]);
