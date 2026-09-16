@@ -583,7 +583,7 @@ const DIVS_BASE=[
 // VERSÃO — fonte única (selo no ecrã inicial + cabeçalho do TXT exportado).
 // Subir aqui a cada alteração ao ficheiro.
 // ═══════════════════════════════════════
-const APP_VERSION='v2026.09.15-FIX292';
+const APP_VERSION='v2026.09.16-FIX297';
 
 /* ══════════════════════════════════════════════════════════════════
    A APP INSTALADA FICAVA PRESA NUMA VERSÃO ANTIGA
@@ -3266,7 +3266,24 @@ function renderCompInputs(q){
 
   // ── PISO DESTA DIVISÃO (só relevante com mais de 1 piso na fração/moradia) ──
   if((D.pisos||1)>1){
-    if(!dd.piso) dd.piso=_etiquetasPisos()[0];
+    /* O PISO SEGUE O DA DIVISÃO ANTERIOR.
+       Por omissão era sempre o PRIMEIRO piso da lista. Numa moradia, ao subir
+       ao 1º andar era preciso corrigir o piso em cada uma das seis divisões
+       seguintes — dois toques por divisão, a toda a volta da casa.
+       O levantamento faz-se piso a piso: a divisão seguinte está quase sempre
+       no mesmo piso da anterior. Herda-se esse, e quem muda de piso corrige uma
+       vez — a seguinte já vem certa. */
+    if(!dd.piso){
+      let herdado='';
+      try{
+        const idx=(D.divisoes||[]).indexOf(q.div);
+        for(let k=idx-1;k>=0;k--){
+          const p2=((D.divisoesDados||{})[(D.divisoes||[])[k]]||{}).piso;
+          if(p2){ herdado=p2; break; }
+        }
+      }catch(e){}
+      dd.piso=herdado||_etiquetasPisos()[0];
+    }
     const pisoSec=document.createElement('div');
     pisoSec.style.cssText='margin-bottom:12px';
     const pisoLbl=document.createElement('div');
@@ -3460,7 +3477,22 @@ function renderCompInputs(q){
         const vals=ot.map(v=>parseFloat(v)||0);
         const total=vals.reduce((a,b)=>a+b,0);
         const parts=vals.filter(v=>v>0).map(v=>v+'m').join(' + ');
+        /* UMA MEDIDA EM CENTÍMETROS ESTRAGA TUDO.
+           Num levantamento real, a parede NE de um quarto ficou com 298,00 m —
+           o laser deu 298 cm e o valor entrou como metros. O número é absurdo
+           mas nada o assinalava: a área continuava certa (vem dos rectângulos),
+           o TXT saía normal, e só a planta denunciava o problema, ao desenhar
+           um bloco de 298 metros que atirava as outras oito divisões para fora
+           do ecrã. O técnico via uma planta vazia e não percebia porquê.
+           Mais de 30 m numa parede de habitação é sempre engano. Avisa-se aqui,
+           enquanto se mede e se pode corrigir. */
+        if(total>30){
+          te.textContent='⚠ '+total.toFixed(2)+' m — a medida parece estar em cm';
+          te.style.color='var(--erro)';
+        } else {
+          te.style.color='';
         te.textContent=total>0&&parts.includes('+')?`= ${total.toFixed(2)}m`:'';
+        }
         comp[orient]=total>0?total.toFixed(2)+'m':'';
         const comps=Object.entries(comp).filter(([,v])=>v).map(([k,v])=>k+' '+v).join(', ');
         answers[curQ]=comps;
@@ -3773,6 +3805,64 @@ function renderCompInputs(q){
   areaSec.appendChild(notaSimpl);
   wrap.appendChild(areaSec);
 
+  /* PÉ-DIREITO PRÓPRIO DESTA DIVISÃO — COM FOTO.
+     O pé-direito era pedido por PISO. Numa moradia com tectos diferentes de
+     divisão para divisão — sala com pé-direito duplo, quartos normais, sótão
+     em mansarda — um valor por piso não chega, e não havia onde fotografar a
+     medição de cada um. O pé-direito é dos valores que mais se contesta num
+     CE: a fotografia da fita contra o tecto é a prova que interessa guardar.
+     Fica fechado por omissão: só se abre quando esta divisão foge ao valor do
+     piso, que é o caso menos comum. */
+  {
+    const peSec=document.createElement('div');
+    peSec.style.cssText='margin-top:14px;padding-top:10px;border-top:1px dashed var(--br)';
+    const temProprio=!!(dd.peDireito&&parseFloat(dd.peDireito));
+    const hdr=document.createElement('div');
+    hdr.style.cssText='display:flex;align-items:center;gap:8px;cursor:pointer';
+    const chk=document.createElement('div');
+    chk.style.cssText='width:20px;height:20px;border-radius:5px;flex:0 0 auto;'+
+      'border:2px solid '+(temProprio?'var(--ac)':'var(--br)')+';'+
+      'background:'+(temProprio?'var(--ac)':'none')+';color:#04140c;'+
+      'display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800';
+    chk.textContent=temProprio?'✓':'';
+    const lbl=document.createElement('div');
+    lbl.style.cssText='font-size:13px;color:var(--tx2)';
+    lbl.textContent='📏 Pé-direito diferente nesta divisão';
+    hdr.appendChild(chk); hdr.appendChild(lbl);
+    peSec.appendChild(hdr);
+    const corpo=document.createElement('div');
+    corpo.style.cssText='margin-top:9px'+(temProprio?'':';display:none');
+    const linha=document.createElement('div');
+    linha.style.cssText='display:flex;align-items:center;gap:8px';
+    const inp=document.createElement('input');
+    inp.type='number'; inp.step='0.01'; inp.inputMode='decimal'; inp.placeholder='2.70';
+    inp.value=temProprio?parseFloat(dd.peDireito):'';
+    inp.style.cssText='width:110px;padding:10px;border-radius:9px;border:1px solid var(--br);'+
+      'background:var(--bg3);color:var(--tx);font-size:16px';
+    inp.oninput=()=>{
+      dd.peDireito=inp.value?parseFloat(inp.value)+'m':'';
+      try{ autoSave(); }catch(e){}
+    };
+    const un=document.createElement('span');
+    un.style.cssText='font-size:13px;color:var(--tx3)'; un.textContent='m';
+    linha.appendChild(inp); linha.appendChild(un);
+    corpo.appendChild(linha);
+    /* A foto da medição, por divisão — é isto que faltava. */
+    corpo.appendChild(botaoFotoCampo('peDireito-div-'+q.div,
+      '📷 Foto da medição do pé-direito ('+q.div+')'));
+    peSec.appendChild(corpo);
+    hdr.onclick=()=>{
+      const abrir=corpo.style.display==='none';
+      corpo.style.display=abrir?'block':'none';
+      chk.style.borderColor=abrir?'var(--ac)':'var(--br)';
+      chk.style.background=abrir?'var(--ac)':'none';
+      chk.textContent=abrir?'✓':'';
+      if(!abrir){ dd.peDireito=''; inp.value=''; try{ autoSave(); }catch(e){} }
+      else inp.focus();
+    };
+    wrap.appendChild(peSec);
+  }
+
   // ── ENVOLVENTES INTERIORES — contacto com zonas comuns/adjacentes ──
   if(!dd.envInt) dd.envInt={};
   if(!dd.envIntTrocos) dd.envIntTrocos={};
@@ -3969,7 +4059,22 @@ function renderPeInputs(n){
 // RENDER INLINE VE CARDS
 // ═══════════════════════════════════════
 const ORIENTS_VE=['Norte','Sul','Este','Oeste','Nordeste','Sudeste','Sudoeste','Noroeste'];
-const VIDRO_OPTS=['Simples','Duplo'];
+/* TIJOLO DE VIDRO — UM VÃO SEM CAIXILHARIA.
+   Aparece em casas de banho, caixas de escada e paredes de separação com a
+   marquise. Não havia opção nenhuma: era preciso declará-lo como vidro simples
+   ou duplo, e nenhum dos dois o descreve — o fator solar e o U ficavam errados.
+   Valores confirmados pelo Renato contra o Manual SCE:
+     · espessura 0,20 m
+     · fator solar g⊥,vi = 0,57  (Tabela 51)
+     · U = 1,8 W/(m².°C)
+   Não tem caixilharia, nem cor de caixilho, nem sistema de abertura, nem caixa
+   de estore — perguntar isso seria pedir dados que não existem. */
+const TIJOLO_VIDRO='Tijolo de vidro';
+const TIJOLO_VIDRO_U=1.8;
+const TIJOLO_VIDRO_G=0.57;
+const TIJOLO_VIDRO_ESP=0.20;
+const ehTijoloVidro=ve=>String((ve&&ve.tipo)||'').toLowerCase().includes('tijolo');
+const VIDRO_OPTS=['Simples','Duplo',TIJOLO_VIDRO];
 /* A COR DA PERSIANA ENTRA NO CÁLCULO.
    A Tabela 13 do ITE50 dá permeabilidades e o fator solar depende da cor da
    proteção: uma persiana escura absorve mais e deixa passar mais calor para
@@ -4466,6 +4571,21 @@ function renderVaosInline(div,n){
     sombArrefDiv.appendChild(sombArrefChips);
     card.appendChild(sombArrefDiv);
 
+    /* UM TIJOLO DE VIDRO NÃO TEM CAIXILHARIA.
+       Cor do caixilho, sistema de abertura, corte térmico, material e caixa
+       de estore não existem neste tipo de vão — perguntá-los é pedir dados
+       que ninguém pode dar, e que depois entram no cálculo como se fossem
+       verdade. Mostra-se em vez disso o que o Manual fixa. */
+    if(ehTijoloVidro(ve)){
+      const tv=document.createElement('div');
+      tv.style.cssText='font-size:12px;color:var(--tx2);background:var(--bg3);'+
+        'border-radius:8px;padding:9px 11px;margin-top:8px;line-height:1.5';
+      tv.innerHTML='<b style="color:var(--ac)">Tijolo de vidro</b> — sem caixilharia.<br>'+
+        'Espessura 0,20 m · fator solar 0,57 · U = 1,8 W/(m².°C)<br>'+
+        '<span style="font-size:11px;color:var(--tx3)">Valores do Manual SCE. '+
+        'Não há caixilho, abertura nem estore a declarar.</span>';
+      card.appendChild(tv);
+    } else {
     // cor da caixilharia
     const caixDiv=document.createElement('div');
     caixDiv.innerHTML=`<div style="font-size:11px;color:var(--tx2);margin-bottom:4px">Cor da caixilharia</div>`;
@@ -4554,6 +4674,7 @@ function renderVaosInline(div,n){
       estoreChips.appendChild(c);
     });
     estoreDiv.appendChild(estoreL);estoreDiv.appendChild(estoreChips);card.appendChild(estoreDiv);
+    }
 
     // ── Uw/Uwdn calculado em direto (ITE50) — apanha erros de seleção ainda em obra ──
     const uwLive=document.createElement('div');
@@ -5958,6 +6079,23 @@ function validarVaosDivisao(div){
 
 function next(){
   const q=qList[curQ];
+  /* A ORDEM ESCOLHIDA TINHA DE SER CONFIRMADA — E NINGUÉM O SABIA.
+     A pergunta da ordem guarda os toques em `ordemDivisoesTemp` e só os aplica
+     a `D.divisoes` no botão «✅ Confirmar ordem». Quem tocasse nas divisões
+     pela ordem certa e avançasse com «Seguinte» — o botão grande, verde, que se
+     usa em todas as outras perguntas — perdia o trabalho sem um aviso.
+     Numa moradia real o técnico escolheu Sala, Cozinha, WC do R/C… e o
+     levantamento começou pelos quartos do 1º andar.
+     Agora o «Seguinte» aplica a ordem escolhida. O botão de confirmar
+     mantém-se para quem o usa; deixou é de ser a única forma. */
+  if(q&&q.isOrdemDivisoesInline&&Array.isArray(D.ordemDivisoesTemp)&&D.ordemDivisoesTemp.length){
+    const restantes=(D.divisoes||[]).filter(d=>!D.ordemDivisoesTemp.includes(d));
+    D.divisoes=[...D.ordemDivisoesTemp,...restantes];
+    D.ordemDivisoes=D.divisoes.slice();
+    answers[curQ]=D.divisoes.join('|||');
+    D.ordemDivisoesTemp=null;
+    try{ autoSave(); }catch(e){}
+  }
   if(q&&q.isOrientComp&&q.div&&q.div!=='__enu__'){
     const problema=validarVaosDivisao(q.div);
     if(problema){
@@ -6201,6 +6339,11 @@ function interpolar(y1, y2, x1, x2, x){
 }
 
 function calcUw(ve){
+  /* O tijolo de vidro tem valor próprio e não passa pelas tabelas do caixilho:
+     não tem caixilharia nenhuma. */
+  if(ehTijoloVidro(ve))
+    return {uw:TIJOLO_VIDRO_U,uwdn:TIJOLO_VIDRO_U,uws:TIJOLO_VIDRO_U,
+      classe:'Sem caixilharia',fonte:'tijolo de vidro (Manual SCE)',tijolo:true};
   const vidro=(ve.tipo||'').toLowerCase().includes('duplo')?'duplo':'simples';
   const mat=matToKey(ve.caixMat);
   const ct=(ve.corteTerm||mat==='pvc')?'com':'sem';
@@ -6469,6 +6612,18 @@ function gerarTextoVE(ve, div){
     }
   }
 
+  /* TIJOLO DE VIDRO — DESCRIÇÃO PRÓPRIA.
+     A frase-tipo fala de caixilharia, classe de permeabilidade e sistema de
+     abertura. Num tijolo de vidro nada disso existe, e escrever «caixilharia de
+     alumínio» num vão que não tem caixilho é escrever uma coisa falsa no
+     certificado. */
+  if(ehTijoloVidro(ve)){
+    const t2='Vão envidraçado em tijolo de vidro sem caixilharia, vidro com uma espessura '+
+      'de '+TIJOLO_VIDRO_ESP.toFixed(2).replace('.',',')+'m, um fator solar de '+
+      TIJOLO_VIDRO_G.toFixed(2).replace('.',',')+' e um Coeficiente de transmissão térmica '+
+      'do vão (U) igual a '+TIJOLO_VIDRO_U.toFixed(1).replace('.',',')+' (W/m2.ºC).';
+    return {txt:t2, uw:TIJOLO_VIDRO_U, uwdn:TIJOLO_VIDRO_U};
+  }
   // Linha 1: características técnicas + Uw/Uwdn | Linha 2: proteção solar
   const tipoStr=vidro==='duplo'?'Vão envidraçado duplo':'Vão envidraçado simples';
   const linha1=`${tipoStr}, constituída por caixilharia de ${matStr}, ${classPerm}, com sistema de ${aber}, ${corteTermStr} e de cor ${cor}. Envidraçado composto por ${compVidro}. ${uwTxt}`.trim();
@@ -7097,6 +7252,39 @@ function verificarLevantamento(){
      Num levantamento real de um último piso, coberturaTipoEsc ficou por
      responder: a secção COBERTURA não saiu no TXT e o verificador não disse
      nada. Um elemento da envolvente que falta é uma lacuna, não uma opção. */
+  /* UMA PAREDE COM MAIS DE 30 METROS É ENGANO DE UNIDADES.
+     Caso real: parede NE de um quarto com 298,00 m — o laser deu 298 cm e o
+     valor entrou como metros. A área continuava certa (vem dos rectângulos) e
+     o TXT saía normal: só a planta denunciava, ao desenhar um bloco de 298
+     metros que empurrava tudo o resto para fora do ecrã. */
+  try{
+    (D.divisoes||[]).forEach(dv=>{
+      const c=((D.divisoesDados||{})[dv]||{}).comprimentos||{};
+      Object.entries(c).forEach(([o,v])=>{
+        const n=parseFloat(String(v||'').replace(',','.').replace(/[^\d.]/g,''));
+        if(n>30)
+          E('Áreas',dv+': parede '+o+' com '+n.toFixed(2).replace('.',',')+
+            ' m — numa habitação isso é engano de unidades (provavelmente '+
+            (n/100).toFixed(2).replace('.',',')+' m lidos em cm). Corrige antes de exportar: '+
+            'uma medida destas destrói a planta e a área de parede.');
+      });
+    });
+  }catch(e){}
+
+  /* UMA ORDEM ESCOLHIDA QUE NUNCA CHEGOU A SER APLICADA.
+     Num levantamento real, a ordem ficou escolhida em `ordemDivisoesTemp` e o
+     `D.divisoes` manteve a ordem automática: o técnico pediu R/C primeiro e a
+     app começou pelos quartos do 1º andar. Se isto ainda aparecer num
+     levantamento antigo, diz-se — e diz-se qual era a ordem pedida. */
+  try{
+    const t2=D.ordemDivisoesTemp;
+    if(Array.isArray(t2)&&t2.length&&
+       JSON.stringify(t2)!==JSON.stringify((D.divisoes||[]).slice(0,t2.length)))
+      A('Divisões','Escolheste uma ordem para percorrer as divisões ('+t2.slice(0,3).join(', ')+
+        '…) que não chegou a ser aplicada — o levantamento seguiu a ordem automática ('+
+        (D.divisoes||[]).slice(0,3).join(', ')+'…). Volta à pergunta da ordem e avança com «Seguinte».');
+  }catch(e){}
+
   /* COBERTURA POR CARACTERIZAR NUM ÚLTIMO PISO — É ERRO, NÃO LACUNA.
      Não é um dado em falta como outro qualquer: decide se a envolvente de
      cima é EXTERIOR ou para ESPAÇO NÃO ÚTIL. São dois cálculos diferentes, e
@@ -10104,6 +10292,12 @@ function buildTxt(){
        devolvia '' e a coluna saía com traços em todas as divisões menos as que
        casavam por acaso. Delega-se na global, que já tem os recursos todos. */
     function resolverPeDireitoDivisao(div,pisoLabel){
+      /* O pé-direito próprio da divisão manda sobre o do piso.
+         Numa moradia com sala de pé-direito duplo e quartos normais, um valor
+         por piso não descreve nada — e era esse que ia para o cálculo. */
+      const proprio=parseFloat(String(((D.divisoesDados||{})[div]||{}).peDireito||'')
+        .replace(',','.').replace(/[^\d.]/g,''));
+      if(proprio>0) return proprio.toFixed(2).replace('.',',')+'m  (medido nesta divisão)';
       const v=resolverPeDireitoPiso(div,pisoLabel);
       if(!(v>0)) return '';
       // teto inclinado: mostra-se o intervalo, mas o cálculo usa o mínimo
@@ -11720,6 +11914,9 @@ function buildTxt(){
     else if(prot.includes('blackout')) tipoP='blackout';
     else if(prot.includes('estore')) tipoP='estore';
     else if(prot.includes('cortina')) tipoP='cortina';
+    /* Tijolo de vidro: g⊥,vi próprio da Tabela 51, e sem proteção possível. */
+    if(ehTijoloVidro(ve))
+      return {gPerp:TIJOLO_VIDRO_G,gtot:TIJOLO_VIDRO_G,vidro:'tijolo',tipoP:null};
     const gtot=tipoP?TAB48[tipoP][vidro][cor]:gPerp; // sem proteção → gtot=g⊥,vi
     return {gPerp,gtot,vidro,tipoP};
   }
@@ -17801,9 +17998,12 @@ function fotografarExterior(){
         if(!Array.isArray(D.fotosAlcado)) D.fotosAlcado=[];
         D.fotosAlcado.push({idbKey,ts:new Date().toLocaleString('pt-PT'),origem:'exterior'});
         ok++;
+        _alcadosPorMarcar.push(idbKey);
       }catch(e){ falhas++; }
     }
     autoSave();
+    // com o imóvel à frente é quando se sabe qual é qual
+    setTimeout(marcarAlcadosPendentes,120);
     if(b){ b.textContent='📷'; b.disabled=false; }
     actualizarBotaoFotoExt();
     if(falhas) alert(falhas+' foto(s) não ficaram guardadas. Tenta outra vez.');
@@ -18768,6 +18968,118 @@ function aplicarPerfil(p){
   mostrarToastLaser('🏢 Perfil "'+p.nome+'" aplicado — valores pré-preenchidos.',4000);
 }
 
+/* MARCAR OS VÃOS NA FOTO DO ALÇADO.
+   A foto do alçado serve para mostrar onde estão as janelas — e depois, no
+   escritório, olha-se para uma fachada com oito vãos e não se sabe qual é
+   qual. Marcar ali mesmo, com o imóvel à frente, é quando se sabe.
+   Rectângulos vermelhos desenhados por cima, numerados. Ficam gravados na
+   própria imagem: seguem a foto para o certificado sem depender de mais nada. */
+/* Fotos acabadas de tirar, à espera de serem marcadas. Cada caminho que grava
+   uma foto de alçado põe a chave aqui; no fim, abre-se o marcador uma vez por
+   foto, em fila. Assim marca-se com o imóvel à frente e não em casa. */
+let _alcadosPorMarcar=[];
+function marcarAlcadosPendentes(){
+  const key=_alcadosPorMarcar.shift();
+  if(!key) return;
+  abrirMarcadorAlcado(key,()=>marcarAlcadosPendentes());
+}
+function abrirMarcadorAlcado(idbKey,depois){
+  fotoDbGet(idbKey).then(dataURL=>{
+    if(!dataURL){ if(depois) depois(); return; }
+    const img=new Image();
+    img.onload=()=>{
+      const fundo=document.createElement('div');
+      fundo.style.cssText='position:fixed;inset:0;background:#000;z-index:10000;'+
+        'display:flex;flex-direction:column';
+      const barra=document.createElement('div');
+      barra.style.cssText='display:flex;gap:6px;padding:9px;background:var(--bg2);'+
+        'align-items:center;flex-wrap:wrap';
+      const info=document.createElement('div');
+      info.style.cssText='flex:1;font-size:12.5px;color:var(--tx2);min-width:150px';
+      info.textContent='Arrasta sobre cada vão para o marcar.';
+      const bt=(txt,fn,forte)=>{
+        const b=document.createElement('button'); b.type='button'; b.textContent=txt;
+        b.style.cssText='padding:9px 13px;border-radius:9px;font-size:13px;cursor:pointer;'+
+          (forte?'border:none;background:var(--ac);color:#04140c;font-weight:700'
+                :'border:1px solid var(--br);background:var(--bg3);color:var(--tx)');
+        b.onclick=fn; barra.appendChild(b); return b;
+      };
+      barra.appendChild(info);
+      const cv=document.createElement('canvas');
+      cv.style.cssText='flex:1;min-height:0;width:100%;object-fit:contain;touch-action:none;background:#000';
+      /* A imagem pode ser grande; o canvas trabalha no tamanho dela para os
+         rectângulos ficarem gravados com a mesma definição. */
+      cv.width=img.naturalWidth; cv.height=img.naturalHeight;
+      const ctx=cv.getContext('2d');
+      const rects=[];
+      const pintar=()=>{
+        ctx.drawImage(img,0,0);
+        const esp=Math.max(3,Math.round(cv.width/300));
+        ctx.lineWidth=esp; ctx.strokeStyle='#FF2020';
+        ctx.font=(esp*7)+'px sans-serif'; ctx.textBaseline='top';
+        rects.forEach((r,i)=>{
+          ctx.strokeRect(r.x,r.y,r.w,r.h);
+          const et='V'+(i+1);
+          const lx=r.x+esp, ly=r.y+esp;
+          const lw=ctx.measureText(et).width+esp*2;
+          ctx.fillStyle='#FF2020'; ctx.fillRect(lx,ly,lw,esp*9);
+          ctx.fillStyle='#fff'; ctx.fillText(et,lx+esp,ly+esp);
+        });
+        info.textContent=rects.length
+          ? rects.length+' vão(s) marcado(s). Arrasta para marcar mais.'
+          : 'Arrasta sobre cada vão para o marcar.';
+      };
+      pintar();
+      /* Do ecrã para a imagem: o canvas é mostrado encolhido. */
+      const paraImg=(ev)=>{
+        const r=cv.getBoundingClientRect();
+        const esc=Math.min(r.width/cv.width,r.height/cv.height);
+        const ox=(r.width-cv.width*esc)/2, oy=(r.height-cv.height*esc)/2;
+        return {x:(ev.clientX-r.left-ox)/esc, y:(ev.clientY-r.top-oy)/esc};
+      };
+      let a=null;
+      cv.addEventListener('pointerdown',ev=>{ ev.preventDefault(); a=paraImg(ev); });
+      cv.addEventListener('pointermove',ev=>{
+        if(!a) return;
+        const b=paraImg(ev);
+        pintar();
+        const esp=Math.max(3,Math.round(cv.width/300));
+        ctx.lineWidth=esp; ctx.strokeStyle='#FF2020'; ctx.setLineDash([esp*2,esp*2]);
+        ctx.strokeRect(Math.min(a.x,b.x),Math.min(a.y,b.y),Math.abs(b.x-a.x),Math.abs(b.y-a.y));
+        ctx.setLineDash([]);
+      });
+      const fecharGesto=ev=>{
+        if(!a) return;
+        const b=paraImg(ev);
+        const w2=Math.abs(b.x-a.x), h2=Math.abs(b.y-a.y);
+        // um toque sem arrasto não é um vão
+        if(w2>cv.width*0.02&&h2>cv.height*0.02)
+          rects.push({x:Math.min(a.x,b.x),y:Math.min(a.y,b.y),w:w2,h:h2});
+        a=null; pintar();
+      };
+      cv.addEventListener('pointerup',fecharGesto);
+      cv.addEventListener('pointercancel',()=>{ a=null; pintar(); });
+      bt('↶ Anular',()=>{ rects.pop(); pintar(); });
+      bt('Sem marcas',()=>{ fundo.remove(); if(depois) depois(); });
+      bt('✓ Guardar',async()=>{
+        if(!rects.length){ fundo.remove(); if(depois) depois(); return; }
+        pintar();
+        try{
+          const novo=cv.toDataURL('image/jpeg',0.88);
+          await fotoDbSet(idbKey,novo);   // substitui a foto pela marcada
+          const f=(D.fotosAlcado||[]).find(x=>x&&x.idbKey===idbKey);
+          if(f) f.vaosMarcados=rects.length;
+          try{ autoSave(); }catch(e){}
+        }catch(e){ alert('Não consegui guardar as marcas: '+(e.message||e)); }
+        fundo.remove(); if(depois) depois();
+      },true);
+      fundo.appendChild(barra); fundo.appendChild(cv);
+      document.body.appendChild(fundo);
+    };
+    img.onerror=()=>{ if(depois) depois(); };
+    img.src=dataURL;
+  }).catch(()=>{ if(depois) depois(); });
+}
 function tirarFotoAlcado(){
   const st=document.getElementById('foto-status');
   st.style.display='block';st.textContent='A obter localização…';
@@ -18801,12 +19113,15 @@ function tirarFotoAlcado(){
         const n=D.fotosAlcado.length+1;
         D.fotosAlcado.push({idbKey,gps,ts:new Date().toLocaleString('pt-PT'),label:'alcado_'+n});
         guardadas++;
+        _alcadosPorMarcar.push(idbKey);
       }catch(e){
         falhas++;
         console.error('Foto de alçado ignorada (falha ao guardar):',e.name,e.message);
       }
     }
     autoSave();
+    // com o imóvel à frente é quando se sabe qual é qual
+    setTimeout(marcarAlcadosPendentes,120);
     const infoStr=gps?`GPS: ${gps.lat.toFixed(6)}, ${gps.lon.toFixed(6)}`:'GPS: não disponível';
     st.textContent=`✅ ${guardadas} foto${guardadas!==1?'s':''} guardada${guardadas!==1?'s':''}${falhas?' (⚠️ '+falhas+' falhou/falharam)':''} | ${infoStr}`;
     renderFotosAlcadoThumbs();
@@ -18924,12 +19239,15 @@ function tirarFotoAlcadoInline(statusEl,thumbsEl){
         const n=D.fotosAlcado.length+1;
         D.fotosAlcado.push({idbKey,gps,ts:new Date().toLocaleString('pt-PT'),label:'alcado_'+n});
         guardadas++;
+        _alcadosPorMarcar.push(idbKey);
       }catch(e){
         falhas++;
         console.error('Foto de alçado ignorada (falha ao guardar):',e.name,e.message);
       }
     }
     autoSave();
+    // com o imóvel à frente é quando se sabe qual é qual
+    setTimeout(marcarAlcadosPendentes,120);
     const infoStr=gps?`GPS: ${gps.lat.toFixed(6)}, ${gps.lon.toFixed(6)}`:'GPS: não disponível';
     statusEl.textContent=`✅ ${guardadas} foto${guardadas!==1?'s':''} guardada${guardadas!==1?'s':''}${falhas?' (⚠️ '+falhas+' falhou/falharam)':''} | ${infoStr}`;
     renderFotosAlcadoThumbsEm(thumbsEl);

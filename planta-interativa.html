@@ -596,7 +596,7 @@ Ver tudo</button>
   window.addEventListener('online',aviso);
 })();
 "use strict";
-const PLANTA_VERSAO='v1.69.0 (2026-09-15)';
+const PLANTA_VERSAO='v1.71.0 (2026-09-16)';
 /* ══════════════════════════════════════════════════════════════════
    CE Voz · motor de planta interativa
    Fonte de verdade: o levantamento (D). A planta é uma camada de
@@ -734,7 +734,12 @@ function orientsMedidas(nome){
   const t=dadosDiv(nome).trocos||{};
   return Object.entries(t)
     .map(([o,arr])=>[o,(Array.isArray(arr)?arr:[arr]).reduce((s,v)=>s+parseM(v),0)])
-    .filter(([o,v])=>v>0 && BEAR[o]!=null);
+    /* Uma medida em centímetros lida como metros — 298 em vez de 2,98 — fazia
+       um bloco de 298 metros que empurrava as outras divisões para fora do
+       ecrã: a planta parecia vazia e nada explicava porquê. Numa habitação
+       nenhuma parede passa de 30 m; acima disso ignora-se a medida e a divisão
+       é desenhada pela área, como quando não há medidas nenhumas. */
+    .filter(([o,v])=>v>0 && v<=COMP_MAX_M && BEAR[o]!=null);
 }
 /* SEPARAR OS PISOS
    O arranjo automático arruma as divisões por orientação, sem saber que umas são
@@ -776,6 +781,17 @@ function separarPorPiso(folga){
     x+=(x1-x0)+F;
   });
   return feitos;
+}
+/* UMA MEDIDA ABSURDA NÃO PODE ESVAZIAR A PLANTA.
+   Uma parede de 298 m — 298 cm lidos como metros — fazia um bloco gigante que
+   empurrava as outras divisões para fora do ecrã. O que se via era uma planta
+   vazia, sem explicação.
+   Numa habitação nenhuma parede passa de 30 m. Acima disso ignora-se a medida
+   e desenha-se a divisão pela área, como se faz quando não há medidas. */
+const COMP_MAX_M=30;
+function compValido(v){
+  const n=parseFloat(String(v||'').replace(',','.').replace(/[^\d.]/g,''));
+  return (n>0&&n<=COMP_MAX_M)?n:0;
 }
 function autoLayout(){
   const D=proj.D;
@@ -7521,12 +7537,15 @@ window.addEventListener('message', ev=>{
           ((m.proj.D&&m.proj.D.divisoes||[]).length)+' divisões. '+
           'O que guardares aqui volta para lá.';
       } else {
+        /* O retorno é o número de divisões NOVAS, ou negativo quando só houve
+           divisões redimensionadas pelas medidas. Estava a ser escrito tal e
+           qual: aparecia «-6 divisão(ões) nova(s) acrescentada(s)», que não
+           quer dizer nada a quem está a medir. */
         const n=acrescentarDivisoesNovas(m.proj);
-        if(n){
-          const d=document.getElementById('dica');
-          if(d) d.textContent=n+' divisão(ões) nova(s) acrescentada(s). '+
-            'O resto do desenho ficou como estava.';
-        }
+        const d=document.getElementById('dica');
+        if(d&&n>0) d.textContent=n+' divisão(ões) nova(s) no desenho. '+
+          'O resto ficou como estava.';
+        else if(d&&n<0) d.textContent=(-n)+' divisão(ões) actualizada(s) com as medidas novas.';
       }
     }
     if(m.tipo==='ce-voz:pedir-layout'){ enviarLayoutParaApp(); }
