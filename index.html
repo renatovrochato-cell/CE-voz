@@ -583,7 +583,7 @@ const DIVS_BASE=[
 // VERSÃO — fonte única (selo no ecrã inicial + cabeçalho do TXT exportado).
 // Subir aqui a cada alteração ao ficheiro.
 // ═══════════════════════════════════════
-const APP_VERSION='v2026.09.16-FIX297';
+const APP_VERSION='v2026.09.16-FIX299';
 
 /* ══════════════════════════════════════════════════════════════════
    A APP INSTALADA FICAVA PRESA NUMA VERSÃO ANTIGA
@@ -700,7 +700,7 @@ const D_INICIAL={
      caderneta não dá e que se perguntam uma vez, no fim. */
   dvRequerente:'',dvTelemovel:'',dvData:'',dvHoraInicio:'',
   dvCodDistrito:'',dvCodConcelho:'',dvCodFreguesia:'',dvAndar:'',dvCodPostal:'',
-  fotosCampos:{},areasPlanta:[],areaUtilPlantaTotal:null,_hist:[],
+  fotosCampos:{},fotosGaleria:[],areasPlanta:[],areaUtilPlantaTotal:null,_hist:[],
   divisoesDados:{}
   // divisoesDados[div] = { comprimentos:{Norte:'3.15 m',...}, vaos:[{id:'VE1',larg:'',alt:'',tipo:'',prot:''}] }
 };
@@ -1106,6 +1106,20 @@ function buildQs(){
          'o telemóvel pode ficar em branco e preencher-se mais tarde.',
     isDVInline:true,
     key:'dv'});
+
+  /* GALERIA FINAL — VER TUDO O QUE FOI FOTOGRAFADO.
+     As fotos ficam espalhadas por onde foram tiradas: divisões, alçados,
+     etiquetas, chapas, campos. No fim do levantamento não havia nenhum sítio
+     onde se visse tudo junto — e é no fim que se percebe que falta a fachada
+     norte, ou que há três fotos iguais da mesma caldeira.
+     Aqui estão todas em quadrado, com o nome, dá para apagar as que não
+     servem, acrescentar as que faltam (da galeria, do Google Fotos, de onde
+     for) e marcar a fracção a vermelho na foto do alçado. */
+  qs.push({id:'galeria',ctx:'Fotografias',
+    text:'Revê as fotografias do levantamento',
+    hint:'Todas as fotos tiradas, juntas. Apaga o que não serve, acrescenta o que falta, '+
+      'e marca a fracção nas fotos de alçado.',
+    isGaleriaInline:true});
 
   qs.push({id:'obs',ctx:'Observações',
     text:'Observações gerais sobre o imóvel?',
@@ -5437,6 +5451,10 @@ function renderQ(){
     inlWrap.style.display='block';inlWrap.innerHTML='';
     document.getElementById('ans-box').style.display='none';
     renderVentObstInline(inlWrap);
+  } else if(q.isGaleriaInline){
+    const wrap=document.getElementById('inline-inputs');
+    wrap.style.display='block';
+    renderGaleriaFotos(wrap);
   } else if(q.isObsInline){
     // observações — gravação áudio
     inlWrap.style.display='block';inlWrap.innerHTML='';
@@ -7252,6 +7270,37 @@ function verificarLevantamento(){
      Num levantamento real de um último piso, coberturaTipoEsc ficou por
      responder: a secção COBERTURA não saiu no TXT e o verificador não disse
      nada. Um elemento da envolvente que falta é uma lacuna, não uma opção. */
+  /* A PAREDE MEDIDA NÃO BATE COM NENHUM LADO DO RECTÂNGULO.
+     A área vem dos rectângulos e o comprimento das paredes vem do laser: são
+     duas medições independentes da mesma divisão, e têm de fechar. Num
+     levantamento real a Sala tinha um rectângulo de 6,08 × 8,15 e a parede SO
+     com 2,95 m — nem um nem outro. Uma das duas está errada, e nenhuma das
+     regras existentes olhava para isto: a área saía certa, o TXT saía normal.
+     Só se verifica quando há UM rectângulo: com dois ou mais a divisão é
+     recortada e um lado pode não corresponder a nada. */
+  try{
+    (D.divisoes||[]).forEach(dv=>{
+      const dd2=(D.divisoesDados||{})[dv]||{};
+      const rs=dd2.areaRect||[];
+      if(rs.length!==1) return;
+      const c=parseFloat(String(rs[0].c||'').replace(',','.'));
+      const l=parseFloat(String(rs[0].l||'').replace(',','.'));
+      if(!(c>0&&l>0)) return;
+      const comps=Object.entries(dd2.comprimentos||{})
+        .map(([o,v])=>[o,parseFloat(String(v||'').replace(',','.').replace(/[^\d.]/g,''))])
+        .filter(([,n])=>n>0&&n<=30);
+      if(!comps.length) return;
+      const bate=n=>Math.abs(n-c)<=0.15||Math.abs(n-l)<=0.15;
+      const foras=comps.filter(([,n])=>!bate(n));
+      if(foras.length===comps.length)
+        A('Áreas',dv+': o rectângulo mede '+c.toFixed(2).replace('.',',')+' × '+
+          l.toFixed(2).replace('.',',')+' m mas '+
+          (comps.length===1?'a parede medida ('+comps[0][0]+' '+comps[0][1].toFixed(2).replace('.',',')+
+            ' m) não bate com nenhum dos lados':'nenhuma das paredes medidas bate com os lados')+
+          ' — uma das medições está errada.');
+    });
+  }catch(e){}
+
   /* UMA PAREDE COM MAIS DE 30 METROS É ENGANO DE UNIDADES.
      Caso real: parede NE de um quarto com 298,00 m — o laser deu 298 cm e o
      valor entrou como metros. A área continuava certa (vem dos rectângulos) e
@@ -7292,7 +7341,12 @@ function verificarLevantamento(){
      esta resposta em branco e foi lançado como cobertura exterior num fogo
      com desvão. */
   try{
-    if(D.edificioTipo==='Apartamento'&&ehUltimoPiso()&&
+    /* NUMA MORADIA A COBERTURA EXISTE SEMPRE.
+       A regra estava restrita a `Apartamento` e a moradia — que tem cobertura
+       por definição, é o edifício inteiro — passava sem qualquer erro. Num
+       levantamento real (Golden Club, moradia de 2 pisos) a cobertura ficou
+       por caracterizar e nada travou a exportação. */
+    if((D.edificioTipo==='Moradia'||(D.edificioTipo==='Apartamento'&&ehUltimoPiso()))&&
        !D.coberturaTipoEsc&&!((D.coberturaTipos||[]).length))
       E('Cobertura','Último piso sem resposta ao tipo de cobertura: não se sabe se é '+
         'terraço/inclinada sem desvão (envolvente EXTERIOR) ou com desvão não habitado '+
@@ -7427,9 +7481,15 @@ function verificarLevantamento(){
   try{
     const _ult=ehUltimoPiso();
     const _semCobResp=/não tem|nao tem|não aplic|nao aplic/i.test(D.coberturaTipoEsc||'');
+    /* A MESMA AFIRMAÇÃO FALSA QUE JÁ TINHA SIDO CORRIGIDA NO TXT.
+       «A cobertura é envolvente exterior» não é verdade: com desvão não
+       habitado a envolvente é a ESTEIRA, para espaço não útil. Corrigi isto no
+       texto do TXT e deixei a cópia aqui — e é esta que aparece no ecrã de
+       verificação, que é onde se olha. */
     if(_ult&&!D.coberturaTipoEsc&&!(D.coberturaTipos||[]).length)
-      L('Cobertura','Cobertura por caracterizar — o fogo é o último piso e a cobertura '+
-        'é envolvente exterior (tipo, isolamento e área)');
+      L('Cobertura','Cobertura por caracterizar — falta dizer se é terraço/inclinada '+
+        'SEM desvão (envolvente exterior) ou COM desvão não habitado (envolvente para '+
+        'espaço não útil), e ainda o isolamento e a área');
     if(_ult&&!_semCobResp&&!D.isolCobEsp&&D.temIsolamento==='Sim')
       A('Cobertura','Isolamento da cobertura por indicar — há isolamento no imóvel mas '+
         'não se disse se a cobertura o tem');
@@ -8450,6 +8510,134 @@ function detalheTempo(){
     'processo amanhã não conta a noite pelo meio.',
   ].filter(Boolean);
   alert(linhas.join('\n'));
+}
+/* ══════════ GALERIA DE FOTOGRAFIAS ══════════
+   Reúne as fotos todas do levantamento, venham de onde vierem. Cada uma sabe
+   de onde é (divisão, alçado, etiqueta, chapa, campo) para se poder apagar a
+   certa e para o nome no pacote continuar a fazer sentido. */
+function _todasAsFotos(){
+  const out=[];
+  (D.divisoes||[]).forEach(dv=>{
+    ((D.divisoesDados||{})[dv]||{}).fotos?.forEach((f,i)=>{
+      if(f&&f.idbKey) out.push({key:f.idbKey,nome:dv+' '+(i+1),grupo:'Divisões',
+        apagar:()=>{ const a=D.divisoesDados[dv].fotos; const j=a.indexOf(f); if(j>=0) a.splice(j,1); }});
+    });
+  });
+  (D.fotosAlcado||[]).forEach((f,i)=>{
+    if(f&&f.idbKey) out.push({key:f.idbKey,nome:'Alçado '+(i+1),grupo:'Alçados',alcado:true,
+      apagar:()=>{ const j=D.fotosAlcado.indexOf(f); if(j>=0) D.fotosAlcado.splice(j,1); }});
+  });
+  (D.fotoEtiquetas||[]).forEach((f,i)=>{
+    if(f&&f.idbKey) out.push({key:f.idbKey,
+      nome:'Etiqueta '+(f.div||'')+(f.tipo?' · '+f.tipo:''),grupo:'Equipamentos',
+      apagar:()=>{ const j=D.fotoEtiquetas.indexOf(f); if(j>=0) D.fotoEtiquetas.splice(j,1); }});
+  });
+  (D.unidadesExtFotos||[]).forEach((f,i)=>{
+    if(f&&f.idbKey) out.push({key:f.idbKey,nome:'Unidade exterior '+(i+1),grupo:'Equipamentos',
+      apagar:()=>{ const j=D.unidadesExtFotos.indexOf(f); if(j>=0) D.unidadesExtFotos.splice(j,1); }});
+  });
+  Object.entries(D.fotosCampos||{}).forEach(([campo,v])=>{
+    fotosDoCampo(v).forEach((f,i)=>{
+      if(f&&f.idbKey) out.push({key:f.idbKey,nome:campo.replace(/-/g,' '),grupo:'Medições',
+        apagar:()=>{ if(Array.isArray(D.fotosCampos[campo])){
+            const j=D.fotosCampos[campo].findIndex(x=>x&&x.idbKey===f.idbKey);
+            if(j>=0) D.fotosCampos[campo].splice(j,1);
+            if(!D.fotosCampos[campo].length) delete D.fotosCampos[campo];
+          } else delete D.fotosCampos[campo]; }});
+    });
+  });
+  (D.fotosGaleria||[]).forEach((f,i)=>{
+    if(f&&f.idbKey) out.push({key:f.idbKey,nome:f.nome||('Extra '+(i+1)),grupo:'Acrescentadas',
+      alcado:true,
+      apagar:()=>{ const j=D.fotosGaleria.indexOf(f); if(j>=0) D.fotosGaleria.splice(j,1); }});
+  });
+  return out;
+}
+function renderGaleriaFotos(wrap){
+  wrap.innerHTML='';
+  const fotos=_todasAsFotos();
+  const topo=document.createElement('div');
+  topo.style.cssText='display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px';
+  const cont=document.createElement('div');
+  cont.style.cssText='flex:1;font-size:13px;color:var(--tx2);min-width:120px';
+  cont.textContent=fotos.length?fotos.length+' fotografias no levantamento':'Ainda não há fotografias.';
+  topo.appendChild(cont);
+  /* Acrescentar de onde for — galeria, Google Fotos, ficheiros. O selector do
+     sistema mostra tudo o que o telemóvel souber abrir. */
+  const lbl=document.createElement('label');
+  lbl.style.cssText='border:1px dashed var(--ac);border-radius:9px;padding:9px 13px;'+
+    'color:var(--ac);font-size:13px;cursor:pointer;white-space:nowrap';
+  lbl.textContent='＋ Acrescentar fotos';
+  const inp=document.createElement('input');
+  inp.type='file'; inp.accept='image/*'; inp.multiple=true; inp.style.display='none';
+  inp.onchange=async()=>{
+    const fs2=[...(inp.files||[])];
+    inp.value='';
+    if(!fs2.length) return;
+    D.fotosGaleria=Array.isArray(D.fotosGaleria)?D.fotosGaleria:[];
+    cont.textContent='A guardar '+fs2.length+' foto(s)…';
+    for(const f of fs2){
+      try{
+        const dataURL=await fotoParaGuardar(f);
+        const key=novaFotoKey('extra');
+        await fotoDbSet(key,dataURL);
+        D.fotosGaleria.push({idbKey:key,nome:f.name||'Extra',
+          ts:new Date().toLocaleString('pt-PT')});
+      }catch(e){ console.warn('foto:',e.message); }
+    }
+    try{ autoSave(); }catch(e){}
+    renderGaleriaFotos(wrap);
+  };
+  lbl.appendChild(inp); topo.appendChild(lbl);
+  wrap.appendChild(topo);
+  if(!fotos.length) return;
+  /* Agrupadas por origem: numa T3 são umas trinta e sem grupos não se acha
+     nada. */
+  const grupos=[...new Set(fotos.map(f=>f.grupo))];
+  grupos.forEach(g=>{
+    const tit=document.createElement('div');
+    tit.style.cssText='font-size:11px;font-weight:700;color:var(--tx3);letter-spacing:.4px;'+
+      'text-transform:uppercase;margin:12px 0 6px';
+    tit.textContent=g;
+    wrap.appendChild(tit);
+    const grelha=document.createElement('div');
+    grelha.style.cssText='display:grid;grid-template-columns:repeat(auto-fill,minmax(104px,1fr));gap:8px';
+    fotos.filter(f=>f.grupo===g).forEach(f=>{
+      const cx=document.createElement('div');
+      cx.style.cssText='position:relative';
+      const img=document.createElement('div');
+      /* Quadrado: todas do mesmo tamanho, para se varrerem de olhos. */
+      img.setAttribute('data-foto',f.key);
+      img.style.cssText='width:100%;aspect-ratio:1;border-radius:9px;background:var(--bg3) '+
+        'center/cover no-repeat;border:1px solid var(--br);cursor:pointer';
+      fotoDbGet(f.key).then(d=>{ if(d) img.style.backgroundImage='url('+d+')'; }).catch(()=>{});
+      img.onclick=()=>abrirMarcadorAlcado(f.key,()=>renderGaleriaFotos(wrap));
+      img.title='Tocar para marcar a fracção a vermelho';
+      const nome=document.createElement('div');
+      nome.style.cssText='font-size:10.5px;color:var(--tx3);margin-top:3px;line-height:1.3;'+
+        'overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+      nome.textContent=f.nome;
+      const x=document.createElement('button');
+      x.type='button'; x.textContent='✕';
+      x.style.cssText='position:absolute;top:4px;right:4px;width:26px;height:26px;'+
+        'border-radius:50%;border:none;background:rgba(0,0,0,.62);color:#fff;'+
+        'font-size:13px;line-height:1;cursor:pointer';
+      x.onclick=async(ev)=>{
+        ev.stopPropagation();
+        if(!confirm('Apagar «'+f.nome+'»?')) return;
+        try{ f.apagar(); await fotoDbDelete(f.key); }catch(e){}
+        try{ autoSave(); }catch(e){}
+        renderGaleriaFotos(wrap);
+      };
+      cx.appendChild(img); cx.appendChild(nome); cx.appendChild(x);
+      grelha.appendChild(cx);
+    });
+    wrap.appendChild(grelha);
+  });
+  const nota=document.createElement('div');
+  nota.style.cssText='font-size:11.5px;color:var(--tx3);margin-top:12px;line-height:1.45';
+  nota.textContent='Toca numa foto para marcar a fracção a vermelho. O ✕ apaga.';
+  wrap.appendChild(nota);
 }
 function goExp(){
   document.getElementById('exp-box').textContent=buildTxt();
@@ -14086,6 +14274,9 @@ async function buildPacoteZipBlob(show){
 
   const chavesNaRecolha=new Set();
   (D.fotosAlcado||[]).forEach(f=>f&&f.idbKey&&chavesNaRecolha.add(f.idbKey));
+  /* As fotos acrescentadas na galeria final seguem para o pacote como as
+     outras — foram postas ali porque faltavam. */
+  (D.fotosGaleria||[]).forEach(f=>f&&f.idbKey&&chavesNaRecolha.add(f.idbKey));
   (D.fotoEtiquetas||[]).forEach(f=>f&&f.idbKey&&chavesNaRecolha.add(f.idbKey));
   (D.unidadesExtFotos||[]).forEach(f=>f&&f.idbKey&&chavesNaRecolha.add(f.idbKey));
   (D.fotosSemLeitura||[]).forEach(f=>f&&f.idbKey&&chavesNaRecolha.add(f.idbKey));
@@ -14513,7 +14704,8 @@ function diasSemCopia(){
 function processoTemConteudo(){
   const nDiv=(D.divisoes||[]).length;
   const nFotos=Object.values(D.divisoesDados||{}).reduce((s2,dd)=>s2+((dd.fotos||[]).length),0)
-    +(D.fotosAlcado||[]).length+(D.fotoEtiquetas||[]).length+(D.unidadesExtFotos||[]).length;
+    +(D.fotosAlcado||[]).length+(D.fotoEtiquetas||[]).length+(D.unidadesExtFotos||[]).length
+    +(D.fotosGaleria||[]).length;
   return nDiv>0||nFotos>0;
 }
 function avisoCopiaSeguranca(){
@@ -14731,6 +14923,7 @@ function chavesFotosReferenciadas(){
       const snap=JSON.parse(localStorage.getItem(k));
       const d=JSON.parse(snap.data);
       (d.fotosAlcado||[]).forEach(f=>f&&f.idbKey&&referenciadas.add(f.idbKey));
+      (d.fotosGaleria||[]).forEach(f=>f&&f.idbKey&&referenciadas.add(f.idbKey));
       (d.fotoEtiquetas||[]).forEach(f=>f&&f.idbKey&&referenciadas.add(f.idbKey));
       (d.unidadesExtFotos||[]).forEach(f=>f&&f.idbKey&&referenciadas.add(f.idbKey));
       Object.values(d.fotosCampos||{}).forEach(v=>fotosDoCampo(v).forEach(f=>referenciadas.add(f.idbKey)));
