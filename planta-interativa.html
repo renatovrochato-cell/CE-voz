@@ -596,7 +596,7 @@ Ver tudo</button>
   window.addEventListener('online',aviso);
 })();
 "use strict";
-const PLANTA_VERSAO='v1.68.0 (2026-09-15)';
+const PLANTA_VERSAO='v1.69.0 (2026-09-15)';
 /* ══════════════════════════════════════════════════════════════════
    CE Voz · motor de planta interativa
    Fonte de verdade: o levantamento (D). A planta é uma camada de
@@ -5025,12 +5025,12 @@ svg.addEventListener('pointerdown',ev=>{
   }
   if(modoForma==='recorte'){
     guardarHist();
-    arr={tipo:'recorte',p0:p,p1:p};
+    arr={_ts:Date.now(),tipo:'recorte',p0:p,p1:p};
     return;
   }
   if(modoForma==='zona'){
     guardarHist();
-    arr={tipo:'zona',p0:agarrarAresta({x:Math.round(p.x*20)/20,y:Math.round(p.y*20)/20}),p1:p};
+    arr={_ts:Date.now(),tipo:'zona',p0:agarrarAresta({x:Math.round(p.x*20)/20,y:Math.round(p.y*20)/20}),p1:p};
     return;
   }
   if(modoForma==='colocar'){
@@ -5081,7 +5081,7 @@ svg.addEventListener('pointerdown',ev=>{
   if(modoForma==='circ'){
     const div=divSelecionada();
     if(!div){document.getElementById('dica').textContent='Escolhe primeiro a divisão na lista à esquerda.';return;}
-    guardarHist(); arr={tipo:'circulo',div,c:p,r:0};
+    guardarHist(); arr={_ts:Date.now(),tipo:'circulo',div,c:p,r:0};
     return;
   }
   if(modoForma==='+'||modoForma==='-'){
@@ -5098,7 +5098,7 @@ svg.addEventListener('pointerdown',ev=>{
     }
     if(!estaSelecionada(div)) sel={t:'div',div};
     guardarHist();
-    arr={tipo:'forma',div,modo:modoForma,
+    arr={_ts:Date.now(),tipo:'forma',div,modo:modoForma,
       p0:agarrarAresta({x:Math.round(p.x*20)/20,y:Math.round(p.y*20)/20}),p1:p};
     return;
   }
@@ -5135,7 +5135,7 @@ svg.addEventListener('pointerdown',ev=>{
     poli.pts.push(q); dicaPoli(); pintar(); return;
   }
   if(moverFundo&&L.fundo){
-    arr={tipo:'fundo',p0:p,f0:{x:L.fundo.x,y:L.fundo.y}};
+    arr={_ts:Date.now(),tipo:'fundo',p0:p,f0:{x:L.fundo.x,y:L.fundo.y}};
     return;
   }
   const rd=t.getAttribute&&t.getAttribute('data-rodar');
@@ -5153,7 +5153,7 @@ svg.addEventListener('pointerdown',ev=>{
   const pega=t.getAttribute&&t.getAttribute('data-pega');
   if(vert){
     const [id,i]=vert.split('|'); const b=L.blocos.find(x=>x.id===id);
-    guardarHist(); arr={tipo:'vertice',b,i:+i}; return;
+    guardarHist(); arr={_ts:Date.now(),tipo:'vertice',b,i:+i}; return;
   }
   const vao=t.getAttribute&&t.getAttribute('data-vao');
   const par=t.getAttribute&&t.getAttribute('data-par');
@@ -5164,13 +5164,13 @@ svg.addEventListener('pointerdown',ev=>{
     const [aid,lado]=adjPega.split('|');
     const a=adjacentes().find(x=>x.id===aid);
     if(a){ guardarHist(); sel={t:'adj',id:aid};
-      arr={tipo:'adjRedim',a,lado,p0:p,a0:{...a}};
+      arr={_ts:Date.now(),tipo:'adjRedim',a,lado,p0:p,a0:{...a}};
       return; }
   }
   const adjAlvo=t.getAttribute&&t.getAttribute('data-adj');
   if(adjAlvo&&!regua&&!pincelCF){
     const a=adjacentes().find(x=>x.id===adjAlvo);
-    if(a){ guardarHist(); sel={t:'adj',id:a.id}; arr={tipo:'adj',a,p0:p,a0:Object.assign({},a,{pts:a.pts?a.pts.map(q=>({x:q.x,y:q.y})):null})};
+    if(a){ guardarHist(); sel={t:'adj',id:a.id}; arr={_ts:Date.now(),tipo:'adj',a,p0:p,a0:Object.assign({},a,{pts:a.pts?a.pts.map(q=>({x:q.x,y:q.y})):null})};
       pintarInspetor(); repintarTudo(); return; }
   }
   if(regua){
@@ -5183,7 +5183,7 @@ svg.addEventListener('pointerdown',ev=>{
   }
   if(pega){
     const [id,lado]=pega.split('|'); const b=L.blocos.find(x=>x.id===id);
-    guardarHist(); arr={tipo:'redim',b,lado,p0:p,b0:{...b}};
+    guardarHist(); arr={_ts:Date.now(),tipo:'redim',b,lado,p0:p,b0:{...b}};
   } else if(vao){
     const [div,i]=vao.split('|'); const v=L.vaos.find(x=>x.div===div&&x.i===+i);
     /* O arrasto arma-se ANTES de desenhar o inspector e a lista: um erro a
@@ -5251,7 +5251,7 @@ svg.addEventListener('pointerdown',ev=>{
       const mover = estaSelecionada(b.div)&&sel.t==='multi'
         ? L.blocos.filter(x=>sel.divs.includes(x.div))
         : (modoBloco?[b]:L.blocos.filter(x=>x.div===b.div));
-      arr={tipo:'mover',mover,p0:p,moveu:false,clique:{t:'parede',bloco:id,lado},
+      arr={_ts:Date.now(),tipo:'mover',mover,p0:p,moveu:false,clique:{t:'parede',bloco:id,lado},
         orig:mover.map(x=>({id:x.id,x:x.x,y:x.y,pts:x.pts?x.pts.map(q=>({x:q.x,y:q.y})):null}))};
     }
   } else if(bl){
@@ -5290,17 +5290,18 @@ svg.addEventListener('pointerdown',ev=>{
     if(!estaSelecionada(b.div)) sel=modoBloco?{t:'bloco',id:bl}:{t:'div',div:b.div};
     const mover = sel.t==='multi' ? L.blocos.filter(x=>sel.divs.includes(x.div))
                 : modoBloco ? [b] : L.blocos.filter(x=>x.div===b.div);
-    guardarHist(); arr={tipo:'mover',mover,p0:p,orig:mover.map(x=>({id:x.id,x:x.x,y:x.y}))};
+    guardarHist(); arr={_ts:Date.now(),tipo:'mover',mover,p0:p,orig:mover.map(x=>({id:x.id,x:x.x,y:x.y}))};
     pintarInspetor(); pintarLista();
   } else {
     sel={t:null};
-    arr={tipo:'pan',p0:{x:ev.clientX,y:ev.clientY},o0:{ox:view.ox,oy:view.oy}};
+    arr={_ts:Date.now(),tipo:'pan',p0:{x:ev.clientX,y:ev.clientY},o0:{ox:view.ox,oy:view.oy}};
     svg.classList.add('arrastar'); pintarInspetor(); pintarLista();
   }
   pintar();
 });
 
 svg.addEventListener('pointermove',ev=>{
+  try{ if(arr) arr._ts=Date.now(); }catch(e){}
   if(dedos.has(ev.pointerId)) dedos.set(ev.pointerId,{x:ev.clientX,y:ev.clientY});
   if(pinca&&dedos.size===2){
     const r=tela.getBoundingClientRect();
@@ -5614,6 +5615,25 @@ function largar(){
   svg.classList.remove('arrastar'); arr=null;
 }
 function soltarDedo(ev){ dedos.delete(ev.pointerId); if(dedos.size<2) pinca=null; largar(); }
+/* REDE DE SEGURANÇA PARA GESTOS PERDIDOS.
+   Limpar na actualização resolve o caso que apanhámos, mas não é a causa: o
+   `pointerup` pode perder-se sem a app fazer nada — o dedo levanta-se fora da
+   janela, o browser cancela o toque, o ecrã roda.
+   Duas redes: o browser avisa quando perde a captura do ponteiro, e verifica-se
+   periodicamente se um botão continua premido de facto. Sem isto, a planta fica
+   bloqueada até ser recarregada, e não há nada no ecrã que o explique. */
+svg.addEventListener('lostpointercapture',soltarDedo);
+document.addEventListener('visibilitychange',()=>{
+  if(document.hidden) largarGestosPresos();
+});
+window.addEventListener('blur',()=>largarGestosPresos());
+setInterval(()=>{
+  /* Um arrasto armado há mais de 10 s sem movimento nenhum é um gesto perdido:
+     ninguém arrasta uma parede durante dez segundos sem mexer. */
+  try{
+    if(arr&&arr._ts&&Date.now()-arr._ts>10000){ largarGestosPresos(); repintarTudo(); }
+  }catch(e){}
+},4000);
 svg.addEventListener('pointerup',soltarDedo);
 svg.addEventListener('pointercancel',soltarDedo);
 // rede de segurança: se o ponteiro for largado fora da tela, ou a janela perder
@@ -7484,6 +7504,7 @@ window.addEventListener('message', ev=>{
   if(!m||typeof m!=='object') return;
   try{
     if(m.tipo==='ce-voz:projeto'&&m.proj){
+      largarGestosPresos();
       /* ACTUALIZAR SEM DESFAZER O QUE JÁ FOI AJUSTADO À MÃO.
          `carregar` refaz o desenho todo: as divisões voltam às posições
          automáticas, os vizinhos desaparecem, as envolventes pintadas
@@ -7514,7 +7535,27 @@ window.addEventListener('message', ev=>{
 /* Acrescenta ao desenho as divisões que a app tem e a planta ainda não.
    Devolve quantas foram acrescentadas. Não toca em nada do que já existe:
    nem posições, nem vizinhos, nem envolventes, nem vãos. */
+/* UM GESTO INTERROMPIDO BLOQUEAVA A PLANTA.
+   O dedo levanta-se fora do svg, o ecrã roda, a app repinta a meio do
+   movimento — e o `pointerup` nunca chega. O arrasto fica armado e os dedos
+   ficam registados: a partir daí o zoom não responde, a planta não se mexe, e
+   só recarregando volta ao normal. Foi o que aconteceu ao andar para a frente
+   e para trás nas perguntas.
+   Cada actualização vinda da app é um momento seguro para limpar: se havia um
+   gesto a decorrer, ele já foi interrompido de facto. */
+function largarGestosPresos(){
+  try{
+    if(typeof arr!=='undefined'&&arr){ try{ largar(); }catch(e){} arr=null; }
+    if(typeof dedos!=='undefined'&&dedos.size) dedos.clear();
+    if(typeof pinca!=='undefined') pinca=null;
+    if(typeof _dedos!=='undefined'&&_dedos.size) _dedos.clear();
+    if(typeof _pinca!=='undefined') _pinca=null;
+    if(typeof guias!=='undefined') guias=[];
+    try{ svg.classList.remove('arrastar'); }catch(e){}
+  }catch(e){}
+}
 function acrescentarDivisoesNovas(proj){
+  largarGestosPresos();
   const D2=(proj&&proj.D)||{};
   const jaTem=new Set((L.blocos||[]).map(b=>b.div));
   const novas=(D2.divisoes||[]).filter(d=>!jaTem.has(d));
