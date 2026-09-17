@@ -583,7 +583,7 @@ const DIVS_BASE=[
 // VERSÃO — fonte única (selo no ecrã inicial + cabeçalho do TXT exportado).
 // Subir aqui a cada alteração ao ficheiro.
 // ═══════════════════════════════════════
-const APP_VERSION='v2026.09.16-FIX299';
+const APP_VERSION='v2026.09.17-FIX302';
 
 /* ══════════════════════════════════════════════════════════════════
    A APP INSTALADA FICAVA PRESA NUMA VERSÃO ANTIGA
@@ -1241,8 +1241,22 @@ function expandDivCompleto(){
          Um vão para espaço não útil continua possível: pergunta-se no painel
          de medidas, na secção dos vãos interiores. */
       cond:()=>{
-        if(servicoSemVao(div)) return false;
         const dd=(D.divisoesDados||{})[div]||{};
+        /* «Sem vão» numa divisão de serviço quer dizer sem vão EXTERIOR — foi
+           isso que se perguntou. Uma despensa que confina com a circulação
+           comum pode ter uma porta envidraçada ou um postigo para lá, e isso
+           conta como vão para espaço não útil. */
+        if(servicoSemVao(div)&&!Object.keys(dd.envInt||{}).length) return false;
+        /* UM VÃO PARA A MARQUISE NÃO É UM VÃO EXTERIOR — E ESTAVA A SER PERDIDO.
+           A pergunta dos vãos INTERIORES (para marquise, circulação comum,
+           garagem) é desenhada dentro deste mesmo painel. Ao escondê-lo nas
+           divisões sem parede exterior, escondiam-se com ele os vãos para
+           espaço não útil — que existem precisamente nessas divisões.
+           Num certificado real (Ed. Carmix), cinco divisões confinavam com
+           marquise e nenhuma delas chegou a ser perguntada: o certificado saiu
+           sem UM ÚNICO vão interior. Uma divisão que confina com espaço não
+           útil tem de ser sempre perguntada, tenha ou não parede exterior. */
+        if(Object.keys(dd.envInt||{}).length) return true;
         if(dd.semParedesExt) return false;
         const temOrient=Object.keys(dd.comprimentos||{}).length>0;
         if(temOrient) return true;
@@ -4111,8 +4125,16 @@ function renderVaosInline(div,n){
   const wrap=document.getElementById('ve-inline-wrap');
   if(!wrap) return;
   wrap.innerHTML='';
-  if(n<=0) return;
   if(!D.divisoesDados[div]) D.divisoesDados[div]={comprimentos:{},vaos:[]};
+  /* SEM VÃOS EXTERIORES, MAS TALVEZ COM VÃO PARA A MARQUISE.
+     A função saía aqui com n<=0 — e os vãos INTERIORES são desenhados lá
+     dentro, logo nunca apareciam numa divisão sem vãos exteriores. É por isso
+     que um certificado real saiu sem um único vão para espaço não útil.
+     Com zero vãos exteriores desenha-se só a secção dos interiores e sai. */
+  if(n<=0){
+    renderVaosInterioresInline(div,wrap);
+    return;
+  }
   // garante array com n entradas — mas NÃO sobrescreve vãos que já têm dados
   // (BUG corrigido: antes reinicializava sempre, apagando o preenchido)
   const arr=D.divisoesDados[div].vaos;
@@ -5500,9 +5522,18 @@ function renderQ(){
         console.warn(`Vãos recuperados em "${q.div}": ${n} (a resposta guardada tinha ${parseInt(answers[curQ])||0})`);
       }
     }catch(e){}
-    if(n>0&&stored!=='Sem vãos'){
+    /* «SEM VÃOS» É SOBRE OS EXTERIORES — NÃO SOBRE OS DA MARQUISE.
+       O painel só era desenhado com n>0. Responder «Sem vãos» — ou ainda não
+       ter respondido — escondia com ele a secção dos vãos INTERIORES, que é
+       desenhada dentro do mesmo painel. Numa cozinha sem janela para a rua mas
+       com porta envidraçada para a marquise, o vão desaparecia do
+       levantamento. Foi assim que um certificado real saiu sem um único vão
+       interior. */
+    const _dd=(D.divisoesDados||{})[q.div]||{};
+    const _temENU=Object.keys(_dd.envInt||{}).some(t=>ENVINT_COM_VAO.includes(t));
+    if((n>0&&stored!=='Sem vãos')||_temENU){
       veWrap.style.display='flex';
-      renderVaosInline(q.div,n);
+      renderVaosInline(q.div,(stored==='Sem vãos')?0:n);
     } else {
       veWrap.style.display='none';veWrap.innerHTML='';
     }
@@ -7121,7 +7152,7 @@ function modoRevisao(){
       h.textContent='VÃOS ENVIDRAÇADOS';
       body.appendChild(h);
     }
-    (dd.vaos||[]).forEach((ve,i)=>
+    lista(dd.vaos).forEach((ve,i)=>
       body.appendChild(linhaVaoRevisao(div,{lado:'ext',idx:i},ve,()=>abrirRevisao())));
     Object.entries(dd.vaosInt||{}).forEach(([tipo,lista])=>
       (lista||[]).forEach((vi,i)=>
@@ -7210,8 +7241,25 @@ function verificarAlertas(){
 // (valores que não batem certo entre si). Usado pelo checklist
 // de fim de obra e como guarda antes de exportar o pacote.
 // ═══════════════════════════════════════════════════════════
+/* LER LISTAS SEM REBENTAR.
+   Um ficheiro editado à mão, uma versão antiga, um campo que ficou a `null` ou
+   a um número — e `(x||[]).some(...)` rebenta, porque `123||[]` é `123` e um
+   número não tem `.some`. O verificador inteiro parava e o ecrã ficava sem
+   nada, sem dizer porquê.
+   `lista()` devolve sempre um array; `obj()` sempre um objecto. */
+function lista(v){ return Array.isArray(v)?v.filter(x=>x&&typeof x==='object'):[]; }
+function obj(v){ return (v&&typeof v==='object'&&!Array.isArray(v))?v:{}; }
 function verificarLevantamento(){
   const lacunas=[],incoerencias=[],avisos=[];
+  /* O VERIFICADOR NÃO PODE REBENTAR.
+     É a última coisa que corre antes de exportar. Se um campo vier com o tipo
+     errado — um ficheiro antigo, uma edição à mão, uma importação a meio — o
+     verificador estoirava e o levantamento saía SEM verificação nenhuma, que é
+     precisamente quando ela é mais precisa.
+     Estas duas ajudantes garantem que se lê sempre uma lista e sempre um
+     objecto, venha o que vier. */
+  const lista=v=>Array.isArray(v)?v:[];
+  const obj=v=>(v&&typeof v==='object'&&!Array.isArray(v))?v:{};
   const L=(sec,msg)=>lacunas.push({sec,msg});
   const E=(sec,msg)=>incoerencias.push({sec,msg});
   const A=(sec,msg)=>avisos.push({sec,msg});
@@ -7270,6 +7318,69 @@ function verificarLevantamento(){
      Num levantamento real de um último piso, coberturaTipoEsc ficou por
      responder: a secção COBERTURA não saiu no TXT e o verificador não disse
      nada. Um elemento da envolvente que falta é uma lacuna, não uma opção. */
+  /* O ANO DE CONSTRUÇÃO TEM DE SER UM ANO POSSÍVEL.
+     Entra em quase tudo: a fronteira de 1990 do isolamento, o F_age dos
+     equipamentos, os valores por defeito das paredes. Um erro de dedo — 2925
+     em vez de 1925, ou 198 em vez de 1980 — passava sem ninguém dar por ela e
+     falseava o certificado inteiro. */
+  try{
+    const ano=parseInt(String(D.anoConstrucao||'').replace(/[^\d]/g,''),10);
+    const agora=new Date().getFullYear();
+    if(D.anoConstrucao&&!(ano>=1500&&ano<=agora))
+      E('Identificação','Ano de construção «'+D.anoConstrucao+'» não é possível — '+
+        'tem de estar entre 1500 e '+agora+'. O ano decide a fronteira do isolamento, '+
+        'o F_age dos equipamentos e os valores por defeito das paredes.');
+  }catch(e){}
+
+  /* UM QUARTO, UMA SALA OU UMA COZINHA TÊM SEMPRE VÃO.
+     São compartimentos habitáveis: o RGEU exige iluminação e ventilação
+     naturais, e nenhum deles é aprovado sem janela. Se o vão não dá para a rua
+     dá para a marquise, para a varanda fechada ou para o saguão — mas existe.
+     Uma destas divisões sem vão nenhum declarado, nem exterior nem interior, é
+     sempre levantamento incompleto: vai para o cálculo com zero de área
+     envidraçada e o certificado sai com ganhos solares e perdas erradas. */
+  try{
+    const HABITAVEL=/^(sala|sala de estar|sala de jantar|quarto|cozinha|kitchenette|escrit[óo]rio|suite|su[íi]te)/i;
+    (Array.isArray(D.divisoes)?D.divisoes:[]).forEach(dv=>{
+      if(!HABITAVEL.test(String(dv).trim())) return;
+      const dd2=obj(D.divisoesDados)[dv]||{};
+      const temExt=lista(dd2.vaos).some(v=>parseFloat(v.larg)>0&&parseFloat(v.alt)>0);
+      const temInt=Object.values(obj(dd2.vaosInt))
+        .some(arr=>(arr||[]).some(v=>parseFloat(v.larg)>0&&parseFloat(v.alt)>0));
+      if(temExt||temInt) return;
+      const enus=Object.keys(obj(dd2.envInt)).filter(k=>dd2.envInt[k]);
+      E('Vãos',dv+': sem nenhum vão envidraçado declarado. Um compartimento habitável '+
+        'tem sempre janela — se não dá para o exterior, dá para '+
+        (enus.length?enus.join(' ou '):'a marquise, a varanda fechada ou o saguão')+
+        '. Sem vão, a divisão entra no cálculo com zero de área envidraçada.');
+    });
+  }catch(e){}
+
+  /* DIVISÃO QUE CONFINA COM ESPAÇO NÃO ÚTIL E NÃO DIZ SE TEM VÃO.
+     Uma parede para marquise quase sempre tem janela — é o vão que mais se
+     esquece, porque não se vê da rua e não tem orientação. Num certificado
+     real (Ed. Carmix) cinco divisões confinavam com marquise e o certificado
+     saiu sem um único vão interior, porque a pergunta nunca apareceu.
+     Corrigida a pergunta, fica o aviso para os levantamentos já feitos e para
+     o caso de se passar à frente: é preciso dizer SIM ou NÃO, não deixar em
+     branco. */
+  try{
+    (Array.isArray(D.divisoes)?D.divisoes:[]).forEach(dv=>{
+      const dd2=obj(D.divisoesDados)[dv]||{};
+      const enus=Object.keys(obj(dd2.envInt)).filter(k=>dd2.envInt[k]);
+      if(!enus.length) return;
+      const porResponder=enus.filter(k=>{
+        const r=obj(dd2.vaosIntYN)[k];
+        return !r||!String(r).trim();
+      });
+      if(porResponder.length)
+        E('Vãos',dv+': confina com '+porResponder.join(' e ')+
+          ' e não foi dito se há vão para lá. Uma parede para espaço não útil quase '+
+          'sempre tem janela — e um vão por declarar é área de envidraçado a menos '+
+          'no cálculo.');
+    });
+  }catch(e){}
+
   /* A PAREDE MEDIDA NÃO BATE COM NENHUM LADO DO RECTÂNGULO.
      A área vem dos rectângulos e o comprimento das paredes vem do laser: são
      duas medições independentes da mesma divisão, e têm de fechar. Num
@@ -7279,14 +7390,14 @@ function verificarLevantamento(){
      Só se verifica quando há UM rectângulo: com dois ou mais a divisão é
      recortada e um lado pode não corresponder a nada. */
   try{
-    (D.divisoes||[]).forEach(dv=>{
-      const dd2=(D.divisoesDados||{})[dv]||{};
+    (Array.isArray(D.divisoes)?D.divisoes:[]).forEach(dv=>{
+      const dd2=obj(D.divisoesDados)[dv]||{};
       const rs=dd2.areaRect||[];
       if(rs.length!==1) return;
       const c=parseFloat(String(rs[0].c||'').replace(',','.'));
       const l=parseFloat(String(rs[0].l||'').replace(',','.'));
       if(!(c>0&&l>0)) return;
-      const comps=Object.entries(dd2.comprimentos||{})
+      const comps=Object.entries(obj(dd2.comprimentos))
         .map(([o,v])=>[o,parseFloat(String(v||'').replace(',','.').replace(/[^\d.]/g,''))])
         .filter(([,n])=>n>0&&n<=30);
       if(!comps.length) return;
@@ -7307,8 +7418,8 @@ function verificarLevantamento(){
      o TXT saía normal: só a planta denunciava, ao desenhar um bloco de 298
      metros que empurrava tudo o resto para fora do ecrã. */
   try{
-    (D.divisoes||[]).forEach(dv=>{
-      const c=((D.divisoesDados||{})[dv]||{}).comprimentos||{};
+    (Array.isArray(D.divisoes)?D.divisoes:[]).forEach(dv=>{
+      const c=(obj(D.divisoesDados)[dv]||{}).comprimentos||{};
       Object.entries(c).forEach(([o,v])=>{
         const n=parseFloat(String(v||'').replace(',','.').replace(/[^\d.]/g,''));
         if(n>30)
@@ -7328,10 +7439,10 @@ function verificarLevantamento(){
   try{
     const t2=D.ordemDivisoesTemp;
     if(Array.isArray(t2)&&t2.length&&
-       JSON.stringify(t2)!==JSON.stringify((D.divisoes||[]).slice(0,t2.length)))
+       JSON.stringify(t2)!==JSON.stringify((Array.isArray(D.divisoes)?D.divisoes:[]).slice(0,t2.length)))
       A('Divisões','Escolheste uma ordem para percorrer as divisões ('+t2.slice(0,3).join(', ')+
         '…) que não chegou a ser aplicada — o levantamento seguiu a ordem automática ('+
-        (D.divisoes||[]).slice(0,3).join(', ')+'…). Volta à pergunta da ordem e avança com «Seguinte».');
+        (Array.isArray(D.divisoes)?D.divisoes:[]).slice(0,3).join(', ')+'…). Volta à pergunta da ordem e avança com «Seguinte».');
   }catch(e){}
 
   /* COBERTURA POR CARACTERIZAR NUM ÚLTIMO PISO — É ERRO, NÃO LACUNA.
@@ -7366,8 +7477,8 @@ function verificarLevantamento(){
   try{
     const OPOSTAS=[['Norte','Sul'],['Este','Oeste'],['NE','SO'],['NO','SE'],
       ['Nordeste','Sudoeste'],['Noroeste','Sudeste']];
-    (D.divisoes||[]).forEach(dv=>{
-      const c=((D.divisoesDados||{})[dv]||{}).comprimentos||{};
+    (Array.isArray(D.divisoes)?D.divisoes:[]).forEach(dv=>{
+      const c=(obj(D.divisoesDados)[dv]||{}).comprimentos||{};
       const num=k=>parseFloat(String(c[k]||'').replace(',','.').replace(/[^\d.]/g,''));
       OPOSTAS.forEach(([a,b2])=>{
         const x=num(a), y=num(b2);
@@ -7392,12 +7503,12 @@ function verificarLevantamento(){
     const m=tp.match(/^T(\d)$/);
     if(m){
       const nT=+m[1];
-      const quartos=(D.divisoes||[]).filter(d=>/^quarto\b/i.test(String(d).trim())).length;
+      const quartos=(Array.isArray(D.divisoes)?D.divisoes:[]).filter(d=>/^quarto\b/i.test(String(d).trim())).length;
       if(quartos&&quartos!==nT)
         A('Divisões','Tipologia '+tp+' mas '+quartos+' quarto(s) levantado(s) — confirma a '+
           'tipologia ou a lista de compartimentos');
-      const area=(D.divisoes||[]).reduce((s2,d)=>{
-        const a=parseFloat(String(((D.divisoesDados||{})[d]||{}).areaUtil||'').replace(',','.'));
+      const area=(Array.isArray(D.divisoes)?D.divisoes:[]).reduce((s2,d)=>{
+        const a=parseFloat(String((obj(D.divisoesDados)[d]||{}).areaUtil||'').replace(',','.'));
         return s2+(isFinite(a)?a:0);
       },0);
       // referência larga: um T0 até 55, e mais 30 m² por quarto
@@ -7413,8 +7524,8 @@ function verificarLevantamento(){
      forma do primeiro. Numa circulação em L medida ao contrário, o pedaço que
      era para baixo saiu em cima e a divisão ficou espelhada. */
   try{
-    (D.divisoes||[]).forEach(dv=>{
-      const rects=((D.divisoesDados||{})[dv]||{}).areaRect||[];
+    (Array.isArray(D.divisoes)?D.divisoes:[]).forEach(dv=>{
+      const rects=(obj(D.divisoesDados)[dv]||{}).areaRect||[];
       const semLado=rects.map((r,i)=>({r,i}))
         .filter(({r,i})=>i>0&&parseFloat(r.c)>0&&parseFloat(r.l)>0&&!r.lado);
       if(semLado.length)
@@ -7429,8 +7540,8 @@ function verificarLevantamento(){
      um recanto que não devia ter sido medido: dá trabalho a mais e afasta a
      área do que o Manual manda calcular. */
   try{
-    (D.divisoes||[]).forEach(dv=>{
-      const rects=((D.divisoesDados||{})[dv]||{}).areaRect||[];
+    (Array.isArray(D.divisoes)?D.divisoes:[]).forEach(dv=>{
+      const rects=(obj(D.divisoesDados)[dv]||{}).areaRect||[];
       if(rects.length<2) return;      // com um rectângulo só, é a divisão toda
       rects.forEach((r,i)=>{
         const c=parseFloat(String(r.c||'').replace(',','.'));
@@ -7451,16 +7562,16 @@ function verificarLevantamento(){
      silêncio e ia para o cálculo: a área de envidraçado ficava maior do que a
      área opaca dessa orientação, e o Nic sai errado. */
   try{
-    (D.divisoes||[]).forEach(dv=>{
-      const dd=(D.divisoesDados||{})[dv]||{};
+    (Array.isArray(D.divisoes)?D.divisoes:[]).forEach(dv=>{
+      const dd=obj(D.divisoesDados)[dv]||{};
       const somaOrient={};
-      (dd.vaos||[]).forEach(v=>{
+      lista(dd.vaos).forEach(v=>{
         const l=parseFloat(String(v.larg||'').replace(',','.'));
         if(!(l>0)||!v.orient) return;
         somaOrient[v.orient]=(somaOrient[v.orient]||0)+l;
       });
       Object.entries(somaOrient).forEach(([o,largTotal])=>{
-        const comp=parseFloat(String((dd.comprimentos||{})[o]||'').replace(',','.'));
+        const comp=parseFloat(String(obj(dd.comprimentos)[o]||'').replace(',','.'));
         if(!(comp>0)) return;
         if(largTotal>comp+0.02)
           E('Vãos',dv+' '+o+': os vãos somam '+largTotal.toFixed(2).replace('.',',')+
@@ -7468,9 +7579,9 @@ function verificarLevantamento(){
             ' m — confirma as medidas');
       });
       // e a altura contra o pé-direito
-      const pd=Math.max(...Object.values(D.peDireitos||{})
+      const pd=Math.max(...Object.values(obj(D.peDireitos))
         .map(x=>parseFloat(String(x||'').replace(',','.'))||0),0);
-      (dd.vaos||[]).forEach(v=>{
+      lista(dd.vaos).forEach(v=>{
         const a=parseFloat(String(v.alt||'').replace(',','.'));
         if(a>0&&pd>0&&a>pd+0.02)
           E('Vãos',dv+' '+(v.id||'')+': altura de '+a.toFixed(2).replace('.',',')+
@@ -7500,11 +7611,11 @@ function verificarLevantamento(){
         '(solo, cave, garagem ou outro fogo)');
   }catch(e){}
   // (a pergunta é saltada quando o andar da caderneta a determinou — ver pisoLocalDeDocumento)
-  if(!Object.keys(D.peDireitos||{}).length) L('Identificação','Pé-direito não registado');
+  if(!Object.keys(obj(D.peDireitos)).length) L('Identificação','Pé-direito não registado');
 
   // ── divisões: área resolvida ──
-  const semArea=(D.divisoes||[]).filter(d=>!resolverAreaDivisaoGlobal(d));
-  if(!(D.divisoes||[]).length) L('Divisões','Nenhuma divisão selecionada');
+  const semArea=(Array.isArray(D.divisoes)?D.divisoes:[]).filter(d=>!resolverAreaDivisaoGlobal(d));
+  if(!(Array.isArray(D.divisoes)?D.divisoes:[]).length) L('Divisões','Nenhuma divisão selecionada');
   else if(semArea.length&&!D.areaUtilPlantaTotal) L('Divisões','Sem área resolvida: '+semArea.join(', '));
 
   // ── PISOS E DIVISÕES ──
@@ -7512,7 +7623,7 @@ function verificarLevantamento(){
   // com tudo somado no piso errado, e o pavimento/cobertura de cada piso saem
   // trocados. Já aconteceu e não era detetado.
   {
-    const divs=D.divisoes||[];
+    const divs=lista(D.divisoes);
     const pisosUsados=[...new Set(divs.map(d=>((D.divisoesDados[d]||{}).piso||'').trim()).filter(Boolean))];
     const nPisos=Math.max(1,parseInt(D.pisos)||1);
     if(nPisos>1&&pisosUsados.length<=1)
@@ -7525,8 +7636,8 @@ function verificarLevantamento(){
         ') mas o edifício está declarado com 1 piso');
     const semNada=divs.filter(d=>{
       const dd=D.divisoesDados[d]||{};
-      const temTroco=Object.values(dd.trocos||{}).some(v=>v&&String(v[0]||'').trim());
-      const temRect=(dd.areaRect||[]).some(r=>parseFloat(r.c)>0&&parseFloat(r.l)>0);
+      const temTroco=Object.values(obj(dd.trocos)).some(v=>v&&String(v[0]||'').trim());
+      const temRect=lista(dd.areaRect).some(r=>parseFloat(r.c)>0&&parseFloat(r.l)>0);
       return !temTroco&&!temRect&&!parseFloat(dd.areaUtil||0);
     });
     if(semNada.length)
@@ -7570,8 +7681,8 @@ function verificarLevantamento(){
   }
 
   // ── vãos envidraçados ──
-  for(const div of (D.divisoes||[])){
-    const vaos=((D.divisoesDados||{})[div]||{}).vaos||[];
+  for(const div of (Array.isArray(D.divisoes)?D.divisoes:[])){
+    const vaos=lista((obj(D.divisoesDados)[div]||{}).vaos);
     vaos.forEach(ve=>{
       const ref=div+' '+(ve.id||'VE?');
       if(!ve.orient) L('Vãos',ref+': sem orientação');
@@ -7642,8 +7753,8 @@ function verificarLevantamento(){
   }
 
   // ── vãos: incoerências ──
-  for(const div of (D.divisoes||[])){
-    const vaos=((D.divisoesDados||{})[div]||{}).vaos||[];
+  for(const div of (Array.isArray(D.divisoes)?D.divisoes:[])){
+    const vaos=lista((obj(D.divisoesDados)[div]||{}).vaos);
     vaos.forEach(ve=>{
       const ref=div+' '+(ve.id||'VE?');
       const l=parseFloat(String(ve.larg||'').replace(',','.')),a=parseFloat(String(ve.alt||'').replace(',','.'));
@@ -7690,9 +7801,9 @@ function verificarLevantamento(){
   // ── área útil sem base: divisão com uma só parede medida ──
   // Com uma única medida a segunda dimensão é estimada, logo a área resultante
   // não é uma medição. Não deve entrar como área útil sem ser assinalada.
-  (D.divisoes||[]).forEach(div=>{
-    const dd=(D.divisoesDados||{})[div]||{};
-    const medidas=Object.values(dd.comprimentos||{})
+  (Array.isArray(D.divisoes)?D.divisoes:[]).forEach(div=>{
+    const dd=obj(D.divisoesDados)[div]||{};
+    const medidas=Object.values(obj(dd.comprimentos))
       .filter(v=>parseFloat(String(v||'').replace(',','.').replace(/[^\d.]/g,''))>0);
     if(medidas.length===1&&!dd.area){
       A('Áreas',`${div}: só uma parede medida — a área útil não pode ser apurada sem a segunda dimensão`);
@@ -13605,7 +13716,7 @@ function resolverPeDireitoPiso(div,pisoLabel){
 function resolverAreaDivisaoGlobal(div){
   const dd=(D.divisoesDados||{})[div]||{};
   if(dd.areaRect&&dd.areaRect.length){
-    const total=dd.areaRect.reduce((s,r)=>{
+    const total=lista(dd.areaRect).reduce((s,r)=>{
       const c=parseFloat(r.c)||0,l=parseFloat(r.l)||0;
       return s+c*l;
     },0);
@@ -14495,7 +14606,7 @@ function areaUtilDivisao(div){
   if(au>0) return {area:au,origem:'medida'};
   // 2) soma dos rectângulos, se a total não tiver sido gravada
   if(Array.isArray(dd.areaRect)&&dd.areaRect.length){
-    const soma=dd.areaRect.reduce((a,r)=>a+num(r&&r.c)*num(r&&r.l),0);
+    const soma=lista(dd.areaRect).reduce((a,r)=>a+num(r&&r.c)*num(r&&r.l),0);
     if(soma>0) return {area:soma,origem:'medida'};
   }
   // 3) área introduzida à mão
@@ -19161,12 +19272,6 @@ function aplicarPerfil(p){
   mostrarToastLaser('🏢 Perfil "'+p.nome+'" aplicado — valores pré-preenchidos.',4000);
 }
 
-/* MARCAR OS VÃOS NA FOTO DO ALÇADO.
-   A foto do alçado serve para mostrar onde estão as janelas — e depois, no
-   escritório, olha-se para uma fachada com oito vãos e não se sabe qual é
-   qual. Marcar ali mesmo, com o imóvel à frente, é quando se sabe.
-   Rectângulos vermelhos desenhados por cima, numerados. Ficam gravados na
-   própria imagem: seguem a foto para o certificado sem depender de mais nada. */
 /* Fotos acabadas de tirar, à espera de serem marcadas. Cada caminho que grava
    uma foto de alçado põe a chave aqui; no fim, abre-se o marcador uma vez por
    foto, em fila. Assim marca-se com o imóvel à frente e não em casa. */
@@ -19176,6 +19281,16 @@ function marcarAlcadosPendentes(){
   if(!key) return;
   abrirMarcadorAlcado(key,()=>marcarAlcadosPendentes());
 }
+/* MARCAR A FRACÇÃO NA FOTO DO ALÇADO.
+   A foto do alçado serve para mostrar QUAL é a fracção no prédio — não onde
+   estão as janelas. Numa fachada com vinte varandas iguais, quem recebe o
+   certificado tem de saber qual delas é a do processo.
+   Duas formas de a contornar:
+     ▭ Rectângulo — arrastar, e depois rodar pela pega, como no Paint. Serve
+       para a esmagadora maioria das fracções.
+     ⬠ Polígono — canto a canto, para as que não são rectangulares: a varanda
+       que avança, o degrau da empena, o recuo do último piso.
+   Linha vermelha grossa, gravada na própria imagem. */
 function abrirMarcadorAlcado(idbKey,depois){
   fotoDbGet(idbKey).then(dataURL=>{
     if(!dataURL){ if(depois) depois(); return; }
@@ -19188,84 +19303,170 @@ function abrirMarcadorAlcado(idbKey,depois){
       barra.style.cssText='display:flex;gap:6px;padding:9px;background:var(--bg2);'+
         'align-items:center;flex-wrap:wrap';
       const info=document.createElement('div');
-      info.style.cssText='flex:1;font-size:12.5px;color:var(--tx2);min-width:150px';
-      info.textContent='Arrasta sobre cada vão para o marcar.';
-      const bt=(txt,fn,forte)=>{
-        const b=document.createElement('button'); b.type='button'; b.textContent=txt;
-        b.style.cssText='padding:9px 13px;border-radius:9px;font-size:13px;cursor:pointer;'+
-          (forte?'border:none;background:var(--ac);color:#04140c;font-weight:700'
-                :'border:1px solid var(--br);background:var(--bg3);color:var(--tx)');
-        b.onclick=fn; barra.appendChild(b); return b;
-      };
-      barra.appendChild(info);
+      info.style.cssText='flex:1;font-size:12.5px;color:var(--tx2);min-width:140px';
       const cv=document.createElement('canvas');
-      cv.style.cssText='flex:1;min-height:0;width:100%;object-fit:contain;touch-action:none;background:#000';
-      /* A imagem pode ser grande; o canvas trabalha no tamanho dela para os
-         rectângulos ficarem gravados com a mesma definição. */
+      cv.style.cssText='flex:1;min-height:0;width:100%;object-fit:contain;'+
+        'touch-action:none;background:#000';
       cv.width=img.naturalWidth; cv.height=img.naturalHeight;
       const ctx=cv.getContext('2d');
-      const rects=[];
-      const pintar=()=>{
-        ctx.drawImage(img,0,0);
-        const esp=Math.max(3,Math.round(cv.width/300));
-        ctx.lineWidth=esp; ctx.strokeStyle='#FF2020';
-        ctx.font=(esp*7)+'px sans-serif'; ctx.textBaseline='top';
-        rects.forEach((r,i)=>{
-          ctx.strokeRect(r.x,r.y,r.w,r.h);
-          const et='V'+(i+1);
-          const lx=r.x+esp, ly=r.y+esp;
-          const lw=ctx.measureText(et).width+esp*2;
-          ctx.fillStyle='#FF2020'; ctx.fillRect(lx,ly,lw,esp*9);
-          ctx.fillStyle='#fff'; ctx.fillText(et,lx+esp,ly+esp);
-        });
-        info.textContent=rects.length
-          ? rects.length+' vão(s) marcado(s). Arrasta para marcar mais.'
-          : 'Arrasta sobre cada vão para o marcar.';
+      /* A espessura acompanha o tamanho da foto: 5 px numa foto de 900 é o
+         mesmo traço que 12 px numa de 2200. */
+      const ESP=Math.max(5,Math.round(cv.width/180));
+      const PEGA=Math.max(14,Math.round(cv.width/55));
+      const VERM='#FF1A1A';
+
+      let modo='rect';            // 'rect' | 'poli'
+      let forma=null;             // {tipo:'rect',cx,cy,w,h,ang} | {tipo:'poli',pts:[]}
+      let arrasto=null;           // {tipo:'novo'|'rodar'|'mover', ...}
+
+      const cantosDoRect=f=>{
+        const c=Math.cos(f.ang), s2=Math.sin(f.ang);
+        const hw=f.w/2, hh=f.h/2;
+        return [[-hw,-hh],[hw,-hh],[hw,hh],[-hw,hh]]
+          .map(([x,y])=>({x:f.cx+x*c-y*s2, y:f.cy+x*s2+y*c}));
       };
-      pintar();
-      /* Do ecrã para a imagem: o canvas é mostrado encolhido. */
+      const pegaRodar=f=>{
+        /* Acima do meio do lado de cima, como no Paint. */
+        const c=Math.cos(f.ang), s2=Math.sin(f.ang);
+        const dy=-(f.h/2)-PEGA*2.2;
+        return {x:f.cx-dy*s2, y:f.cy+dy*c};
+      };
+      const pintar=(previa)=>{
+        ctx.drawImage(img,0,0);
+        ctx.lineWidth=ESP; ctx.strokeStyle=VERM;
+        ctx.lineJoin='round'; ctx.lineCap='round';
+        const traco=pts=>{
+          if(!pts||pts.length<2) return;
+          ctx.beginPath();
+          ctx.moveTo(pts[0].x,pts[0].y);
+          pts.slice(1).forEach(q=>ctx.lineTo(q.x,q.y));
+          ctx.closePath(); ctx.stroke();
+        };
+        if(forma&&forma.tipo==='rect') traco(cantosDoRect(forma));
+        if(forma&&forma.tipo==='poli'){
+          if(forma.fechado) traco(forma.pts);
+          else if(forma.pts.length>1){
+            ctx.beginPath();
+            ctx.moveTo(forma.pts[0].x,forma.pts[0].y);
+            forma.pts.slice(1).forEach(q=>ctx.lineTo(q.x,q.y));
+            ctx.stroke();
+          }
+          /* Os cantos já postos, para se ver onde se tocou. */
+          if(!forma.fechado) forma.pts.forEach(q=>{
+            ctx.beginPath(); ctx.arc(q.x,q.y,ESP*1.1,0,7); ctx.fillStyle=VERM; ctx.fill();
+          });
+        }
+        if(previa){ ctx.save(); ctx.setLineDash([ESP*2,ESP*2]); traco(previa); ctx.restore(); }
+        return true;
+      };
+      /* As pegas desenham-se por cima, mas NÃO entram na imagem gravada. */
+      const pintarComPegas=()=>{
+        pintar();
+        if(forma&&forma.tipo==='rect'){
+          const p=pegaRodar(forma), cs=cantosDoRect(forma);
+          const topo={x:(cs[0].x+cs[1].x)/2,y:(cs[0].y+cs[1].y)/2};
+          ctx.strokeStyle='#fff'; ctx.lineWidth=Math.max(2,ESP/2.5);
+          ctx.beginPath(); ctx.moveTo(topo.x,topo.y); ctx.lineTo(p.x,p.y); ctx.stroke();
+          ctx.beginPath(); ctx.arc(p.x,p.y,PEGA,0,7);
+          ctx.fillStyle='#fff'; ctx.fill();
+          ctx.strokeStyle=VERM; ctx.lineWidth=Math.max(2,ESP/2.5); ctx.stroke();
+        }
+        info.textContent=
+          !forma ? (modo==='rect'
+              ? 'Arrasta sobre a fracção para a envolver num rectângulo.'
+              : 'Toca em cada canto da fracção. Fecha no primeiro ponto.')
+          : forma.tipo==='rect' ? 'Roda pela pega branca. Arrasta de novo para refazer.'
+          : forma.fechado ? 'Fracção marcada.'
+          : forma.pts.length+' canto(s). Toca no primeiro ponto para fechar.';
+      };
       const paraImg=(ev)=>{
         const r=cv.getBoundingClientRect();
         const esc=Math.min(r.width/cv.width,r.height/cv.height);
         const ox=(r.width-cv.width*esc)/2, oy=(r.height-cv.height*esc)/2;
         return {x:(ev.clientX-r.left-ox)/esc, y:(ev.clientY-r.top-oy)/esc};
       };
-      let a=null;
-      cv.addEventListener('pointerdown',ev=>{ ev.preventDefault(); a=paraImg(ev); });
-      cv.addEventListener('pointermove',ev=>{
-        if(!a) return;
-        const b=paraImg(ev);
-        pintar();
-        const esp=Math.max(3,Math.round(cv.width/300));
-        ctx.lineWidth=esp; ctx.strokeStyle='#FF2020'; ctx.setLineDash([esp*2,esp*2]);
-        ctx.strokeRect(Math.min(a.x,b.x),Math.min(a.y,b.y),Math.abs(b.x-a.x),Math.abs(b.y-a.y));
-        ctx.setLineDash([]);
+      const dist=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
+
+      cv.addEventListener('pointerdown',ev=>{
+        ev.preventDefault();
+        const p=paraImg(ev);
+        if(modo==='poli'){
+          if(!forma||forma.tipo!=='poli') forma={tipo:'poli',pts:[],fechado:false};
+          if(forma.fechado) return;
+          /* Tocar no primeiro ponto fecha a forma. */
+          if(forma.pts.length>=3&&dist(p,forma.pts[0])<PEGA*1.6){
+            forma.fechado=true; pintarComPegas(); return;
+          }
+          forma.pts.push(p); pintarComPegas(); return;
+        }
+        if(forma&&forma.tipo==='rect'&&dist(p,pegaRodar(forma))<PEGA*1.6){
+          arrasto={tipo:'rodar'}; return;
+        }
+        arrasto={tipo:'novo',a:p};
       });
-      const fecharGesto=ev=>{
-        if(!a) return;
-        const b=paraImg(ev);
-        const w2=Math.abs(b.x-a.x), h2=Math.abs(b.y-a.y);
-        // um toque sem arrasto não é um vão
-        if(w2>cv.width*0.02&&h2>cv.height*0.02)
-          rects.push({x:Math.min(a.x,b.x),y:Math.min(a.y,b.y),w:w2,h:h2});
-        a=null; pintar();
+      cv.addEventListener('pointermove',ev=>{
+        if(!arrasto) return;
+        const p=paraImg(ev);
+        if(arrasto.tipo==='rodar'&&forma){
+          forma.ang=Math.atan2(p.y-forma.cy,p.x-forma.cx)+Math.PI/2;
+          pintarComPegas(); return;
+        }
+        if(arrasto.tipo==='novo'){
+          const a=arrasto.a;
+          pintar([{x:a.x,y:a.y},{x:p.x,y:a.y},{x:p.x,y:p.y},{x:a.x,y:p.y}]);
+        }
+      });
+      const largar=ev=>{
+        if(!arrasto) return;
+        if(arrasto.tipo==='novo'){
+          const a=arrasto.a, b=paraImg(ev);
+          const w2=Math.abs(b.x-a.x), h2=Math.abs(b.y-a.y);
+          /* Um toque sem arrasto não é uma fracção. */
+          if(w2>cv.width*0.03&&h2>cv.height*0.02)
+            forma={tipo:'rect',cx:(a.x+b.x)/2,cy:(a.y+b.y)/2,w:w2,h:h2,ang:0};
+        }
+        arrasto=null; pintarComPegas();
       };
-      cv.addEventListener('pointerup',fecharGesto);
-      cv.addEventListener('pointercancel',()=>{ a=null; pintar(); });
-      bt('↶ Anular',()=>{ rects.pop(); pintar(); });
-      bt('Sem marcas',()=>{ fundo.remove(); if(depois) depois(); });
+      cv.addEventListener('pointerup',largar);
+      cv.addEventListener('pointercancel',()=>{ arrasto=null; pintarComPegas(); });
+
+      const bt=(txt,fn,forte)=>{
+        const b=document.createElement('button'); b.type='button'; b.textContent=txt;
+        b.style.cssText='padding:9px 12px;border-radius:9px;font-size:13px;cursor:pointer;'+
+          (forte?'border:none;background:var(--ac);color:#04140c;font-weight:700'
+                :'border:1px solid var(--br);background:var(--bg3);color:var(--tx)');
+        b.onclick=fn; barra.appendChild(b); return b;
+      };
+      const bR=bt('▭ Rectângulo',()=>{ modo='rect'; forma=null; marcarModo(); pintarComPegas(); });
+      const bP=bt('⬠ Polígono',()=>{ modo='poli'; forma=null; marcarModo(); pintarComPegas(); });
+      const marcarModo=()=>{
+        [[bR,'rect'],[bP,'poli']].forEach(([b,m])=>{
+          b.style.background=(modo===m)?'var(--ac)':'var(--bg3)';
+          b.style.color=(modo===m)?'#04140c':'var(--tx)';
+          b.style.fontWeight=(modo===m)?'700':'400';
+        });
+      };
+      marcarModo();
+      barra.appendChild(info);
+      bt('↻ Recomeçar',()=>{ forma=null; pintarComPegas(); });
+      bt('Sem marca',()=>{ fundo.remove(); if(depois) depois(); });
       bt('✓ Guardar',async()=>{
-        if(!rects.length){ fundo.remove(); if(depois) depois(); return; }
-        pintar();
+        const vazia=!forma||(forma.tipo==='poli'&&forma.pts.length<3);
+        if(vazia){ fundo.remove(); if(depois) depois(); return; }
+        if(forma.tipo==='poli') forma.fechado=true;
+        pintar();                      // sem pegas: é isto que fica gravado
         try{
-          const novo=cv.toDataURL('image/jpeg',0.88);
-          await fotoDbSet(idbKey,novo);   // substitui a foto pela marcada
+          const nova=cv.toDataURL('image/jpeg',0.88);
+          await fotoDbSet(idbKey,nova);
           const f=(D.fotosAlcado||[]).find(x=>x&&x.idbKey===idbKey);
-          if(f) f.vaosMarcados=rects.length;
+          if(f) f.fraccaoMarcada=true;
+          const g=(D.fotosGaleria||[]).find(x=>x&&x.idbKey===idbKey);
+          if(g) g.fraccaoMarcada=true;
           try{ autoSave(); }catch(e){}
-        }catch(e){ alert('Não consegui guardar as marcas: '+(e.message||e)); }
+        }catch(e){ alert('Não consegui guardar a marca: '+(e.message||e)); }
         fundo.remove(); if(depois) depois();
       },true);
+      pintarComPegas();
       fundo.appendChild(barra); fundo.appendChild(cv);
       document.body.appendChild(fundo);
     };

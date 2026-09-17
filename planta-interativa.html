@@ -411,6 +411,8 @@ Régua</button><button id="btAdj" title="Desenhar um espaço vizinho: outra frac
 Vizinho</button>
       <button id="btVaos" title="Arrumar os vãos: cada um vai para a parede da sua orientação">🪟
 Vãos</button>
+      <button id="btEspelhar" title="Espelhar a divisão seleccionada — troca o lado do recorte sem mexer nas medidas">⇋
+Espelhar</button>
       <button id="btCotas" class="on">⇥
 Cotas</button>
       <button id="btOrient" class="on">🧭
@@ -596,7 +598,7 @@ Ver tudo</button>
   window.addEventListener('online',aviso);
 })();
 "use strict";
-const PLANTA_VERSAO='v1.71.0 (2026-09-16)';
+const PLANTA_VERSAO='v1.73.0 (2026-09-17)';
 /* ══════════════════════════════════════════════════════════════════
    CE Voz · motor de planta interativa
    Fonte de verdade: o levantamento (D). A planta é uma camada de
@@ -861,8 +863,26 @@ function autoLayout(){
     // bloco principal: a parede medida define o comprimento na fachada
     const r=f.rects[0];
     let w=r.c,h=r.l;
-    if((f.fila==='T'||f.fila==='B') && f.compFachada>0){ w=f.compFachada; h=(f.area>0?f.area/w:r.l); }
-    if((f.fila==='E'||f.fila==='D') && f.compFachada>0){ h=f.compFachada; w=(f.area>0?f.area/h:r.c); }
+    /* A PAREDE MEDIDA PODE SER A DO DENTE, NÃO A DA FACHADA PRINCIPAL.
+       Esticar o bloco para `área / comprimento medido` só faz sentido quando a
+       divisão é um rectângulo: aí a área e a fachada definem a forma.
+       Numa divisão recortada não: a parede medida pode ser o lado do dente e a
+       área é a soma dos dois rectângulos. Numa sala real de 3,76 × 6,70 com um
+       dente de 1,56 × 1,77, a única parede medida era a do dente (1,56) — e a
+       app desenhou 1,56 × 17,92, a área certa com a forma toda errada.
+       Com dois ou mais rectângulos os lados medidos mandam, e a fachada só é
+       usada se coincidir com um deles. */
+    const recortada=f.rects.length>1;
+    const bateAlgumLado=v=>Math.abs(v-r.c)<=0.15||Math.abs(v-r.l)<=0.15;
+    const podeEsticar=f.compFachada>0&&(!recortada||bateAlgumLado(f.compFachada));
+    if((f.fila==='T'||f.fila==='B') && podeEsticar){
+      w=f.compFachada;
+      h=(!recortada&&f.area>0)?f.area/w:r.l;
+    }
+    if((f.fila==='E'||f.fila==='D') && podeEsticar){
+      h=f.compFachada;
+      w=(!recortada&&f.area>0)?f.area/h:r.c;
+    }
     // sem fachada medida: se a envolvente interior medida coincide com um dos
     // lados do retângulo, é esse o lado que encosta à lateral — logo fica na
     // vertical (a despensa de 2,11×1,40 com 2,11 m de edifício adjacente é uma
@@ -4393,6 +4413,34 @@ function _distOri(a,b){
   const d=Math.abs(x-y)%8;
   return Math.min(d,8-d);
 }
+/* Troca o lado do recorte sem mexer nas medidas: reflecte os blocos da divisão
+   em torno do eixo da própria divisão, e com eles os vãos e os contornos
+   desenhados à mão. */
+function espelharDivisao(div,eixo){
+  const bs=(L.blocos||[]).filter(b=>b.div===div);
+  if(!bs.length) return;
+  guardarHist();
+  const x0=Math.min(...bs.map(b=>b.x)), x1=Math.max(...bs.map(b=>b.x+b.w));
+  const y0=Math.min(...bs.map(b=>b.y)), y1=Math.max(...bs.map(b=>b.y+b.h));
+  bs.forEach(b=>{
+    if(eixo==='h') b.x=x0+x1-(b.x+b.w);
+    else           b.y=y0+y1-(b.y+b.h);
+    if(Array.isArray(b.pts)&&b.pts.length>=3)
+      b.pts=b.pts.map(q=>eixo==='h'?{x:x0+x1-q.x,y:q.y}:{x:q.x,y:y0+y1-q.y});
+    b.tocado=true;   // ajustado à mão: as medidas deixam de mandar neste bloco
+  });
+  /* Os vãos estão presos a uma parede pelo lado (N/S/E/O): ao espelhar, a
+     parede esquerda passa a ser a direita. */
+  const troca=eixo==='h'?{O:'E',E:'O'}:{N:'S',S:'N'};
+  (L.vaos||[]).filter(v=>v.div===div).forEach(v=>{
+    if(troca[v.lado]) v.lado=troca[v.lado];
+  });
+  normalizarDivisao(div);
+  repintarTudo();
+  const d=document.getElementById('dica');
+  if(d) d.textContent=div+' espelhada '+(eixo==='h'?'na horizontal':'na vertical')+
+    '. As medidas ficaram iguais — só mudou o lado.';
+}
 function arrumarVaos(){
   guardarHist();
   let movidos=0, semParede=[];
@@ -4702,6 +4750,15 @@ function abrirMenu(px,py,blocoId,parede){
     itens.push({t:'b',txt:'＋ Juntar bocado',fn:()=>porModo('+')});
     itens.push({t:'b',txt:'－ Cortar bocado',fn:()=>porModo('-')});
     itens.push({t:'b',txt:'✏ Redesenhar contorno',fn:()=>porModo('poli')});
+    /* ESPELHAR A DIVISÃO.
+       Numa divisão em L, o recorte fica do lado que a app adivinhou a partir do
+       «fica abaixo / à direita» — e metade das vezes é o outro lado. Sem isto,
+       a única saída era apagar os blocos e redesenhar o contorno à mão.
+       Espelhar troca o lado sem tocar nas medidas: cada bloco mantém as
+       dimensões e roda em torno do eixo da divisão. */
+    itens.push({t:'hr'});
+    itens.push({t:'b',txt:'⇋ Espelhar na horizontal',fn:()=>espelharDivisao(b.div,'h')});
+    itens.push({t:'b',txt:'⇅ Espelhar na vertical',fn:()=>espelharDivisao(b.div,'v')});
     itens.push({t:'b',txt:'○ Círculo',fn:()=>porModo('circ')});
     if(L.blocos.filter(x=>x.div===b.div).length>1){
       itens.push({t:'hr'});
@@ -6236,6 +6293,18 @@ alt('btCE',()=>{modoCE=!modoCE;
     : 'Arrasta as divisões até encostarem.';
   repintarTudo();});
 alt('btVaos',()=>arrumarVaos());
+alt('btEspelhar',()=>{
+  /* Espelha a divisão seleccionada; sem selecção, diz o que falta fazer. */
+  const div=(sel&&sel.t==='div')?sel.div
+    :(sel&&sel.t==='bloco')?((L.blocos.find(b=>b.id===sel.id)||{}).div)
+    :(sel&&sel.t==='vao')?sel.div:null;
+  const d=document.getElementById('dica');
+  if(!div){
+    if(d) d.textContent='Escolhe primeiro a divisão — na lista à esquerda ou tocando nela no desenho.';
+    return;
+  }
+  espelharDivisao(div,'h');
+});
 alt('btCotas',()=>{verCotas=!verCotas;document.getElementById('btCotas').classList.toggle('on',verCotas);pintar();});
 alt('btOrient',()=>{verOrient=!verOrient;document.getElementById('btOrient').classList.toggle('on',verOrient);pintar();});
 alt('btSol',()=>{verSol=!verSol;document.getElementById('btSol').classList.toggle('on',verSol);
