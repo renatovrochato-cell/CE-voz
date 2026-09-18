@@ -583,7 +583,7 @@ const DIVS_BASE=[
 // VERSÃO — fonte única (selo no ecrã inicial + cabeçalho do TXT exportado).
 // Subir aqui a cada alteração ao ficheiro.
 // ═══════════════════════════════════════
-const APP_VERSION='v2026.09.17-FIX303';
+const APP_VERSION='v2026.09.17-FIX304';
 
 /* ══════════════════════════════════════════════════════════════════
    A APP INSTALADA FICAVA PRESA NUMA VERSÃO ANTIGA
@@ -1267,7 +1267,7 @@ function expandDivCompleto(){
           Object.keys(((D.divisoesDados||{})[d2]||{}).comprimentos||{}).length>0);
         if(!algumaTem) return true;            // levantamento ainda no início
         // já se marcaram orientações noutras divisões e nesta não: é interior
-        return ((dd.vaos||[]).some(v=>parseFloat(v.larg)>0));   // salvo se já tem vãos
+        return ((dd.vaos||[]).some(v=>num(v.larg)>0));   // salvo se já tem vãos
       }
     });
     // 3. AQS — só após vãos da Cozinha (ou Kitchenette)
@@ -1841,7 +1841,7 @@ function renderEnuInline(){
     totalEl.style.cssText='font-size:11px;color:var(--ac);font-weight:600;margin-bottom:3px';
     grp.appendChild(totalEl);
     function calcTotal(){
-      const vals=td.trocos.map(v=>parseFloat(v)||0).filter(v=>v>0);
+      const vals=td.trocos.map(v=>num(v)).filter(v=>v>0);
       const tot=vals.reduce((a,b)=>a+b,0);
       td.comp=tot>0?tot.toFixed(2)+'m':'';
       totalEl.textContent=vals.length>1?'Total: '+tot.toFixed(2)+'m':'';
@@ -3383,7 +3383,7 @@ function renderCompInputs(q){
      adivinha estar lá.
      Este botão aparece só nessas divisões e repõe a pergunta, ali mesmo. */
   if(!semParedes&&!Object.keys(dd.comprimentos||{}).length&&!D.orientacoesPorVer){
-    const temVaos=(dd.vaos||[]).some(v=>parseFloat(v.larg)>0);
+    const temVaos=(dd.vaos||[]).some(v=>num(v.larg)>0);
     if(!temVaos){
       const b=document.createElement('button');
       b.type='button';
@@ -3502,7 +3502,7 @@ function renderCompInputs(q){
       lblRow.appendChild(lbl);lblRow.appendChild(totalEl);
       orientWrap.appendChild(lblRow);
       function updateTotal(ot,te,comp){
-        const vals=ot.map(v=>parseFloat(v)||0);
+        const vals=ot.map(v=>num(v));
         const total=vals.reduce((a,b)=>a+b,0);
         const parts=vals.filter(v=>v>0).map(v=>v+'m').join(' + ');
         /* UMA MEDIDA EM CENTÍMETROS ESTRAGA TUDO.
@@ -3804,8 +3804,8 @@ function renderCompInputs(q){
       if(dd.areaRect.length===0){
         // pré-preencher com o comprimento da primeira parede exterior já medida —
         // poupa medir a mesma parede duas vezes (comprimento da parede ≈ um dos lados do compartimento)
-        const primeiroComp=Object.values(dd.comprimentos||{}).find(v=>parseFloat(v)>0);
-        if(primeiroComp) cPrefill=parseFloat(primeiroComp).toFixed(2);
+        const primeiroComp=Object.values(dd.comprimentos||{}).find(v=>num(v)>0);
+        if(primeiroComp) cPrefill=num(primeiroComp).toFixed(2);
       }
       dd.areaRect.push({c:cPrefill,l:''});
       renderAreaRects();
@@ -3844,7 +3844,7 @@ function renderCompInputs(q){
   {
     const peSec=document.createElement('div');
     peSec.style.cssText='margin-top:14px;padding-top:10px;border-top:1px dashed var(--br)';
-    const temProprio=!!(dd.peDireito&&parseFloat(dd.peDireito));
+    const temProprio=!!(dd.peDireito&&num(dd.peDireito));
     const hdr=document.createElement('div');
     hdr.style.cssText='display:flex;align-items:center;gap:8px;cursor:pointer';
     const chk=document.createElement('div');
@@ -3864,7 +3864,7 @@ function renderCompInputs(q){
     linha.style.cssText='display:flex;align-items:center;gap:8px';
     const inp=document.createElement('input');
     inp.type='number'; inp.step='0.01'; inp.inputMode='decimal'; inp.placeholder='2.70';
-    inp.value=temProprio?parseFloat(dd.peDireito):'';
+    inp.value=temProprio?num(dd.peDireito):'';
     inp.style.cssText='width:110px;padding:10px;border-radius:9px;border:1px solid var(--br);'+
       'background:var(--bg3);color:var(--tx);font-size:16px';
     inp.oninput=()=>{
@@ -3935,7 +3935,7 @@ function renderCompInputs(q){
       tLblRow.appendChild(tLbl);tLblRow.appendChild(tTotalEl);
       tWrap.appendChild(tLblRow);
       function updateEnvIntTotal(){
-        const vals=dd.envIntTrocos[tipo].map(v=>parseFloat(v)||0);
+        const vals=dd.envIntTrocos[tipo].map(v=>num(v));
         const total=vals.reduce((a,b)=>a+b,0);
         tTotalEl.textContent=total>0?`= ${total.toFixed(2)}m`:'';
         dd.envInt[tipo]=total>0?total.toFixed(2)+'m':'';
@@ -4004,7 +4004,7 @@ function renderPeInputs(n){
     const lbl=document.createElement('div');lbl.className='pe-lbl';lbl.textContent=labelTxt;
     const inp=document.createElement('input');
     inp.className='pe-inp';inp.type='number';inp.step='0.01';inp.inputMode='decimal';inp.placeholder=placeholder||'2.70';
-    inp.value=D.peDireitos[key]?parseFloat(D.peDireitos[key])||'':'';
+    inp.value=D.peDireitos[key]?num(D.peDireitos[key])||'':'';
     const unit=document.createElement('span');unit.style.cssText='font-size:12px;color:var(--tx3)';unit.textContent='m';
     inp.oninput=()=>{D.peDireitos[key]=inp.value?inp.value+'m':'';updateAnswers();};
     row.appendChild(lbl);row.appendChild(inp);row.appendChild(unit);
@@ -4060,7 +4060,7 @@ function renderPeInputs(n){
       const lblMax=document.createElement('div');lblMax.className='pe-lbl';lblMax.textContent='Pé direito máximo:';
       const inpMax=document.createElement('input');
       inpMax.className='pe-inp';inpMax.type='number';inpMax.step='0.01';inpMax.inputMode='decimal';inpMax.placeholder='3.20';
-      inpMax.value=D.peDireitoMax?parseFloat(D.peDireitoMax)||'':'';
+      inpMax.value=D.peDireitoMax?num(D.peDireitoMax)||'':'';
       const unitMax=document.createElement('span');unitMax.style.cssText='font-size:12px;color:var(--tx3)';unitMax.textContent='m';
       inpMax.oninput=()=>{D.peDireitoMax=inpMax.value?inpMax.value+'m':'';};
       rowMax.appendChild(lblMax);rowMax.appendChild(inpMax);rowMax.appendChild(unitMax);
@@ -4070,7 +4070,7 @@ function renderPeInputs(n){
       const lblMin=document.createElement('div');lblMin.className='pe-lbl';lblMin.textContent='Pé direito mínimo:';
       const inpMin=document.createElement('input');
       inpMin.className='pe-inp';inpMin.type='number';inpMin.step='0.01';inpMin.inputMode='decimal';inpMin.placeholder='2.00';
-      inpMin.value=D.peDireitoMin?parseFloat(D.peDireitoMin)||'':'';
+      inpMin.value=D.peDireitoMin?num(D.peDireitoMin)||'':'';
       const unitMin=document.createElement('span');unitMin.style.cssText='font-size:12px;color:var(--tx3)';unitMin.textContent='m';
       inpMin.oninput=()=>{D.peDireitoMin=inpMin.value?inpMin.value+'m':'';};
       rowMin.appendChild(lblMin);rowMin.appendChild(inpMin);rowMin.appendChild(unitMin);
@@ -4097,6 +4097,19 @@ const ORIENTS_VE=['Norte','Sul','Este','Oeste','Nordeste','Sudeste','Sudoeste','
      · U = 1,8 W/(m².°C)
    Não tem caixilharia, nem cor de caixilho, nem sistema de abertura, nem caixa
    de estore — perguntar isso seria pedir dados que não existem. */
+/* LER UM NÚMERO QUE O UTILIZADOR ESCREVEU.
+   O teclado decimal português escreve VÍRGULA, e `parseFloat('2,50')` devolve
+   2 — perde os decimais em silêncio. Os valores chegam ainda com unidade
+   («2.50m»), com espaços, ou vazios.
+   Esta é a única forma certa de ler um número em toda a app. Qualquer
+   `parseFloat` directo sobre um campo escrito à mão é um erro à espera de
+   acontecer: já custou a área dos vãos, o perímetro das pontes térmicas e as
+   áreas das divisões. */
+function num(v){
+  if(typeof v==='number') return isFinite(v)?v:0;
+  const x=parseFloat(String(v==null?'':v).replace(',','.').replace(/[^\d.\-]/g,''));
+  return isFinite(x)?x:0;
+}
 const TIJOLO_VIDRO='Tijolo de vidro';
 const TIJOLO_VIDRO_U=1.8;
 const TIJOLO_VIDRO_G=0.57;
@@ -7392,9 +7405,9 @@ function verificarLevantamento(){
     (Array.isArray(D.divisoes)?D.divisoes:[]).forEach(dv=>{
       if(!HABITAVEL.test(String(dv).trim())) return;
       const dd2=obj(D.divisoesDados)[dv]||{};
-      const temExt=lista(dd2.vaos).some(v=>parseFloat(v.larg)>0&&parseFloat(v.alt)>0);
+      const temExt=lista(dd2.vaos).some(v=>num(v.larg)>0&&num(v.alt)>0);
       const temInt=Object.values(obj(dd2.vaosInt))
-        .some(arr=>(arr||[]).some(v=>parseFloat(v.larg)>0&&parseFloat(v.alt)>0));
+        .some(arr=>(arr||[]).some(v=>num(v.larg)>0&&num(v.alt)>0));
       if(temExt||temInt) return;
       const enus=Object.keys(obj(dd2.envInt)).filter(k=>dd2.envInt[k]);
       E('Vãos',dv+': sem nenhum vão envidraçado declarado. Um compartimento habitável '+
@@ -7575,7 +7588,7 @@ function verificarLevantamento(){
     (Array.isArray(D.divisoes)?D.divisoes:[]).forEach(dv=>{
       const rects=(obj(D.divisoesDados)[dv]||{}).areaRect||[];
       const semLado=rects.map((r,i)=>({r,i}))
-        .filter(({r,i})=>i>0&&parseFloat(r.c)>0&&parseFloat(r.l)>0&&!r.lado);
+        .filter(({r,i})=>i>0&&num(r.c)>0&&num(r.l)>0&&!r.lado);
       if(semLado.length)
         A('Áreas',dv+': '+semLado.length+' rectângulo(s) sem indicação de onde encaixam — '+
           'a planta vai adivinhar. Diz se ficam acima, abaixo, à esquerda ou à direita.');
@@ -7685,8 +7698,8 @@ function verificarLevantamento(){
     const semNada=divs.filter(d=>{
       const dd=D.divisoesDados[d]||{};
       const temTroco=Object.values(obj(dd.trocos)).some(v=>v&&String(v[0]||'').trim());
-      const temRect=lista(dd.areaRect).some(r=>parseFloat(r.c)>0&&parseFloat(r.l)>0);
-      return !temTroco&&!temRect&&!parseFloat(dd.areaUtil||0);
+      const temRect=lista(dd.areaRect).some(r=>num(r.c)>0&&num(r.l)>0);
+      return !temTroco&&!temRect&&!num(dd.areaUtil);
     });
     if(semNada.length)
       E('Divisões',semNada.length+' divisão(ões) sem medida nenhuma — nem troço, nem '+
@@ -7762,7 +7775,7 @@ function verificarLevantamento(){
     if(!isSolar&&!D.aqsIdadeEquip&&!D.aqsAnoFabrico&&!D.anoConstrucao&&D.aqsManutencao!=='sim')
       L('AQS','Sem idade, ano de fabrico nem ano de construção — F_age cai no cenário mais desfavorável');
     if(isEsq&&!D.aqsRendimento) A('AQS','Esquentador/caldeira sem rendimento — vai usar 0,75 por defeito (marca condensação se for o caso)');
-    if(isBC&&(!D.aqsRendimento||isNaN(parseFloat(D.aqsRendimento)))) A('AQS','Bomba de calor sem COP — vai usar 2,50 por defeito (Tabela 76)');
+    if(isBC&&(!D.aqsRendimento||isNaN(num(D.aqsRendimento)))) A('AQS','Bomba de calor sem COP — vai usar 2,50 por defeito (Tabela 76)');
     if(isSolar&&(!D.solN||!D.solArea)) L('AQS','Solar térmico sem nº de coletores ou área');
     if(isTermo&&!D.aqsCapacidade) A('AQS','Termoacumulador sem capacidade (L)');
     if(isEsq&&aqsL.includes('esquentador')&&D.aqsCapacidade) A('AQS','Capacidade (L) preenchida num esquentador (instantâneo) — resto de tipo anterior? Não sai no texto, mas confirma');
@@ -7782,7 +7795,7 @@ function verificarLevantamento(){
       if(m&&D.aqsFatorIdade!=null){
         const isTermo=aqsL.includes('termoacumulador');
         const isBC=aqsL.includes('bomba de calor');
-        const r=parseFloat(D.aqsRendimento);
+        const r=num(D.aqsRendimento);
         const known=D.aqsRendimento&&!isNaN(r);
         const base=isTermo?0.90:isBC?(known?r:2.50)
           :known?((r>1?Math.round(r):Math.round(r*100))/100)
@@ -8127,12 +8140,12 @@ function buildSum(){
         // BUG CORRIGIDO: usava sempre o primeiro pé-direito da casa — agora
         // resolve pelo piso desta divisão.
         const pdVal=resolverPeDireitoPiso(div,dd.piso||'R/C')||'';
-        const pd=parseFloat(pdVal)||0;
+        const pd=num(pdVal);
 
         // tabela por orientação
         let totalComp=0, totalArea=0;
         comps.forEach(([orient,compStr])=>{
-          const comp=parseFloat(compStr)||0;
+          const comp=num(compStr);
           const area=pd>0?(comp*pd):0;
           totalComp+=comp;totalArea+=area;
           const areaStr=pd>0?` × ${pd}m = <strong>${area.toFixed(2)}m²</strong>`:'';
@@ -8186,9 +8199,9 @@ function buildSum(){
       // BUG CORRIGIDO: usava sempre o primeiro pé-direito da casa — agora
       // resolve pelo piso desta divisão.
       const pdVal=resolverPeDireitoPiso(div,dd.piso||'R/C')||'';
-      const pd=parseFloat(pdVal)||0;
+      const pd=num(pdVal);
       Object.entries(dd.comprimentos||{}).forEach(([orient,compStr])=>{
-        const comp=parseFloat(compStr)||0;
+        const comp=num(compStr);
         const area=pd>0?comp*pd:comp;
         paredesOrient[orient]=(paredesOrient[orient]||0)+area;
       });
@@ -8282,7 +8295,7 @@ function buildSum(){
         let compTotal=0;
         for(const div of D.divisoes){
           const dd=D.divisoesDados[div]||{};
-          Object.values(dd.comprimentos||{}).forEach(c=>{compTotal+=parseFloat(c)||0;});
+          Object.values(dd.comprimentos||{}).forEach(c=>{compTotal+=num(c);});
         }
 
         // ── PTL 1: Fachada com caixilharia — sempre presente ──
@@ -8341,7 +8354,7 @@ function buildSum(){
         }
 
         // ── PTL caixa de estore — sempre quando existe ──
-        const ptl3=todosVaosPTL.filter(({ve})=>ve.caixEstore).reduce((s,{ve})=>s+(parseFloat(ve.larg)||0),0);
+        const ptl3=todosVaosPTL.filter(({ve})=>ve.caixEstore).reduce((s,{ve})=>s+(num(ve.larg)||0),0);
         const nEstore=todosVaosPTL.filter(({ve})=>ve.caixEstore).length;
         if(nEstore>0){
           h+=`<div style="display:grid;grid-template-columns:1fr auto;gap:8px;padding:7px 13px">
@@ -8554,7 +8567,7 @@ function pontosCriticos(){
     Object.keys(((D.divisoesDados||{})[d]||{}).comprimentos||{})))];
   P.push(['Orientações',oris.length?oris.join(', '):'— NENHUMA PAREDE MEDIDA']);
   const nVaos=(D.divisoes||[]).reduce((n,d)=>n+(((D.divisoesDados||{})[d]||{}).vaos||[])
-    .filter(v=>parseFloat(v.larg)>0).length,0);
+    .filter(v=>num(v.larg)>0).length,0);
   P.push(['Vãos medidos',String(nVaos)]);
   P.push(['AQS',D.aqsTipo?(D.aqsTipo+(D.aqsAnoFabrico?' ('+D.aqsAnoFabrico+')':'')):'— POR RESPONDER']);
   P.push(['Climatização',D.temClimatizacao==='Não'?'nenhuma (declarado)':
@@ -9682,7 +9695,7 @@ function _perfilDoLevantamento(){
 
   return {tipo,piso,vidros,aqs:aqsL,avac,lareira,caixilharia:caix,protecao:prot,
     cidade:D.concelho||D.localidade||'',
-    espParede:D.espParede?String(parseFloat(D.espParede)/100):'',
+    espParede:D.espParede?String(num(D.espParede)/100):'',
     // mesmo campo fantasma: o comparador dizia sempre «sem isolamento» e ia
     // buscar processos que não se parecem com este
     isolamento:isSimTxt(D.temIsolamento)?'SIM':'NÃO',
@@ -10355,13 +10368,13 @@ function descParede2025(op){
     if(op.material){
       const m=lista.filter(x=>new RegExp(op.material,'i').test(x.isol));
       if(m.length) return m.sort((a,b)=>
-        Math.abs(parseFloat(a.espParede||0)-esp)-Math.abs(parseFloat(b.espParede||0)-esp))[0];
+        Math.abs(num(a.espParede)-esp)-Math.abs(num(b.espParede)-esp))[0];
     }
     const ano=parseInt(op.ano)||0;
     if(esp>=0.45&&(!ano||ano<1960)){
       const pedra=lista.filter(x=>/pedra|taipa/i.test(x.isol));
       if(pedra.length) return pedra.sort((a,b)=>
-        Math.abs(parseFloat(a.espParede||0)-esp)-Math.abs(parseFloat(b.espParede||0)-esp))[0];
+        Math.abs(num(a.espParede)-esp)-Math.abs(num(b.espParede)-esp))[0];
     }
     const semIsol=lista.filter(x=>/sem isolamento/i.test(x.isol)||/tj \d+cm/i.test(x.isol));
     if(!semIsol.length) return null;
@@ -10370,7 +10383,7 @@ function descParede2025(op){
        e favorece o edifício com uma espessura que não foi medida. Fica a maior
        entrada que NÃO ultrapassa o medido, e a diferença assinala-se. */
     const ordenadas=semIsol.slice()
-      .sort((a,b)=>parseFloat(a.espParede||0)-parseFloat(b.espParede||0));
+      .sort((a,b)=>num(a.espParede)-num(b.espParede));
     const cabem=ordenadas.filter(x=>parseFloat(x.espParede||0)<=esp+0.005);
     const escolhida=cabem.length?cabem[cabem.length-1]:ordenadas[0];
     const dif=esp-parseFloat(escolhida.espParede||0);
@@ -11236,8 +11249,8 @@ function buildTxt(){
     // prioridade sobre outros sistemas de aquecimento na MESMA divisão (ex: sala
     // com lareira + ar condicionado — a área da sala conta para a lareira, não
     // para o AC, nesse cálculo de aquecimento).
-    const areaTotalCasa=D.divisoes.reduce((s,div)=>s+(parseFloat(resolverAreaDivisaoGlobal(div))||0),0);
-    function areaDivs(divs){return divs.reduce((s,div)=>s+(parseFloat(resolverAreaDivisaoGlobal(div))||0),0);}
+    const areaTotalCasa=D.divisoes.reduce((s,div)=>s+(num(resolverAreaDivisaoGlobal(div))||0),0);
+    function areaDivs(divs){return divs.reduce((s,div)=>s+(num(resolverAreaDivisaoGlobal(div))||0),0);}
     function fracaoOuTraco(areaServida){
       // "não colocas quando não sabes ou não ficou bem definido" — sem área total
       // conhecida (nenhuma divisão medida), não há como calcular a fração.
@@ -11383,7 +11396,7 @@ function buildTxt(){
   t+=sep('ESPAÇOS NÃO ÚTEIS');
   const _temEnuPorDivisao=D.divisoes.some(div=>{
     const dd=D.divisoesDados[div]||{};
-    return Object.values(dd.envIntTrocos||{}).some(vals=>(vals||[]).some(v=>parseFloat(v)>0));
+    return Object.values(dd.envIntTrocos||{}).some(vals=>(vals||[]).some(v=>num(v)>0));
   });
   if(!(D.enuYN||'').toLowerCase().includes('sim')&&_temEnuPorDivisao){
     t+=ln('Paredes c/ ENU','Sim (ver detalhe na secção ENVOLVENTES INTERIORES, mais abaixo)');
@@ -11488,9 +11501,9 @@ function buildTxt(){
       if(!comps.length) t+=`  (comprimentos de parede não medidos nesta divisão)\n`;
       comps.forEach(([orient,comp])=>{
         const trocos=(dd.trocos&&dd.trocos[orient])||[];
-        const vals=trocos.map(v=>parseFloat(v)||0).filter(v=>v>0);
+        const vals=trocos.map(v=>num(v)).filter(v=>v>0);
         const detalhe=vals.length>1?' ('+vals.map(v=>v+'m').join(' + ')+')':'';
-        const area=pdVal>0?(parseFloat(comp)||0)*pdVal:0;
+        const area=pdVal>0?num(comp)*pdVal:0;
         t+=`  ${orient}: ${comp}${detalhe}${area>0?' → '+_m2(area):''}\n`;
       });
     }
@@ -11499,7 +11512,7 @@ function buildTxt(){
   // ── ÁREAS DOS COMPARTIMENTOS (Apav) — se medidas com o laser ──
   const divsComArea=D.divisoes.filter(div=>{
     const dd=D.divisoesDados[div]||{};
-    return dd.areaRect&&dd.areaRect.some(r=>(parseFloat(r.c)||0)*(parseFloat(r.l)||0)>0);
+    return dd.areaRect&&dd.areaRect.some(r=>(num(r.c)||0)*(num(r.l)||0)>0);
   });
   if(divsComArea.length){
     t+=sep('ÁREAS DOS COMPARTIMENTOS (Apav)');
@@ -11508,15 +11521,15 @@ function buildTxt(){
     let apavTotal=0,volumeTotal=0;
     divsComArea.forEach(div=>{
       const dd=D.divisoesDados[div];
-      const rects=dd.areaRect.filter(r=>(parseFloat(r.c)||0)*(parseFloat(r.l)||0)>0);
+      const rects=dd.areaRect.filter(r=>(num(r.c)||0)*(num(r.l)||0)>0);
       /* O lado diz a FORMA, não só a área: «3,20×2,10 ↓» é um L com o segundo
          pedaço por baixo do primeiro. Sem isto, quem revê vê dois rectângulos
          e não sabe como encaixam. */
       const _seta={N:'↑',S:'↓',O:'←',E:'→'};
       const medStr=rects.map((r,i)=>
-        `${parseFloat(r.c).toFixed(2)}×${parseFloat(r.l).toFixed(2)}`+
+        `${num(r.c).toFixed(2)}×${num(r.l).toFixed(2)}`+
         (i>0&&_seta[r.lado]?' '+_seta[r.lado]:'')).join(' + ');
-      const area=rects.reduce((s,r)=>s+(parseFloat(r.c)||0)*(parseFloat(r.l)||0),0);
+      const area=rects.reduce((s,r)=>s+(num(r.c)||0)*(num(r.l)||0),0);
       apavTotal+=area;
       // BUG CORRIGIDO: o volume somava área total × um único pé-direito global —
       // numa moradia/prédio de vários pisos com pé-direito diferente por piso,
@@ -11617,7 +11630,7 @@ function buildTxt(){
     const piso3=dd3.piso||'R/C';
     if(!_orientRawPorPiso[piso3]) _orientRawPorPiso[piso3]={};
     Object.entries(dd3.trocos||{}).forEach(([orient,trocos])=>{
-      const vals=(trocos||[]).map(v=>parseFloat(v)||0).filter(v=>v>0);
+      const vals=(trocos||[]).map(v=>num(v)).filter(v=>v>0);
       if(vals.length){
         if(!_orientRawPorPiso[piso3][orient]) _orientRawPorPiso[piso3][orient]=[];
         _orientRawPorPiso[piso3][orient].push(...vals);
@@ -11983,7 +11996,7 @@ function buildTxt(){
     const dd3=D.divisoesDados[div]||{};
     const piso3=dd3.piso||'R/C';
     Object.entries(dd3.envIntTrocos||{}).forEach(([tipo,trocos])=>{
-      const vals=(trocos||[]).map(v=>parseFloat(v)||0).filter(v=>v>0);
+      const vals=(trocos||[]).map(v=>num(v)).filter(v=>v>0);
       if(vals.length){
         if(!_envIntRaw[tipo]) _envIntRaw[tipo]=[];
         _envIntRaw[tipo].push(...vals);
@@ -12389,7 +12402,7 @@ function buildTxt(){
     const dd=(D.divisoesDados||{})[div]||{};
     Object.entries(dd.vaosInt||{}).forEach(([tipo,lista])=>{
       (lista||[]).forEach(vi=>{
-        const larg=parseFloat(vi.larg)||0, alt=parseFloat(vi.alt)||0;
+        const larg=num(vi.larg), alt=num(vi.alt);
         if(!(larg>0&&alt>0)) return;
         let uwdn=vi.uwdn;
         if(uwdn===undefined||uwdn===null){
@@ -12630,8 +12643,8 @@ function buildTxt(){
   // ── Recolher dados para PTL ──
   const todosVaosPTL2=[];
   for(const div of D.divisoes)(D.divisoesDados[div]?.vaos||[]).forEach(ve=>todosVaosPTL2.push({div,ve}));
-  const ptl1=todosVaosPTL2.reduce((s,{ve})=>{const l=parseFloat(ve.larg)||0,a=parseFloat(ve.alt)||0;return s+(l+a)*2;},0);
-  const ptl3=todosVaosPTL2.filter(({ve})=>ve.caixEstore).reduce((s,{ve})=>s+(parseFloat(ve.larg)||0),0);
+  const ptl1=todosVaosPTL2.reduce((s,{ve})=>{const l=num(ve.larg)||0,a=num(ve.alt)||0;return s+(l+a)*2;},0);
+  const ptl3=todosVaosPTL2.filter(({ve})=>ve.caixEstore).reduce((s,{ve})=>s+(num(ve.larg)||0),0);
   const nEstore=todosVaosPTL2.filter(({ve})=>ve.caixEstore).length;
 
   // ── Ψ Tabela 34 — valores por defeito existentes (pág. 61 do Manual SCE) ──
@@ -12845,7 +12858,7 @@ function buildTxt(){
            assinala-se — melhor do que atribuir tudo a uma só. */
         // guardado para o cálculo dos ângulos, mais abaixo
       _pdParaAngulos=(()=>{
-        const vals=Object.values(D.peDireitos||{}).map(v=>parseFloat(v)||0).filter(v=>v>0);
+        const vals=Object.values(D.peDireitos||{}).map(v=>num(v)).filter(v=>v>0);
         return vals.length?vals.reduce((a,b)=>a+b,0)/vals.length:2.60;
       })();
       const _cobs=(D.coberturaTipos&&D.coberturaTipos.length)
@@ -12991,7 +13004,7 @@ function buildTxt(){
     // referência já são aproximados) — usa-se a MÉDIA de todos os pés-direitos
     // registados (não só o do primeiro piso), para não enviesar a estimativa
     // num prédio/moradia com pés-direitos diferentes por piso.
-    const pdRegistados=Object.values(D.peDireitos||{}).map(v=>parseFloat(v)||0).filter(v=>v>0);
+    const pdRegistados=Object.values(D.peDireitos||{}).map(v=>num(v)).filter(v=>v>0);
     const pdRegistado=pdRegistados.length?pdRegistados.reduce((a,b)=>a+b,0)/pdRegistados.length:0;
     const pdMed=pdRegistado||2.70;
     const Langulo=pdMed*nAngulos;
@@ -13525,8 +13538,8 @@ function gerarTextoAQS(){
   const rendChip=(D.aqsRendimento||'').toLowerCase();
   const isCondensacao=rendChip.includes('elevado')||rendChip.includes('condensa');
   let effKnownPct=null;
-  if(D.aqsRendimento&&!isNaN(parseFloat(D.aqsRendimento))){
-    const v=parseFloat(D.aqsRendimento);
+  if(D.aqsRendimento&&!isNaN(num(D.aqsRendimento))){
+    const v=num(D.aqsRendimento);
     effKnownPct=v>1?Math.round(v):Math.round(v*100); // aceita "86" ou "0.86"
   }
 
@@ -13600,7 +13613,7 @@ function gerarTextoAQS(){
   if(isBC){
     const deposito=capacidade?` com depósito de ${capacidade} litros`:'';
     if(effKnownPct!==null){
-      const cop=parseFloat(D.aqsRendimento);
+      const cop=num(D.aqsRendimento);
       return `Sistema do tipo bomba de calor${deposito}, a eletricidade, para preparação de águas quentes sanitárias, `+
         `marca ${marca}, modelo ${modelo}, composto por 1 unidade com eficiência (COP) de ${fmtNumPT(cop)}`+
         `${potencia?' e uma potência de '+potencia+' kW':''}, com base na informação da chapa/catálogo técnico do equipamento. `+
@@ -13744,21 +13757,21 @@ function resolverAreaDaPlanta(div){
 // que não fosse o primeiro, num prédio/moradia de vários pisos.
 function resolverPeDireitoPiso(div,pisoLabel){
   const pd=D.peDireitos||{};
-  if(pd[div]) return parseFloat(pd[div])||0;
-  if(pd[pisoLabel]) return parseFloat(pd[pisoLabel])||0;
+  if(pd[div]) return num(pd[div]);
+  if(pd[pisoLabel]) return num(pd[pisoLabel]);
   const pisosUsados=[...new Set((D.divisoes||[]).map(dv=>(D.divisoesDados[dv]||{}).piso||'R/C'))]
     .sort((a,b)=>{
       const ia=ORDEM_PISOS.indexOf(a),ib=ORDEM_PISOS.indexOf(b);
       return (ia<0?99:ia)-(ib<0?99:ib);
     });
   const idx=pisosUsados.indexOf(pisoLabel);
-  if(idx>=0&&pd[idx+1]) return parseFloat(pd[idx+1])||0;
+  if(idx>=0&&pd[idx+1]) return num(pd[idx+1]);
   /* RECURSOS, POR ESTA ORDEM — devolver 0 era o pior de todos.
      Com um pé-direito registado e as divisões marcadas noutro piso, a chave não
      casava e saía 0: TODA a área de parede exterior saía a zero, sem uma
      palavra, e a tabela do TXT vinha com traços. Agora usa-se o único que
      houver, ou a média dos registados, e só em último caso o valor corrente. */
-  const vals=Object.values(pd).map(v=>parseFloat(v)||0).filter(v=>v>0);
+  const vals=Object.values(pd).map(v=>num(v)).filter(v=>v>0);
   if(vals.length===1) return vals[0];
   if(vals.length>1) return +(vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(2);
   return 2.60;                      // pé-direito corrente, para não zerar áreas
@@ -13768,13 +13781,13 @@ function resolverAreaDivisaoGlobal(div){
   const dd=(D.divisoesDados||{})[div]||{};
   if(dd.areaRect&&dd.areaRect.length){
     const total=lista(dd.areaRect).reduce((s,r)=>{
-      const c=parseFloat(r.c)||0,l=parseFloat(r.l)||0;
+      const c=num(r.c)||0,l=num(r.l)||0;
       return s+c*l;
     },0);
     if(total>0) return total.toFixed(2);
   }
-  if(dd.areaUtil&&parseFloat(dd.areaUtil)>0) return parseFloat(dd.areaUtil).toFixed(2);
-  if(dd.area&&parseFloat(dd.area)>0) return parseFloat(dd.area).toFixed(2);
+  if(dd.areaUtil&&num(dd.areaUtil)>0) return num(dd.areaUtil).toFixed(2);
+  if(dd.area&&num(dd.area)>0) return num(dd.area).toFixed(2);
   const daPlanta=resolverAreaDaPlanta(div);
   if(daPlanta) return daPlanta;
   const comps=Object.values(dd.comprimentos||{}).map(v=>parseFloat(String(v).replace(',','.'))||0).filter(v=>v>0);
@@ -13815,7 +13828,7 @@ function gerarDescricaoSucinta(){
     if(D.areaUtilPlantaTotal>0) return D.areaUtilPlantaTotal;
     let total=0;
     for(const div of D.divisoes){
-      const area=parseFloat(resolverAreaDivisaoGlobal(div))||0;
+      const area=num(resolverAreaDivisaoGlobal(div))||0;
       total+=area;
     }
     return total;
@@ -14826,7 +14839,7 @@ function itecons_tsv(){
     0,
     (D.divisoes||[]).map(div=>{
       const dd=D.divisoesDados[div]||{};
-      let a=0; try{ a=resolverAreaDivisaoGlobal(div)||0; }catch(e){ a=parseFloat(dd.areaUtil||0)||0; }
+      let a=0; try{ a=resolverAreaDivisaoGlobal(div)||0; }catch(e){ a=num(dd.areaUtil)||0; }
       let pd=''; try{ pd=resolverPeDireitoPiso(div,dd.piso||'R/C')||''; }catch(e){}
       return [div,dd.piso||'',num(a),num(pd)];
     }));
@@ -15648,7 +15661,7 @@ function _progressoDivisao(div){
     if(/-comp$/.test(q.id)){
       if(dd2.semParedesExt||Object.keys(dd2.comprimentos||{}).length) feitas++;
     } else if(/-vaos$/.test(q.id)){
-      if((dd2.vaos||[]).some(v=>parseFloat(v.larg)>0)||dd2.nVaos===0) feitas++;
+      if((dd2.vaos||[]).some(v=>num(v.larg)>0)||dd2.nVaos===0) feitas++;
     } else if(/-clima$/.test(q.id)){
       if((((D.climaDivisoes||{})[div]||{}).tipos||[]).length) feitas++;
     } else if(answers&&answers[qList.indexOf(q)]!=null&&answers[qList.indexOf(q)]!=='') feitas++;
@@ -15664,7 +15677,7 @@ function _estadoDivisao(div){
   const nOri=Object.keys(dd2.comprimentos||{}).length;
   if(dd2.semParedesExt) partes.push('interior');
   else if(nOri) partes.push(nOri+(nOri!==1?' paredes':' parede'));
-  const nV=(dd2.vaos||[]).filter(v=>parseFloat(v.larg)>0).length;
+  const nV=(dd2.vaos||[]).filter(v=>num(v.larg)>0).length;
   if(nV) partes.push(nV+(nV!==1?' janelas':' janela'));
   const a=parseFloat(String(dd2.areaUtil||'').replace(',','.'));
   if(a>0) partes.push(a.toFixed(2).replace('.',',')+' m²');
@@ -15865,7 +15878,7 @@ function abrirMenuPerguntas(){
           :(n?n+(n!==1?' orientações':' orientação'):'por medir');
       } else if(/-vaos$/.test(q.id)){
         nome='Janelas';
-        const n=(dd2.vaos||[]).filter(v=>parseFloat(v.larg)>0).length;
+        const n=(dd2.vaos||[]).filter(v=>num(v.larg)>0).length;
         sub=n?n+(n!==1?' medidas':' medida'):'por responder';
       } else if(/-clima$/.test(q.id)){
         nome='Climatização';
@@ -16469,7 +16482,7 @@ function usarCompartimentosDaPlanta(){
     if(d.piso&&!dd.piso) dd.piso=d.piso;
     // a área da planta só entra se não houver medida no local
     const _medidoNoLocal=Object.values(dd.trocos||{}).some(v=>v&&String(v[0]||'').trim())||
-      (dd.areaRect||[]).some(r=>parseFloat(r.c)>0);
+      (dd.areaRect||[]).some(r=>num(r.c)>0);
     if(d.tipo==='util'&&!_medidoNoLocal&&!dd.areaUtil){
       dd.areaUtil=Number(d.area).toFixed(2);
       dd.areaOrigem='planta';
@@ -17136,8 +17149,8 @@ function abrirVistoriaFinal(sep){
           const m=(D.areasPlanta||[]).find(a=>a&&a.nome&&normalizarConcelho(a.nome)===alvo);
           if(m&&m.area>0) _daPlanta=m;
         }catch(e){}
-        if(dd.area&&parseFloat(dd.area)>0){
-          areaTxt=parseFloat(dd.area).toFixed(2).replace('.',',')+' m² (introduzida)';
+        if(dd.area&&num(dd.area)>0){
+          areaTxt=num(dd.area).toFixed(2).replace('.',',')+' m² (introduzida)';
         } else if(_daPlanta){
           areaTxt=_daPlanta.area.toFixed(2).replace('.',',')+' m² (da planta anexada)';
           if(_daPlanta.tipo==='bruta') faltas.push('área da planta é BRUTA — não conta como área útil');
@@ -20094,18 +20107,18 @@ function gerarEsbocoPlantaPDF(){
       let L,W,naoMedido=false;
       if(orientsKeys.length>=2){
         L=parseM(comps[orientsKeys[0]]);W=parseM(comps[orientsKeys[1]]);
-      }else if(dd.areaRect&&dd.areaRect.length===1&&parseFloat(dd.areaRect[0].c)>0&&parseFloat(dd.areaRect[0].l)>0){
+      }else if(dd.areaRect&&dd.areaRect.length===1&&num(dd.areaRect[0].c)>0&&num(dd.areaRect[0].l)>0){
         // um único retângulo medido (ex: Apav "1.70×2.20") — usa as dimensões reais,
         // não a área total com raiz quadrada (que dava um quadrado a fingir ser a sala)
-        L=parseFloat(dd.areaRect[0].c);W=parseFloat(dd.areaRect[0].l);
+        L=num(dd.areaRect[0].c);W=num(dd.areaRect[0].l);
       }else if(orientsKeys.length===1){
         L=parseM(comps[orientsKeys[0]]);
-        const area=parseFloat(resolverAreaDivisaoGlobal(div))||0;
+        const area=num(resolverAreaDivisaoGlobal(div))||0;
         W=(L>0&&area>0)?area/L:Math.sqrt(area||9);
       }else{
         // sem comprimentos nem áreas medidas (nenhuma fonte real) — não inventar 3×3m
         // em silêncio como acontecia antes; usa um placeholder pequeno e MARCA como tal.
-        const area=parseFloat(resolverAreaDivisaoGlobal(div))||0;
+        const area=num(resolverAreaDivisaoGlobal(div))||0;
         if(area>0){L=W=Math.sqrt(area);}
         else{L=W=2;naoMedido=true;}
       }
