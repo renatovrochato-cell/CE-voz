@@ -583,7 +583,7 @@ const DIVS_BASE=[
 // VERSÃO — fonte única (selo no ecrã inicial + cabeçalho do TXT exportado).
 // Subir aqui a cada alteração ao ficheiro.
 // ═══════════════════════════════════════
-const APP_VERSION='v2026.09.17-FIX302';
+const APP_VERSION='v2026.09.17-FIX303';
 
 /* ══════════════════════════════════════════════════════════════════
    A APP INSTALADA FICAVA PRESA NUMA VERSÃO ANTIGA
@@ -7318,6 +7318,54 @@ function verificarLevantamento(){
      Num levantamento real de um último piso, coberturaTipoEsc ficou por
      responder: a secção COBERTURA não saiu no TXT e o verificador não disse
      nada. Um elemento da envolvente que falta é uma lacuna, não uma opção. */
+  /* OS CAMPOS DE PISO TÊM DE TER VALORES QUE EXISTEM.
+     `pisoLocal` é uma CLASSIFICAÇÃO (1 cave, 2 intermédio, 3 último, 4 térreo),
+     não um número de andar — já foi confundido antes. Um valor fora dessa
+     escala faz `ehUltimoPiso()` dar falso e o fogo perde a cobertura sem que
+     nada o diga. E `nPisosEdificio` vindo da caderneta como texto («dez») dá
+     NaN em todas as regras que dependem dele. */
+  try{
+    if(D.edificioTipo==='Apartamento'){
+      const pl=String(D.pisoLocal||'').trim();
+      if(pl&&!['1','2','3','4'].includes(pl))
+        E('Identificação','Posição do fogo no edifício com valor inesperado («'+pl+'»). '+
+          'Só existem quatro: cave, piso intermédio, último piso e rés-do-chão. '+
+          'Um valor fora disto faz o fogo perder a cobertura no cálculo.');
+      const np=String(D.nPisosEdificio||'').trim();
+      if(np&&!(parseInt(np,10)>0))
+        E('Identificação','Número de pisos do edifício não é um número («'+np+'»). '+
+          'Entra nas regras de posição do fogo e de envolvente.');
+    }
+  }catch(e){}
+
+  /* AS MEDIDAS DE UM VÃO TÊM DE SER DE UM VÃO.
+     Um vão de 194 × 200 m — os centímetros outra vez, ou um dedo no teclado —
+     passava sem uma palavra e entrava no cálculo com 38 800 m² de área
+     envidraçada. Um vão com medida a zero ou negativa também passava, e conta
+     zero: é o mesmo que não existir, mas aparece nos quadros como se existisse.
+     Numa habitação, um vão tem entre 0,20 m e 6 m de lado. */
+  try{
+    lista(D.divisoes).forEach(dv=>{
+      const dd2=obj(obj(D.divisoesDados)[dv]);
+      const ver=(v,onde)=>{
+        const l=parseFloat(String(v.larg||'').replace(',','.').replace(/[^\d.-]/g,''));
+        const a=parseFloat(String(v.alt||'').replace(',','.').replace(/[^\d.-]/g,''));
+        const id=(v.id||'vão')+(onde?' ('+onde+')':'');
+        const dim=(v.larg||'—')+' × '+(v.alt||'—');
+        if((v.larg||v.alt)&&(!(l>0)||!(a>0)))
+          E('Vãos',dv+', '+id+': medida inválida ('+dim+'). Um vão com lado zero '+
+            'ou negativo conta zero no cálculo, mas continua a aparecer nos quadros.');
+        else if(l>6||a>6)
+          E('Vãos',dv+', '+id+': '+dim+' m — numa habitação não há vãos destes. '+
+            'Provavelmente a medida está em cm (seria '+
+            (l>6?(l/100).toFixed(2).replace('.',','):l.toFixed(2).replace('.',','))+' × '+
+            (a>6?(a/100).toFixed(2).replace('.',','):a.toFixed(2).replace('.',','))+' m).');
+      };
+      lista(dd2.vaos).forEach(v=>ver(v,''));
+      Object.entries(obj(dd2.vaosInt)).forEach(([t2,arr])=>lista(arr).forEach(v=>ver(v,'para '+t2)));
+    });
+  }catch(e){}
+
   /* O ANO DE CONSTRUÇÃO TEM DE SER UM ANO POSSÍVEL.
      Entra em quase tudo: a fronteira de 1990 do isolamento, o F_age dos
      equipamentos, os valores por defeito das paredes. Um erro de dedo — 2925
@@ -8109,9 +8157,12 @@ function buildSum(){
         cardH+=`<div class="sum-row" style="border-top:1px solid var(--br);margin-top:3px;padding-top:4px"><span class="sum-k" style="font-weight:700;color:var(--ac)">Vãos por orientação</span></div>`;
         let totalVaosArea=0;
         Object.entries(veByOrient).forEach(([orient,ves])=>{
-          const areaTotal=ves.reduce((s,ve)=>{
-            const l=parseFloat(ve.larg)||0;const a=parseFloat(ve.alt)||0;return s+l*a;
-          },0);
+          /* UMA VÍRGULA DECIMAL DAVA UMA ÁREA ERRADA, EM SILÊNCIO.
+             O teclado decimal português escreve vírgula: `parseFloat('1,94')`
+             devolve 1. Um vão de 1,94 × 1,99 entrava neste resumo como 1 m² em
+             vez de 3,86 — e é este o quadro que se lê antes de exportar.
+             A areaVao() já faz a conversão certa; usa-se essa. */
+          const areaTotal=ves.reduce((s,ve)=>s+areaVao(ve),0);
           totalVaosArea+=areaTotal;
           cardH+=`<div class="sum-row"><span class="sum-k" style="color:var(--tx2)">${orient} (${ves.length} vão${ves.length>1?'s':''})</span><span class="sum-v"><strong>${areaTotal.toFixed(2)}m²</strong></span></div>`;
           ves.forEach(ve=>{
@@ -8193,8 +8244,7 @@ function buildSum(){
           <span>J</span><span>VE</span><span>Divisão</span><span style="text-align:right">Área</span><span style="text-align:right">Orient.</span><span style="text-align:right">Uw</span></div>`;
         let totVF=0;
         todosVaos.forEach(({n,div,ve},idx)=>{
-          const l=parseFloat(ve.larg)||0;const a2=parseFloat(ve.alt)||0;
-          const area=l*a2;totVF+=area;
+          const area=areaVao(ve);totVF+=area;   // vírgula decimal: ver nota acima
           const r=calcUw(ve);
           const valStr=(r&&r.uwdn!==null)?r.uwdn.toFixed(2).replace('.',',')+' Uwdn':(r&&r.uw!==null?r.uw.toFixed(2).replace('.',',')+' Uw':'—');
           h+=`<div style="display:grid;grid-template-columns:auto auto 1fr auto auto auto;gap:6px;padding:5px 10px;border-bottom:1px solid var(--bg3);align-items:center;font-size:12px">
@@ -8236,10 +8286,11 @@ function buildSum(){
         }
 
         // ── PTL 1: Fachada com caixilharia — sempre presente ──
-        const ptl1=todosVaosPTL.reduce((s,{ve})=>{
-          const l=parseFloat(ve.larg)||0;const a=parseFloat(ve.alt)||0;
-          return s+(l+a)*2;
-        },0);
+        /* O perímetro dos vãos — a PTL «fachada com caixilharia». Mesma
+           armadilha da vírgula decimal: com parseFloat directo, um vão de
+           1,94 × 1,99 dava 8 m de perímetro em vez de 15,72. */
+        const _m=x=>parseFloat(String(x||'').replace(',','.').replace(/[^\d.]/g,''))||0;
+        const ptl1=todosVaosPTL.reduce((s,{ve})=>s+(_m(ve.larg)+_m(ve.alt))*2,0);
         const rowStyle='display:grid;grid-template-columns:1fr auto;gap:8px;padding:7px 13px;border-bottom:1px solid var(--bg3)';
         h+=`<div style="${rowStyle}">
           <span style="font-size:13px;color:var(--tx)">Fachada com caixilharia</span>
