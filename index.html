@@ -583,7 +583,7 @@ const DIVS_BASE=[
 // VERSÃO — fonte única (selo no ecrã inicial + cabeçalho do TXT exportado).
 // Subir aqui a cada alteração ao ficheiro.
 // ═══════════════════════════════════════
-const APP_VERSION='v2026.09.17-FIX304';
+const APP_VERSION='v2026.09.21-FIX307';
 
 /* ══════════════════════════════════════════════════════════════════
    A APP INSTALADA FICAVA PRESA NUMA VERSÃO ANTIGA
@@ -625,8 +625,19 @@ const APP_VERSION='v2026.09.17-FIX304';
       const nomes=await caches.keys();
       for(const n of nomes){ try{ await caches.delete(n); }catch(e){} }
     }
-    if(regs.length&&tinhaControlo&&!sessionStorage.getItem('ce_sw_limpo')){
-      sessionStorage.setItem('ce_sw_limpo','1');
+    /* A MARCA TEM DE SOBREVIVER AO FECHO DA APP.
+       Estava em sessionStorage, que é apagado quando o separador fecha. De cada
+       vez que se fechava a app e voltava a abrir, não havia marca, o service
+       worker era limpo outra vez e a página RECARREGAVA — voltando ao ecrã
+       inicial. Parecia acontecer «algumas vezes»; acontecia sempre que se
+       fechava e reabria. */
+    let jaLimpo=false;
+    try{ jaLimpo=!!localStorage.getItem('ce_sw_limpo'); }catch(e){
+      try{ jaLimpo=!!sessionStorage.getItem('ce_sw_limpo'); }catch(e2){}
+    }
+    if(regs.length&&tinhaControlo&&!jaLimpo){
+      try{ localStorage.setItem('ce_sw_limpo','1'); }
+      catch(e){ try{ sessionStorage.setItem('ce_sw_limpo','1'); }catch(e2){} }
       _recarregarApp();
     }
   }catch(e){}
@@ -1689,13 +1700,82 @@ function renderClimaDiv(div){
     // campo outra marca
     const oi=document.createElement('input');oi.className='aqs-inp';oi.type='text';oi.placeholder='Outra marca…';oi.style.marginTop='5px';
     oi.oninput=()=>{const v=oi.value.trim();if(v&&!cd.marcasPorTipo[tipo].includes(v)) cd.marcasPorTipo[tipo].push(v);};
+    // botão ler etiqueta para este sistema
+    const etqBtnId='etq-status-'+div+'-'+tipo.replace(/\s/g,'_');
+    const etqBtn=document.createElement('button');
+    etqBtn.textContent='🔍 Ler etiqueta — '+tipo;
+    etqBtn.style.cssText='border:1px dashed var(--ac);border-radius:8px;background:none;color:var(--ac);font-size:12px;padding:7px 12px;cursor:pointer;width:100%;margin-top:6px';
+    etqBtn.onclick=(e)=>{e.preventDefault();lerEtiquetaEquipamento(div, etqBtnId, tipo);};
+    /* FOTO DA UNIDADE INTERIOR, SEM LEITURA.
+       A etiqueta tem marca, modelo e potências — vale a pena ler. A unidade
+       interior em si não tem nada que se leia: o que interessa é o registo
+       visual de que está ali, onde está e como está instalada, para quem revê
+       o processo no escritório. Mandá-la ao OCR era pagar uma leitura para
+       receber campos vazios. */
+    const fotoBtn=document.createElement('button');
+    fotoBtn.type='button';
+    fotoBtn.textContent='📷 Foto da unidade interior — '+tipo;
+    fotoBtn.style.cssText='border:1px dashed var(--tx2);border-radius:8px;background:none;color:var(--tx2);'+
+      'font-size:12px;padding:7px 10px;margin-top:6px;cursor:pointer;width:100%;text-align:left';
+    fotoBtn.onclick=(e)=>{e.preventDefault();fotografarSemLeitura('unidade interior '+tipo+' — '+div,div);};
+    /* ETIQUETA ANEXADA SEM LEITURA.
+       O «Ler etiqueta» manda a foto à IA e gasta tokens. Quando não compensa
+       (chapa ilegível, muitos equipamentos iguais, lê-se depois no escritório)
+       a foto da etiqueta fica guardada como as outras etiquetas — mesmo nome
+       de ficheiro no ZIP, mesma galeria — mas sem leitura. Câmara ou galeria. */
+    const anxBtn=document.createElement('button');
+    anxBtn.type='button';
+    anxBtn.textContent='📎 Anexar foto da etiqueta, sem leitura — '+tipo;
+    anxBtn.style.cssText='border:1px dashed var(--ac);border-radius:8px;background:none;color:var(--ac);'+
+      'font-size:12px;padding:7px 10px;margin-top:6px;cursor:pointer;width:100%;text-align:left;opacity:.85';
+    anxBtn.onclick=(e)=>{e.preventDefault();anexarEtiquetaSemLeitura(div,tipo,etqBtnId);};
+    mg.appendChild(ml);mg.appendChild(mrow);mg.appendChild(oi);mg.appendChild(etqBtn);mg.appendChild(anxBtn);mg.appendChild(fotoBtn);
+    // estado + miniatura — criados SEMPRE aqui (não só ao clicar), para sobreviverem
+    // ao redesenho do formulário depois de uma leitura de etiqueta bem-sucedida
+    const stEl=document.createElement('div');stEl.id=etqBtnId;stEl.style.cssText='font-size:11px;margin-top:4px;display:none';
+    mg.appendChild(stEl);
+    const thumbId='etq-thumb-'+div+'-'+tipo.replace(/\s/g,'_');
+    const thumbEl=document.createElement('img');thumbEl.id=thumbId;
+    thumbEl.style.cssText='width:100%;max-height:140px;object-fit:contain;border-radius:8px;border:1px solid var(--br);margin-top:6px;display:none';
+    mg.appendChild(thumbEl);
+    const existente=(cd.dadosOCRPorTipo||{})[tipo];
+    if(existente){
+      const resumoExistente=formatarResumoEtiqueta(existente);
+      stEl.style.display='block';stEl.style.color='var(--ac)';stEl.textContent='✅ '+resumoExistente;
+      // repor a foto já guardada para este sistema (a mais recente correspondente)
+      const fotoGuardada=[...(D.fotoEtiquetas||[])].reverse().find(f=>f.div===div&&f.tipo===tipo);
+      if(fotoGuardada){
+        resolverFotoURL(fotoGuardada).then(url=>{if(url){thumbEl.src=url;thumbEl.style.display='block';}}).catch(()=>{});
+      }
+    } else {
+      // sem leitura, mas com etiqueta anexada: mostrar que está lá e por ler
+      const semLer=(D.fotoEtiquetas||[]).filter(f=>f&&f.div===div&&f.tipo===tipo&&f.semLeitura);
+      if(semLer.length){
+        stEl.style.display='block';stEl.style.color='var(--ac)';
+        stEl.textContent='📎 '+(semLer.length>1?semLer.length+' etiquetas anexadas':'Etiqueta anexada')+
+          ' sem leitura — marca e modelo à mão, ou lê no escritório';
+        resolverFotoURL(semLer[semLer.length-1]).then(url=>{if(url){thumbEl.src=url;thumbEl.style.display='block';}}).catch(()=>{});
+      }
+    }
+    form.appendChild(mg);
+  });
+
+  // sistemas sem marca — label informativo + foto da lareira/recuperador
+  if(tiposSemMarca.length){
+    const sg=document.createElement('div');sg.className='aqs-group';
+    const sl=document.createElement('div');sl.className='aqs-lbl';sl.textContent='Sem marca comercial';
+    const sv=document.createElement('div');sv.style.cssText='font-size:12px;color:var(--tx2);margin-top:2px';
+    sv.textContent=tiposSemMarca.join(', ');
+    sg.appendChild(sl);sg.appendChild(sv);
     /* LAREIRA ABERTA OU RECUPERADOR — ESCOLHE-SE, JÁ NÃO SE FOTOGRAFA.
        Isto vinha do reconhecimento da foto, que foi retirado. A distinção
        importa: uma lareira aberta e um recuperador fechado não têm o mesmo
        rendimento por defeito (Tabela 76), e descrever tudo como recuperador é
        favorável ao edifício sem corresponder ao que lá está. Quem está à
-       frente da lareira responde em dois toques. */
-    if(/lareira|recuperador/i.test(tipo)){
+       frente da lareira responde em dois toques.
+       Esteve dentro do ciclo dos sistemas COM marca, onde a lareira nunca
+       entra: a pergunta não aparecia e o texto saía sempre «recuperador». */
+    if(tiposSemMarca.some(t=>/lareira|recuperador/i.test(t||''))){
       const lg=document.createElement('div');
       lg.style.cssText='margin-top:8px';
       const ll=document.createElement('div');
@@ -1715,59 +1795,14 @@ function renderClimaDiv(div){
         c.textContent=rot;
         c.onclick=(e)=>{ e.preventDefault();
           D.lareiraTipo[div]=(D.lareiraTipo[div]===val?'':val);
-          autoSave(); renderClimaDivInline(div,wrap); };
+          autoSave(); renderClimaDiv(div); };
+          /* chamava renderClimaDivInline, que não existe: gravava o tipo de
+             lareira mas rebentava antes de redesenhar e o chip não acendia */
         lrow.appendChild(c);
       });
       lg.appendChild(lrow);
-      mg.appendChild(lg);
+      sg.appendChild(lg);
     }
-    // botão ler etiqueta para este sistema
-    const etqBtnId='etq-status-'+div+'-'+tipo.replace(/\s/g,'_');
-    const etqBtn=document.createElement('button');
-    etqBtn.textContent='🔍 Ler etiqueta — '+tipo;
-    etqBtn.style.cssText='border:1px dashed var(--ac);border-radius:8px;background:none;color:var(--ac);font-size:12px;padding:7px 12px;cursor:pointer;width:100%;margin-top:6px';
-    etqBtn.onclick=(e)=>{e.preventDefault();lerEtiquetaEquipamento(div, etqBtnId, tipo);};
-    /* FOTO DA UNIDADE INTERIOR, SEM LEITURA.
-       A etiqueta tem marca, modelo e potências — vale a pena ler. A unidade
-       interior em si não tem nada que se leia: o que interessa é o registo
-       visual de que está ali, onde está e como está instalada, para quem revê
-       o processo no escritório. Mandá-la ao OCR era pagar uma leitura para
-       receber campos vazios. */
-    const fotoBtn=document.createElement('button');
-    fotoBtn.type='button';
-    fotoBtn.textContent='📷 Foto da unidade interior — '+tipo;
-    fotoBtn.style.cssText='border:1px dashed var(--tx2);border-radius:8px;background:none;color:var(--tx2);'+
-      'font-size:12px;padding:7px 10px;margin-top:6px;cursor:pointer;width:100%;text-align:left';
-    fotoBtn.onclick=(e)=>{e.preventDefault();fotografarSemLeitura('unidade interior '+tipo+' — '+div,div);};
-    mg.appendChild(ml);mg.appendChild(mrow);mg.appendChild(oi);mg.appendChild(etqBtn);mg.appendChild(fotoBtn);
-    // estado + miniatura — criados SEMPRE aqui (não só ao clicar), para sobreviverem
-    // ao redesenho do formulário depois de uma leitura de etiqueta bem-sucedida
-    const stEl=document.createElement('div');stEl.id=etqBtnId;stEl.style.cssText='font-size:11px;margin-top:4px;display:none';
-    mg.appendChild(stEl);
-    const thumbId='etq-thumb-'+div+'-'+tipo.replace(/\s/g,'_');
-    const thumbEl=document.createElement('img');thumbEl.id=thumbId;
-    thumbEl.style.cssText='width:100%;max-height:140px;object-fit:contain;border-radius:8px;border:1px solid var(--br);margin-top:6px;display:none';
-    mg.appendChild(thumbEl);
-    const existente=(cd.dadosOCRPorTipo||{})[tipo];
-    if(existente){
-      const resumoExistente=formatarResumoEtiqueta(existente);
-      stEl.style.display='block';stEl.style.color='var(--ac)';stEl.textContent='✅ '+resumoExistente;
-      // repor a foto já guardada para este sistema (a mais recente correspondente)
-      const fotoGuardada=[...(D.fotoEtiquetas||[])].reverse().find(f=>f.div===div&&f.tipo===tipo);
-      if(fotoGuardada){
-        resolverFotoURL(fotoGuardada).then(url=>{if(url){thumbEl.src=url;thumbEl.style.display='block';}}).catch(()=>{});
-      }
-    }
-    form.appendChild(mg);
-  });
-
-  // sistemas sem marca — label informativo + foto da lareira/recuperador
-  if(tiposSemMarca.length){
-    const sg=document.createElement('div');sg.className='aqs-group';
-    const sl=document.createElement('div');sl.className='aqs-lbl';sl.textContent='Sem marca comercial';
-    const sv=document.createElement('div');sv.style.cssText='font-size:12px;color:var(--tx2);margin-top:2px';
-    sv.textContent=tiposSemMarca.join(', ');
-    sg.appendChild(sl);sg.appendChild(sv);
     // foto da lareira: é o único sistema sem marca que precisa de registo visual
     if(tiposSemMarca.some(t=>(t||'').toLowerCase().includes('lareira'))){
       sg.appendChild(botaoFotoCampo(`lareira-${div}`,'📷 Foto da lareira/recuperador (frontal ou chapa)'));
@@ -4183,7 +4218,16 @@ function renderVaosInline(div,n){
       protInt:pv.protInt||(_ehWC?'Sem proteção interior':''),
       caixCor:pv.caixCor||'Cor clara',
       abertura:pv.abertura||(_ehWC?'Basculante':'De correr'),
-      caixEstore:pv.caixEstore||false,corteTerm:pv.corteTerm||false,
+      /* A CAIXA DE ESTORE NÃO SE PROPAGA SOZINHA.
+         O perfil do primeiro vão passa a caixilharia aos vãos seguintes — cor,
+         material, tipo — e levava com ele a caixa de estore. Num caso real, o
+         primeiro vão tinha persiana com caixa e os dois seguintes nasceram com
+         `caixEstore` ligado apesar de não terem protecção nenhuma: a PTL «zona
+         da caixa de estore» saiu com 4 vãos em vez de 2.
+         Uma caixa de estore é uma coisa que se vê na parede, vão a vão. Só se
+         herda quando o vão também herda a protecção que lá vive dentro. */
+      caixEstore:(pv.caixEstore&&pv.prot&&!/sem prote/i.test(pv.prot||''))||false,
+      corteTerm:pv.corteTerm||false,
       caixMat:pv.caixMat||'Alumínio',caixAr:6,
       portadaPermeab:pv.portadaPermeab||'',
       sombAquec:pv.sombAquec||'Sem sombreamento',
@@ -5048,9 +5092,29 @@ function divisoesComOrdemEscolhida(){
      divisões inventadas e as reais desapareciam.
      É esta a causa da ordem trocada que já apareceu três vezes. */
   const resp=getAns('divisoes');
-  const base=(String(resp||'').trim())
-    ? parseDivs(resp)
-    : ((D.divisoes||[]).length ? D.divisoes.slice() : parseDivs(''));
+  /* UMA DIVISÃO ACRESCENTADA A MEIO DO LEVANTAMENTO DESAPARECIA.
+     A base vinha sempre dos chips da pergunta «Quais as divisões a levantar?»,
+     e esses chips não sabem nada de uma divisão acrescentada depois. Esta
+     função é chamada sempre que as perguntas se re-expandem e reescreve
+     D.divisoes — a divisão nova saía da lista e os dados dela ficavam órfãos em
+     divisoesDados: não apareciam no TXT, nem na revisão, nem na planta, e a
+     área desaparecia do total. Num levantamento real (Rua do M.F.A) foi uma
+     despensa com 1,40 m², parede para a circulação comum e uma foto.
+     Regra: quando a lista viva contém TUDO o que os chips geram, é ela que
+     manda — é a mesma lista mais o que foi acrescentado à mão. Se os chips
+     trouxerem algo que a lista não tem, foi a resposta que mudou e são eles que
+     mandam, como antes. Assim uma divisão acrescentada sobrevive, uma divisão
+     apagada não ressuscita (apagar limpa a lista e a resposta), e nomes
+     desalinhados não geram duplicados. */
+  const _dosChips=(String(resp||'').trim())?parseDivs(resp):null;
+  const _viva=Array.isArray(D.divisoes)?D.divisoes.filter(Boolean):[];
+  let base;
+  if(_dosChips){
+    const vivaTemTudo=_viva.length&&_dosChips.every(d=>_viva.includes(d));
+    base=vivaTemTudo?_viva.slice():_dosChips;
+  } else {
+    base=_viva.length?_viva.slice():parseDivs('');
+  }
   // sem ordem escolhida, propõe-se a ordem de percurso corrente
   /* A sugestão só entra quando NÃO há ordem nenhuma — nem a resposta à
      pergunta, nem a gravada. Olhar só a D.ordemDivisoes deixava de fora quem
@@ -7331,6 +7395,51 @@ function verificarLevantamento(){
      Num levantamento real de um último piso, coberturaTipoEsc ficou por
      responder: a secção COBERTURA não saiu no TXT e o verificador não disse
      nada. Um elemento da envolvente que falta é uma lacuna, não uma opção. */
+  /* CAIXA DE ESTORE SEM PROTECÇÃO EXTERIOR.
+     A caixa é o caixote onde a persiana se enrola: sem persiana, sem portada,
+     sem nada, não há caixa nenhuma. Quando os dois campos se contradizem, a
+     PTL «zona da caixa de estore» conta vãos a mais e a ponte térmica sai
+     inflada — aconteceu num certificado real, com 4 vãos contados onde havia
+     2.
+     Pode ser legítimo (caixa vazia de uma persiana retirada), por isso
+     pergunta-se em vez de decidir. */
+  try{
+    lista(D.divisoes).forEach(dv=>{
+      const dd2=obj(obj(D.divisoesDados)[dv]);
+      lista(dd2.vaos).forEach(v=>{
+        const semProt=!v.prot||/sem prote/i.test(String(v.prot));
+        if(v.caixEstore&&semProt)
+          A('Vãos',dv+', '+(v.id||'vão')+': tem caixa de estore marcada mas '+
+            (v.prot?'«'+v.prot+'»':'nenhuma proteção exterior')+'. '+
+            'Sem persiana não há caixa — e a caixa entra na PTL «zona da caixa de '+
+            'estore», que fica inflada. Confirma no local: ou tem persiana, ou a '+
+            'caixa não existe.');
+      });
+    });
+  }catch(e){}
+
+  /* DIVISÃO COM DADOS MAS FORA DA LISTA — ÓRFÃ.
+     Acontecia quando se acrescentava uma divisão a meio do levantamento: os
+     dados ficavam gravados e o nome saía da lista. A divisão não aparecia no
+     TXT, nem na revisão, nem na planta, e a área dela não entrava no total.
+     Corrigido na origem, mas os levantamentos já feitos têm de ser avisados —
+     e a área em falta é dado de certificado. */
+  try{
+    const naLista=new Set(lista(D.divisoes));
+    Object.entries(obj(D.divisoesDados)).forEach(([nome,dd2])=>{
+      if(naLista.has(nome)) return;
+      const d2=obj(dd2);
+      const temDados=num(d2.areaUtil)>0||lista(d2.areaRect).length||
+        lista(d2.fotos).length||Object.keys(obj(d2.envInt)).length||
+        Object.keys(obj(d2.comprimentos)).length;
+      if(!temDados) return;
+      const a=num(d2.areaUtil);
+      E('Divisões','«'+nome+'» tem dados levantados mas não está na lista de divisões'+
+        (a>0?' — '+a.toFixed(2).replace('.',',')+' m² que não entram na área útil':'')+
+        '. Acrescenta-a outra vez na pergunta das divisões, ou os dados perdem-se.');
+    });
+  }catch(e){}
+
   /* OS CAMPOS DE PISO TÊM DE TER VALORES QUE EXISTEM.
      `pisoLocal` é uma CLASSIFICAÇÃO (1 cave, 2 intermédio, 3 último, 4 térreo),
      não um número de andar — já foi confundido antes. Um valor fora dessa
@@ -13012,7 +13121,17 @@ function buildTxt(){
   }
 
   // 5. Zona caixa de estore
-  if(nEstore>0) ptlRows.push({tipo:`Zona caixa de estore (${nEstore} vão${nEstore!==1?'s':''})`,L:ptl3,psi:PSI.estore});
+  /* DIZER QUAIS SÃO OS VÃOS, NÃO SÓ QUANTOS.
+     A linha dizia «(4 vãos) 3,93 m» e mais nada. Quem transcreve para o modelo
+     de cálculo não conseguia confirmar de onde vinha o número, e num caso real
+     bloqueou por não saber que vãos eram: a conta estava certa, faltava a
+     prova. Com os nomes ao lado, confere-se de relance. */
+  if(nEstore>0){
+    const _quais=todosVaosPTL2.filter(({ve})=>ve.caixEstore)
+      .map(({div,ve})=>div+' '+(ve.id||'')+(num(ve.larg)>0?' '+num(ve.larg).toFixed(2).replace('.',',')+'m':''));
+    ptlRows.push({tipo:`Zona caixa de estore (${nEstore} vão${nEstore!==1?'s':''}`+
+      (_quais.length?`: ${_quais.join(', ')}`:'')+`)`,L:ptl3,psi:PSI.estore});
+  }
 
   ptlRows.forEach(r=>{
     t+=`${r.tipo.padEnd(40)} ${r.L.toFixed(2)} m\n`;
@@ -15104,6 +15223,11 @@ function chavesFotosReferenciadas(){
       Object.values(d.fotosCampos||{}).forEach(v=>fotosDoCampo(v).forEach(f=>referenciadas.add(f.idbKey)));
       Object.values(d.divisoesDados||{}).forEach(dd=>(dd.fotos||[]).forEach(f=>f&&f.idbKey&&referenciadas.add(f.idbKey)));
       if(d.obsAudioKey) referenciadas.add(d.obsAudioKey);
+      /* A PLANTA ANEXADA TAMBÉM PERTENCE À RECOLHA.
+         Faltava nesta lista: a limpeza de órfãs varria o IndexedDB, não
+         encontrava a chave da planta em lado nenhum e apagava-a. Ao reabrir o
+         processo o painel voltava vazio e havia que carregar o PDF outra vez. */
+      if(d.plantaChave) referenciadas.add(d.plantaChave);
     }catch(e){/* recolha corrompida/ilegível — ignora, não entra nas referenciadas */}
   });
   return referenciadas;
@@ -17711,6 +17835,33 @@ async function fotografarSemLeitura(legenda,div){
       mostrarToastLaser('📷 Foto guardada: '+(legenda||'foto')+' — vai no pacote, sem leitura automática.',4000);
       try{ renderQ(); }catch(e){}
     }catch(e){ alert('Não consegui guardar a foto: '+(e.message||e)); }
+  };
+  input.click();
+}
+/* Foto da etiqueta de um equipamento de climatização, guardada sem OCR.
+   Sem capture: o Android oferece câmara ou galeria. Perfil «precisa» para as
+   letras miúdas da chapa se lerem no escritório. */
+function anexarEtiquetaSemLeitura(div,tipo,statusElId){
+  const input=document.createElement('input');
+  input.type='file'; input.accept='image/*'; input.multiple=true;
+  input.onchange=async()=>{
+    const files=Array.from(input.files||[]); if(!files.length) return;
+    let n=0;
+    for(const f of files){
+      try{
+        const dataURL=await fotoParaGuardar(f,'precisa');
+        const idbKey=novaFotoKey('etq');
+        await fotoDbSet(idbKey,dataURL);
+        if(!Array.isArray(D.fotoEtiquetas)) D.fotoEtiquetas=[];
+        D.fotoEtiquetas.push({nome:f.name,idbKey,div:div||'',tipo:tipo||null,
+          semLeitura:true,ts:new Date().toLocaleString('pt-PT')});
+        n++;
+      }catch(e){ alert('Não consegui guardar a foto «'+f.name+'»: '+(e.message||e)); }
+    }
+    if(!n) return;
+    try{ autoSave(); }catch(e){}
+    mostrarToastLaser('📎 '+(n>1?n+' etiquetas anexadas':'Etiqueta anexada')+' — '+tipo+', '+div+'. Sem leitura, sem tokens.',4000);
+    try{ renderClimaDiv(div); }catch(e){ try{ renderQ(); }catch(e2){} }
   };
   input.click();
 }
@@ -21692,7 +21843,12 @@ let _vpPaginas=[], _vpPag=0, _vpZoom=1, _vpRot=0, _vpNorte=null, _vpArrasto=null
 async function visPlantaGuardar(){
   try{
     if(!_vpPaginas.length){ D.plantaChave=null; try{ autoSave(); }catch(e){} return; }
-    const chave='planta:'+(D.nome||'sem_nome').replace(/[^a-zA-Z0-9]/g,'_').toLowerCase();
+    /* A CHAVE TEM DE SER ÚNICA POR PROCESSO.
+       Tinha regras próprias de limpeza do nome: «Lote 6 A» e «Lote 6-A» davam a
+       MESMA chave e os dois processos passavam a partilhar a planta — o segundo
+       abria com a do primeiro, ou apagava-a. O nome sozinho não chega; junta-se
+       o identificador da sessão, que é único. */
+    const chave='planta:'+recolhaKey(D.nome)+(D._sessao?':'+D._sessao:'');
     await fotoDbSet(chave,JSON.stringify(_vpPaginas));
     D.plantaChave=chave;
     D.plantaNPaginas=_vpPaginas.length;
@@ -21703,7 +21859,16 @@ async function visPlantaGuardar(){
 async function visPlantaRestaurar(){
   try{
     if(_vpPaginas.length||!D.plantaChave) return false;
-    const raw=await fotoDbGet(D.plantaChave);
+    let raw=await fotoDbGet(D.plantaChave);
+    /* Plantas guardadas antes de a chave levar a sessão: tenta-se a chave
+       antiga. Sem isto, quem já tinha plantas guardadas perdia-as ao actualizar. */
+    if(!raw){
+      for(const antiga of ['planta:'+recolhaKey(D.nome),
+                           'planta:'+(D.nome||'sem_nome').replace(/[^a-zA-Z0-9]/g,'_').toLowerCase()]){
+        try{ raw=await fotoDbGet(antiga); }catch(e){}
+        if(raw){ D.plantaChave=antiga; break; }
+      }
+    }
     if(!raw) return false;
     const pgs=JSON.parse(raw);
     if(!Array.isArray(pgs)||!pgs.length) return false;

@@ -598,7 +598,7 @@ Ver tudo</button>
   window.addEventListener('online',aviso);
 })();
 "use strict";
-const PLANTA_VERSAO='v1.73.0 (2026-09-17)';
+const PLANTA_VERSAO='v1.74.0 (2026-09-18)';
 /* ══════════════════════════════════════════════════════════════════
    CE Voz · motor de planta interativa
    Fonte de verdade: o levantamento (D). A planta é uma camada de
@@ -3504,23 +3504,123 @@ function relatorio(){
   t+='Planta interativa '+PLANTA_VERSAO+'\n';
   t+='='.repeat(78)+'\n\n';
 
+  /* ÁREAS ÚTEIS TODAS DE SEGUIDA.
+     Estavam espalhadas, uma por divisão, ao longo de páginas. Para conferir
+     contra a caderneta é preciso vê-las juntas — e a soma tem de bater com o
+     total, que é o que se escreve no certificado. */
+  const _divs=divisoes();
+  const _areaDes=n=>L.blocos.filter(x=>x.div===n).reduce((s,x)=>s+areaBloco(x),0);
+  const _areaLev=n=>parseM(dadosDiv(n).areaUtil)||0;
+  t+='ÁREAS ÚTEIS\n';
+  t+='  '+L1('Divisão',20)+L1('Planta',12)+L1('Levantamento',14)+'Difere\n';
+  t+='  '+'-'.repeat(54)+'\n';
+  let _sdes=0,_slev=0;
+  _divs.forEach(n=>{
+    const ad=_areaDes(n), al=_areaLev(n);
+    _sdes+=ad; _slev+=al;
+    const dif=al>0?ad-al:0;
+    t+='  '+L1(n,20)+L1(fmt(ad)+' m²',12)+L1(al>0?fmt(al)+' m²':'—',14)+
+       (al>0&&Math.abs(dif)>0.05?(dif>0?'+':'')+fmt(dif)+' m²':'')+'\n';
+  });
+  t+='  '+'-'.repeat(54)+'\n';
+  /* A soma faz-se com os valores EXACTOS e arredonda-se no fim. Somar os
+     valores já arredondados dava um cêntimo a mais ou a menos do que o total
+     — apareceu num relatório real: 45,82 nas divisões e 45,81 no total. */
+  t+='  '+L1('TOTAL',20)+L1(fmt(_sdes)+' m²',12)+L1(_slev>0?fmt(_slev)+' m²':'—',14)+'\n';
+  /* O total é a soma dos valores EXACTOS, não dos arredondados: é o valor
+     certo, mas quem soma a coluna à mão pode dar um cêntimo de diferença e
+     julgar que há erro. Diz-se, em vez de deixar a dúvida. */
+  const _somaArred=_divs.reduce((s2,n)=>s2+Math.round(_areaDes(n)*100)/100,0);
+  if(Math.abs(_somaArred-_sdes)>0.004)
+    t+='  (somando a coluna arredondada dá '+fmt(_somaArred)+' m² — o total usa os '+
+       'valores exactos, é esse que vale)\n';
+  if(D.areaBrutaPrivativa){
+    const abp=parseM(D.areaBrutaPrivativa);
+    if(abp>0){
+      t+='  '+L1('Área bruta privativa',21)+L1(fmt(abp)+' m²',13)+' (caderneta)\n';
+      if(_slev>abp)
+        t+='  ⚠ a área útil ultrapassa a bruta privativa — uma das duas está errada\n';
+    }
+  }
+  t+='\n';
+
   t+='FECHO DO FOGO\n';
   t+='  Área útil          planta '+fmt(b.areaDes)+' m²   levantamento '+fmt(b.areaLev)+' m²\n';
   Object.keys(b.porOrient).sort().forEach(o=>{
-    t+='  Parede ext. '+L1(o,5)+'  planta '+fmt(b.porOrient[o].des)+' m    levantamento '+fmt(b.porOrient[o].med)+' m\n';
+    const d2=b.porOrient[o].des, m2=b.porOrient[o].med;
+    const dif=(m2>0&&Math.abs(d2-m2)>0.05)?'   ⚠ difere '+fmt(Math.abs(d2-m2))+' m':'';
+    t+='  Parede ext. '+L1(o,5)+'  planta '+fmt(d2)+' m    levantamento '+fmt(m2)+' m'+dif+'\n';
   });
   Object.keys(b.env).sort().forEach(k=>{
-    t+='  '+L1(k,18)+' planta '+fmt(b.env[k].des)+' m    levantamento '+fmt(b.env[k].med)+' m\n';
+    const d2=b.env[k].des, m2=b.env[k].med;
+    const dif=(Math.abs(d2-m2)>0.05)?'   ⚠ difere '+fmt(Math.abs(d2-m2))+' m':'';
+    t+='  '+L1(k,18)+' planta '+fmt(d2)+' m    levantamento '+fmt(m2)+' m'+dif+'\n';
   });
   t+='  Vãos colocados     '+b.vaos.colocados+' de '+b.vaos.total+'\n';
   t+='  Buracos            '+(b.buracos.length?b.buracos.length+' ('+fmt(b.buracos.reduce((s,x)=>s+x.area,0))+' m²)':'nenhum')+'\n';
   t+='  Sobreposição       '+(b.sobreposicao>.02?fmt(b.sobreposicao)+' m²':'nenhuma')+'\n\n';
 
-  divisoes().forEach(nome=>{
+  /* AS ENVOLVENTES COM DIMENSÃO — COMPRIMENTO, ALTURA E ÁREA.
+     O relatório dava só o comprimento. Quem transcreve para o modelo de
+     cálculo precisa da ÁREA, e a área é o comprimento vezes o pé-direito da
+     divisão — que a planta conhece. Assim não se refaz a conta à mão, que é
+     onde se erra. */
+  const _pd=n=>{
+    const dd=dadosDiv(n);
+    const proprio=parseM(dd.peDireito);
+    if(proprio>0) return proprio;
+    const pds=Object.values(D.peDireitos||{}).map(v=>parseM(v)).filter(v=>v>0);
+    return pds.length?pds[0]:0;
+  };
+  const _linhas=[];
+  _divs.forEach(nome=>{
+    const pd=_pd(nome);
+    L.blocos.filter(x=>x.div===nome).forEach(bl=>paredes(bl).forEach(par=>{
+      const lv=vaosLivres(par), eo=envObj(bl.id,par.lado), sg=envSeg(par);
+      if(lv.exterior>.02)
+        _linhas.push({div:nome,tipo:'Exterior',orient:par.orient,comp:lv.exterior,pd});
+      if(sg&&(sg[1]-sg[0])>.02)
+        _linhas.push({div:nome,tipo:eo.tipo,orient:par.orient,comp:sg[1]-sg[0],pd,
+          proposta:!!eo.auto});
+    }));
+  });
+  if(_linhas.length){
+    t+='ENVOLVENTES — COMPRIMENTO, ALTURA E ÁREA\n';
+    t+='  '+L1('Divisão',16)+L1('Envolvente',28)+L1('Or.',7)+
+       L1('Compr.',13)+L1('Pé-dir.',10)+'Área bruta\n';
+    t+='  '+'-'.repeat(85)+'\n';
+    /* A mesma divisão pode ter vários troços da mesma envolvente na mesma
+       orientação — a Sala tinha seis linhas «Exterior». Para transcrever
+       interessa o total por orientação, não o retalho do desenho. */
+    const _ag=[];
+    _linhas.forEach(x=>{
+      const j=_ag.find(y=>y.div===x.div&&y.tipo===x.tipo&&y.orient===x.orient&&
+        y.proposta===x.proposta&&Math.abs(y.pd-x.pd)<0.01);
+      if(j){ j.comp+=x.comp; j.n=(j.n||1)+1; } else _ag.push(Object.assign({},x));
+    });
+    const _tot={};
+    _ag.forEach(x=>{
+      const ar=x.pd>0?x.comp*x.pd:0;
+      _tot[x.tipo]=(_tot[x.tipo]||0)+ar;
+      t+='  '+L1(x.div,16)+L1(x.tipo+(x.proposta?' (prop.)':''),28)+L1(x.orient,7)+
+         L1(fmt(x.comp)+' m'+(x.n>1?' ('+x.n+')':''),13)+L1(x.pd>0?fmt(x.pd)+' m':'—',10)+
+         (ar>0?fmt(ar)+' m²':'—')+'\n';
+    });
+    t+='  '+'-'.repeat(85)+'\n';
+    Object.keys(_tot).sort().forEach(k=>{
+      t+='  '+L1('TOTAL '+k,74)+fmt(_tot[k])+' m²\n';
+    });
+    t+='\n  (n) = número de troços somados nessa orientação.\n';
+    t+='  Área bruta de parede, vãos incluídos. Para a área OPACA, descontar os\n';
+    t+='  vãos de cada orientação (quadro dos vãos, mais abaixo).\n';
+    t+='  «(prop.)» = a app propôs a envolvente a partir do desenho — confirmar no local.\n\n';
+  }
+
+  _divs.forEach(nome=>{
     const d=dadosDiv(nome), meus=L.blocos.filter(x=>x.div===nome);
-    const a=meus.reduce((s,x)=>s+areaBloco(x),0);
+    const ad=_areaDes(nome), al=_areaLev(nome);
     t+='-'.repeat(78)+'\n'+nome.toUpperCase()+'\n';
-    t+='  Área  planta '+fmt(a)+' m²   levantamento '+(parseM(d.areaUtil)?fmt(parseM(d.areaUtil))+' m²':'—')+
+    t+='  Área  planta '+fmt(ad)+' m²   levantamento '+(al>0?fmt(al)+' m²':'—')+
        '   ('+meus.length+' bloco'+(meus.length>1?'s':'')+')\n';
     ['pav','teto'].forEach(alvo=>{
       const m=areaPorCF(nome,alvo);
@@ -3529,16 +3629,29 @@ function relatorio(){
       t+='  '+(alvo==='pav'?'Pavimento':'Cobertura')+': '+
         ks.map(k=>fmt(m[k])+' m² '+CF_NOME[k]).join(' + ')+'\n';
     });
-    t+='  '+L1('Parede',8)+L1('Compr.',9)+'Composição\n';
+    /* PAREDES: só o que conta para o cálculo.
+       «Partilhada» é parede entre divisões do MESMO fogo — não é envolvente,
+       não tem U, não entra em lado nenhum. Enchia o quadro e escondia as
+       linhas que interessam. Fica o total, numa palavra. */
+    const ls=[];
+    let partTot=0;
     meus.forEach(bl=>paredes(bl).forEach(par=>{
       const lv=vaosLivres(par), eo=envObj(bl.id,par.lado), sg=envSeg(par);
       const part=par.comp-lv.exterior-(sg?sg[1]-sg[0]:0);
-      const pcs=[];
-      if(lv.exterior>.02) pcs.push(fmt(lv.exterior)+' exterior');
-      if(sg) pcs.push(fmt(sg[1]-sg[0])+' '+eo.tipo+(eo.auto?' (proposta)':''));
-      if(part>.02) pcs.push(fmt(part)+' partilhada');
-      t+='  '+L1(par.orient,8)+L1(fmt(par.comp)+' m',9)+(pcs.join(' + ')||'—')+'\n';
+      if(part>.02) partTot+=part;
+      if(lv.exterior>.02)
+        ls.push([par.orient,fmt(lv.exterior)+' m','Exterior',
+          _pd(nome)>0?fmt(lv.exterior*_pd(nome))+' m²':'—']);
+      if(sg&&(sg[1]-sg[0])>.02)
+        ls.push([par.orient,fmt(sg[1]-sg[0])+' m',eo.tipo+(eo.auto?' (prop.)':''),
+          _pd(nome)>0?fmt((sg[1]-sg[0])*_pd(nome))+' m²':'—']);
     }));
+    if(ls.length){
+      t+='  '+L1('Or.',8)+L1('Compr.',10)+L1('Envolvente',30)+'Área bruta\n';
+      ls.forEach(r=>t+='  '+L1(r[0],8)+L1(r[1],10)+L1(r[2],30)+r[3]+'\n');
+    } else t+='  Sem envolvente exterior nem para espaço não útil.\n';
+    if(partTot>.02)
+      t+='  ('+fmt(partTot)+' m de parede interior entre divisões do fogo — não entra no cálculo)\n';
     const vs=L.vaos.filter(v=>v.div===nome);
     if(vs.length){
       t+='  Vãos:\n';
