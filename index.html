@@ -583,7 +583,7 @@ const DIVS_BASE=[
 // VERSÃO — fonte única (selo no ecrã inicial + cabeçalho do TXT exportado).
 // Subir aqui a cada alteração ao ficheiro.
 // ═══════════════════════════════════════
-const APP_VERSION='v2026.09.21-FIX307';
+const APP_VERSION='v2026.09.21-FIX311';
 
 /* ══════════════════════════════════════════════════════════════════
    A APP INSTALADA FICAVA PRESA NUMA VERSÃO ANTIGA
@@ -706,7 +706,7 @@ const D_INICIAL={
   enuYN:'',enuMedida:'',enuTipos:{},enuVaosYN:'',enuVaosLoc:[],enuVaosDim:'',enuVaosDimLarg:'',enuVaosDimAlt:'',
   espParede:'',espVidros:'',caixaArGlobal:6,fotoEtiquetas:[],
   localidade:'',freguesia:'',concelho:'',zonaClimatica:'I1-V3',zonaClimaticaAuto:true,anoConstrucao:'',inerciaTermica:'Forte',nPisosEdificio:'',
-  numeroMatriz:'',numeroFracao:'',moradaCaderneta:'',certidaoPermanenteNumero:'',concelhoCaderneta:'',anoInscricaoMatriz:'',numeroDescricaoPredial:'',
+  numeroMatriz:'',numeroFracao:'',moradaCaderneta:'',certidaoPermanenteNumero:'',concelhoCaderneta:'',conservatoria:'',anoInscricaoMatriz:'',numeroDescricaoPredial:'',
   /* Extrato para a Declaração de Visita (projeto "DV extrato"): dados que a
      caderneta não dá e que se perguntam uma vez, no fim. */
   dvRequerente:'',dvTelemovel:'',dvData:'',dvHoraInicio:'',
@@ -1675,6 +1675,7 @@ function renderClimaDiv(div){
   if(!D.climaDivisoes[div]) D.climaDivisoes[div]={tipos:[],marcasPorTipo:{},local:[]};
   const cd=D.climaDivisoes[div];
   if(!cd.tipos) cd.tipos=[];
+  cd.tipos=cd.tipos.filter(t=>String(t||'').trim());
   if(!cd.marcasPorTipo) cd.marcasPorTipo={};
   const form=document.createElement('div');form.className='aqs-form';
 
@@ -6154,7 +6155,9 @@ function saveToD(key,raw){
     } else if(campo==='clima'){
       if(!D.climaDivisoes[div]) D.climaDivisoes[div]={tipos:[],marcas:[],local:[]};
       if(v==='Não') D.climaDivisoes[div].tipos=[];
-      else if(!D.climaDivisoes[div].tipos.includes(v)) D.climaDivisoes[div].tipos.push(v);
+      // um valor vazio não é equipamento — ficava ["Split",""] e o verificador
+      // acusava «tipo de equipamento em branco»
+      else if(String(v||'').trim()&&!D.climaDivisoes[div].tipos.includes(v)) D.climaDivisoes[div].tipos.push(v);
     } else if(campo==='clima-yn'){
       if(!D.climaDivisoes[div]) D.climaDivisoes[div]={tipo:'',marcas:[],local:[]};
       D.climaDivisoes[div].yn=v;
@@ -6659,6 +6662,55 @@ function fmtUw(v){
   return v.toFixed(2).replace('.',',');
 }
 
+/* Média dos pés-direitos registados — usada nas PTL de ângulo saliente. */
+function pdMedioParaPTL(){
+  const vals=Object.values(D.peDireitos||{}).map(v=>parseFloat(String(v).replace(',','.'))).filter(v=>v>0);
+  return vals.length?vals.reduce((a,b)=>a+b,0)/vals.length:null;
+}
+/* COR DA CAIXILHARIA — a da caixilharia, não a da proteção. A frase dizia
+   «de cor escura» num alumínio registado como «Cor clara», porque ia buscar a
+   cor à cortina (sem cor registada → escura). */
+function corDaCaixilharia(ve){
+  const c=String((ve&&ve.caixCor)||'').toLowerCase();
+  if(/clara/.test(c)) return 'clara';
+  if(/escura/.test(c)) return 'escura';
+  return corDaProtecao(ve);
+}
+/* VIDRO DUPLO — as espessuras levantadas. Com «6-14-4» saía «4 + 14 + 4»:
+   só a caixa de ar vinha do levantamento. */
+function panosVidroDuplo(caixAr){
+  const n=String(D.espVidros||'').match(/\d+(?:[.,]\d+)?/g)||[];
+  if(n.length>=3){
+    const f=x=>String(x).replace('.',',');
+    return {e1:f(n[0]),ar:f(n[1]),e2:f(n[2])};
+  }
+  return {e1:'4',ar:String(caixAr),e2:'4'};
+}
+/* PORTA DE ENTRADA POR DEFEITO — um valor só. A área saía de 0,90 × 2,00
+   (1,80 m²) e a PTL das ombreiras e padieira de 0,80 × 2,00: a mesma porta
+   com duas larguras no mesmo TXT. */
+const PORTA_DEFEITO={largura:0.90,altura:2.00};
+/* ÂNGULOS SALIENTES — UMA CONTA SÓ.
+   O quadro das PTL contava «orientações − 1» e esquecia os pisos; o detalhe
+   contava 1/2/4 cantos e multiplicava pelos pisos. Numa moradia de dois pisos
+   com quatro fachadas o quadro dava 3 × 2,87 = 8,61 m e o detalhe 11,48 m, e o
+   certo são 4 cantos com a altura dos dois pisos. Fica a regra do detalhe:
+   uma fachada por orientação, um canto entre fachadas consecutivas —
+   2 orientações → 1 canto, 3 → 2, 4 ou mais → 4. É o MÍNIMO: reentrâncias e
+   volumes salientes acrescentam cantos, que se contam na planta. */
+function angulosSalientes(){
+  let oris=(D.orientacoesConfirmadas||[]).filter(Boolean);
+  if(!oris.length) oris=[...new Set((D.divisoes||[]).flatMap(d=>{
+    const tr=(D.divisoesDados[d]||{}).trocos||{};
+    return Object.keys(tr).filter(o=>(tr[o]||[]).some(v=>parseFloat(String(v).replace(',','.'))>0));
+  }))];
+  const nOri=oris.length;
+  const nCantos=nOri>=4?4:(nOri===3?2:(nOri===2?1:0));
+  const nPisos=Math.max(1,parseInt(D.pisos)||1);
+  const pdReg=pdMedioParaPTL();
+  const pd=pdReg||2.70;
+  return {nOri,nCantos,nPisos,pd,pdAssumido:!pdReg,L:nCantos*pd*nPisos};
+}
 function gerarTextoVE(ve, div){
   const r=calcUw(ve);
   const vidro=(ve.tipo||'').toLowerCase().includes('duplo')?'duplo':'simples';
@@ -6666,7 +6718,9 @@ function gerarTextoVE(ve, div){
   const matStr=mat.toLowerCase();
   const corteTerm=ve.corteTerm||(matStr.includes('pvc'));
   const corteTermStr=corteTerm?'com corte térmico':'sem corte térmico';
-  const aber=(ve.abertura||'Fixo').toLowerCase();
+  /* «De correr» e «Correr» são o mesmo; a frase já tem o «de» — saía
+     «com sistema de de correr» em três certificados. */
+  const aber=(ve.abertura||'Fixo').toLowerCase().replace(/^de\s+/,'');
   const cor=corDaProtecao(ve);
   const prot=ve.prot||'';
   const protL=prot.toLowerCase();
@@ -6681,7 +6735,8 @@ function gerarTextoVE(ve, div){
   // composição vidro
   const compVidro=vidro==='simples'
     ?'vidro simples incolor com espessura de 4mm'
-    :`vidro duplo incolor 4 mm + caixa de ar ${caixAr}mm + incolor 4 mm`;
+    :(()=>{ const pv=panosVidroDuplo(caixAr);
+        return `vidro duplo incolor ${pv.e1} mm + caixa de ar ${pv.ar}mm + incolor ${pv.e2} mm`; })();
 
   // proteção — linha própria, separada do texto técnico. Exterior e interior são
   // campos independentes agora (antes só existia um, e chegou a inventar-se uma
@@ -6752,7 +6807,7 @@ function gerarTextoVE(ve, div){
   }
   // Linha 1: características técnicas + Uw/Uwdn | Linha 2: proteção solar
   const tipoStr=vidro==='duplo'?'Vão envidraçado duplo':'Vão envidraçado simples';
-  const linha1=`${tipoStr}, constituída por caixilharia de ${matStr}, ${classPerm}, com sistema de ${aber}, ${corteTermStr} e de cor ${cor}. Envidraçado composto por ${compVidro}. ${uwTxt}`.trim();
+  const linha1=`${tipoStr}, constituída por caixilharia de ${matStr}, ${classPerm}, com sistema de ${aber}, ${corteTermStr} e de cor ${corDaCaixilharia(ve)}. Envidraçado composto por ${compVidro}. ${uwTxt}`.trim();
   const txt=`${linha1}\n${protTxt}`;
   return {txt, uw:r?r.uw:null, uwdn:r?r.uwdn:null};
 }
@@ -7326,6 +7381,166 @@ function verificarAlertas(){
    `lista()` devolve sempre um array; `obj()` sempre um objecto. */
 function lista(v){ return Array.isArray(v)?v.filter(x=>x&&typeof x==='object'):[]; }
 function obj(v){ return (v&&typeof v==='object'&&!Array.isArray(v))?v:{}; }
+/* ══════════ AUDITOR DE COERÊNCIA DO TXT ══════════
+   As baterias verificavam o código contra ele próprio. Os erros que chegaram
+   a certificados eram de outra natureza: o mesmo valor calculado em dois
+   sítios com resultados diferentes (pé-direito do ângulo 2,69 e 2,60; porta
+   0,90 e 0,80; perda de carga «elevada» e «Baixa»), o TXT a dizer outra coisa
+   do que foi levantado (vidro 6-14-4 escrito 4+14+4; caixilharia clara escrita
+   escura), resultados impossíveis (H_FA acima do edifício), um dado do
+   documento sem conferência (concelho do cartório).
+   Este auditor lê o TXT PRONTO — o que vai para o certificado — e confere-o
+   com ele próprio e com o levantamento. Corre no verificador, antes de cada
+   exportação, e nas baterias sobre todos os levantamentos reais.
+   Cada achado diz se é erro de CÓDIGO (a app escreveu mal) ou de DADOS (o
+   levantamento contradiz-se). */
+function auditarCoerencia(txtPronto){
+  const out=[];
+  const C=(msg)=>out.push({tipo:'codigo',msg});      // a app escreveu uma contradição
+  const Dd=(msg)=>out.push({tipo:'dados',msg});      // o levantamento contradiz-se
+  let t='';
+  try{ t=txtPronto||buildTxt(); }catch(e){ C('o TXT não foi gerado: '+e.message); return out; }
+  const L=t.split('\n');
+  const nPT=v=>parseFloat(String(v).replace(/\s/g,'').replace(',','.'));
+  const f2=x=>(Math.round(x*100)/100).toFixed(2).replace('.',',');
+  const todos=(re)=>{ const r=[]; let m; const g=new RegExp(re.source,re.flags.includes('g')?re.flags:re.flags+'g');
+    while((m=g.exec(t))) r.push(m); return r; };
+  const semAc=v=>String(v||'').normalize('NFD').replace(/[̀-ͯ]/g,'').trim().toLowerCase();
+
+  // 1. LIXO NO TEXTO — nunca pode ir para um certificado
+  L.forEach((l,i)=>{
+    if(/\bundefined\b|\bNaN\b|\[object Object\]|\bnull\b(?! se)/.test(l))
+      C('linha '+(i+1)+' tem «'+(l.match(/undefined|NaN|\[object Object\]|null/)||[''])[0]+'»: '+l.trim().slice(0,90));
+  });
+  // palavras repetidas («com sistema de de correr»)
+  /* fronteiras de palavra com acentos: o \b do JavaScript acha que em «não o»
+     e «excluído do» há duas palavras iguais seguidas */
+  todos(/(?<![\p{L}\p{N}])(de|da|do|das|dos|a|o|e|em|com|por|para|sem)[ \t]+\1(?![\p{L}\p{N}])/giu).forEach(m=>{
+    const i=t.lastIndexOf('\n',m.index)+1, j=t.indexOf('\n',m.index);
+    C('palavra repetida «'+m[0]+'»: '+t.slice(i,j<0?undefined:j).trim().slice(0,110));
+  });
+  // rótulos da caderneta colados na morada
+  L.filter(l=>/^(Morada|Localidade)\b/i.test(l.trim())).forEach(l=>{
+    if(/Av\.?\s*\/\s*Rua\s*\/\s*Pra[çc]a\s*:|\bLote\s*:|\bLugar\s*:|C[óo]digo\s+Postal\s*:/i.test(l))
+      C('rótulos da caderneta na morada: '+l.trim().slice(0,100));
+  });
+
+  // 2. O MESMO VALOR EM DOIS SÍTIOS
+  // concelho
+  { const vs=new Set();
+    todos(/^Concelho:\s*(.+)$/gm).forEach(m=>vs.add(semAc(m[1])));
+    todos(/^Freguesia · Concelho:.*·\s*(.+)$/gm).forEach(m=>vs.add(semAc(m[1])));
+    todos(/concelho de ([^()\n,]+?) \(zona/g).forEach(m=>vs.add(semAc(m[1])));
+    todos(/^Concelho {2,}(\S.*)$/gm).forEach(m=>vs.add(semAc(m[1])));
+    vs.delete('');
+    if(vs.size>1) C('o concelho aparece diferente em sítios diferentes: '+[...vs].join(' / '));
+    const doCod=(typeof concelhoPorCodigo==='function')?concelhoPorCodigo(D.dvCodDistrito,D.dvCodConcelho):null;
+    if(doCod&&vs.size&&![...vs].every(v=>v===semAc(doCod)))
+      Dd('concelho '+[...vs].join('/')+' e código da caderneta '+D.dvCodDistrito+'-'+D.dvCodConcelho+' = '+doCod);
+  }
+  // área útil
+  { const vs=[];
+    todos(/TOTAL \(área útil\)\s*\|\s*([\d.,]+)/g).forEach(m=>vs.push(['tabela das divisões',nPT(m[1])]));
+    todos(/^Área útil \(m²\):\s*([\d.,]+)/gm).forEach(m=>vs.push(['ventilação',nPT(m[1])]));
+    todos(/área útil de pavimento de ([\d.,]+) m²/g).forEach(m=>vs.push(['descrição sucinta',nPT(m[1])]));
+    todos(/TOTAL Apav \(medido\)\s+([\d.,]+)/g).forEach(m=>vs.push(['Apav',nPT(m[1])]));
+    const ok=vs.filter(x=>isFinite(x[1])&&x[1]>0);
+    if(ok.length>1){ const mx=Math.max(...ok.map(x=>x[1])), mn=Math.min(...ok.map(x=>x[1]));
+      if(mx-mn>0.05) C('área útil diferente em sítios diferentes: '+ok.map(x=>x[0]+' '+f2(x[1])).join(', ')); }
+  }
+  // volume
+  { const vs=[];
+    todos(/Volume \(soma[^)]*\)\s*([\d.,]+) m³/g).forEach(m=>vs.push(nPT(m[1])));
+    todos(/^Volume \(m³\):\s*([\d.,]+)/gm).forEach(m=>vs.push(nPT(m[1])));
+    const ok=vs.filter(x=>isFinite(x)&&x>0);
+    if(ok.length>1&&Math.max(...ok)-Math.min(...ok)>0.2) C('volume diferente em sítios diferentes: '+ok.map(f2).join(' / ')+' m³');
+  }
+  // ângulos salientes: quadro das PTL × detalhe
+  { const q=t.match(/ângulo saliente \((\d+)[^)]*\)[^\n]*?\s([\d.]+) m\s*$/m);
+    const d=t.match(/(\d+) canto\(s\) × ([\d,]+) m de pé-direito × (\d+) piso\(s\) = ([\d,]+) m/);
+    if(q&&d){
+      const Lq=nPT(q[2]), Ld=nPT(d[4]);
+      if(Math.abs(Lq-Ld)>0.02) C('PTL de ângulo saliente: '+q[1]+' ângulo(s), '+f2(Lq)+' m no quadro; '+d[1]+
+        ' canto(s) × '+d[3]+' piso(s) = '+f2(Ld)+' m no detalhe');
+    }
+  }
+  // porta: área por defeito × padieira da PTL
+  { const a=t.match(/área por defeito [\d,]+ m² = ([\d,]+) × ([\d,]+)/), p=t.match(/padieira de ([\d.,]+) m/);
+    if(a&&p&&Math.abs(nPT(a[1])-nPT(p[1]))>0.001)
+      C('porta de entrada com '+a[1]+' m de largura na área e '+p[1]+' m na PTL');
+  }
+  // perda de carga: texto do CE × folha
+  { const tx=t.match(/perda de carga (elevada|baixa)/i), fl=t.match(/Perda de carga\s+(Alta|Baixa)/);
+    if(tx&&fl&&((/elevada/i.test(tx[1]))!==(fl[1]==='Alta')))
+      C('perda de carga «'+tx[1]+'» no texto do CE e «'+fl[1]+'» na folha de ventilação');
+  }
+  // alturas da ventilação: texto × quadro para copiar
+  { const h1=t.match(/Altura da fração, HFA \(m\):\s*([\d,]+)/), h2=t.match(/Altura da fracção, HFA \(m\)\s+([\d,]+)/);
+    const e1=t.match(/Altura do edifício, Hedf \(m\):\s*([\d,]+)/), e2=t.match(/Altura do edifício, Hedf \(m\)\s+([\d,]+)/);
+    if(h1&&h2&&h1[1]!==h2[1]) C('H_FA '+h1[1]+' no resumo e '+h2[1]+' no quadro para copiar');
+    if(e1&&e2&&e1[1]!==e2[1]) C('H_edif '+e1[1]+' no resumo e '+e2[1]+' no quadro para copiar');
+    if(h1&&e1&&nPT(h1[1])>nPT(e1[1])+0.001) C('H_FA '+h1[1]+' m acima da altura do edifício '+e1[1]+' m — impossível');
+  }
+
+  // 3. O TXT DIZ O QUE FOI LEVANTADO
+  { const n=String(D.espVidros||'').match(/\d+(?:[.,]\d+)?/g)||[];
+    if(n.length>=3){
+      const quer=n.slice(0,3).map(x=>x.replace('.',','));
+      todos(/vidro duplo incolor ([\d,]+) mm \+ caixa de ar ([\d,]+)mm \+ incolor ([\d,]+) mm/g).forEach(m=>{
+        if(m[1]!==quer[0]||m[2]!==quer[1]||m[3]!==quer[2])
+          C('vidro levantado '+n.slice(0,3).join('-')+', no texto '+m[1]+'+'+m[2]+'+'+m[3]);
+      });
+    }
+  }
+  try{
+    (D.divisoes||[]).forEach(dv=>((D.divisoesDados[dv]||{}).vaos||[]).forEach(ve=>{
+      const c=String(ve.caixCor||'').toLowerCase(); if(!/clara|escura/.test(c)) return;
+      const tx=(gerarTextoVE(ve,dv)||{}).txt||'';
+      const m=tx.match(/ e de cor (clara|escura)\. /);
+      if(m&&!c.includes(m[1])) C(dv+' '+(ve.id||'')+': caixilharia «'+ve.caixCor+'» e o texto diz «de cor '+m[1]+'»');
+    }));
+  }catch(e){}
+  // o andar do texto das alturas × o andar da caderneta
+  { const m=t.match(/que está no (R\/C|\d+)º?(?: andar)?\)/);
+    let and=''; try{ and=_dvAndar(); }catch(e){}
+    const o=(typeof ordemDoAndar==='function')?ordemDoAndar(and):null;
+    if(m&&o!=null){ const oTxt=m[1]==='R/C'?1:parseInt(m[1])+1;
+      if(oTxt!==o) C('as alturas dizem «'+m[1]+(m[1]==='R/C'?'':'º andar')+'» e a caderneta diz «'+and+'»'); }
+  }
+
+  // 4. O LEVANTAMENTO CONTRADIZ-SE (dados, não código)
+  { const pl=String(D.pisoLocal||''), and=(()=>{ try{ return _dvAndar(); }catch(e){ return ''; } })();
+    const o=(typeof ordemDoAndar==='function')?ordemDoAndar(and):null;
+    const acima=(typeof pisosAcimaDoSolo==='function')?pisosAcimaDoSolo():0;
+    const nf=parseInt(D.pisos)||1;
+    if(D.edificioTipo==='Apartamento'&&o!=null&&acima){
+      if(pl==='3'&&o+nf-1!==acima)
+        Dd('«último piso» no '+and+' de um prédio com '+acima+' pisos acima do terreno'+
+          (parseInt(D.nPisosAbaixoSolo)?'':' — se a caderneta conta uma cave nos '+D.nPisosEdificio+' pisos, diz quantas')+
+          '; senão não é o último piso');
+      if(pl==='4'&&o!==1) Dd('«piso térreo» num '+and);
+      if((pl==='2'||pl==='2*')&&o+nf-1>=acima&&acima>1) Dd('«piso intermédio» no '+and+', que é o último dos '+acima+' pisos');
+    }
+  }
+  // parede exterior medida numa orientação que não está nas confirmadas
+  { const conf=(D.orientacoesConfirmadas||[]).filter(Boolean);
+    if(conf.length){
+      const med=new Set();
+      (D.divisoes||[]).forEach(dv=>Object.entries((D.divisoesDados[dv]||{}).trocos||{}).forEach(([o,v])=>{
+        if((v||[]).some(x=>parseFloat(String(x).replace(',','.'))>0)) med.add(o); }));
+      const fora=[...med].filter(o=>!conf.includes(o));
+      if(fora.length) Dd('parede exterior medida a '+fora.join(', ')+', que não está nas orientações confirmadas ('+
+        conf.join(', ')+') — conta nos cantos salientes e no fator solar; confirma as orientações');
+    }
+  }
+  // Uw plausível
+  todos(/\((Uwdn|Uw)\) igual a ([\d,]+)/g).forEach(m=>{ const u=nPT(m[2]);
+    if(!(u>=0.5&&u<=7)) C('U de vão impossível: '+m[1]+' = '+m[2]); });
+  // pés-direitos plausíveis
+  Object.entries(D.peDireitos||{}).forEach(([k,v])=>{ const x=nPT(v);
+    if(x&&(x<2.0||x>5.0)) Dd('pé-direito do piso '+k+' = '+String(v)+' — fora de 2,00 a 5,00 m'); });
+  return out;
+}
 function verificarLevantamento(){
   const lacunas=[],incoerencias=[],avisos=[];
   /* O VERIFICADOR NÃO PODE REBENTAR.
@@ -7415,6 +7630,43 @@ function verificarLevantamento(){
             'estore», que fica inflada. Confirma no local: ou tem persiana, ou a '+
             'caixa não existe.');
       });
+    });
+  }catch(e){}
+
+  /* CONCELHO QUE NÃO BATE COM O CÓDIGO DA CADERNETA.
+     Levantamento da Praia da Rocha: concelho e conservatória «Lagoa» (lido da
+     entidade da escritura, «C.N. LAGOA»), códigos 08-11 = Portimão. O concelho
+     entra na zona climática, na ventilação, na descrição e na DV — é erro de
+     certificado. Apanha também os levantamentos feitos antes da correção. */
+  try{
+    const doCod=concelhoPorCodigo(D.dvCodDistrito,D.dvCodConcelho);
+    const conc=D.concelhoCaderneta||D.concelho;
+    if(doCod&&conc&&!mesmoConcelho(conc,doCod))
+      E('Identificação','Concelho «'+conc+'», mas o código da caderneta ('+D.dvCodDistrito+'-'+
+        D.dvCodConcelho+') é '+doCod+'. Corrige o concelho — entra na zona climática, na ventilação e na DV.');
+    if(doCod&&D.conservatoria&&!mesmoConcelho(D.conservatoria,doCod))
+      A('Identificação','Conservatória de '+D.conservatoria+' num prédio do concelho de '+doCod+
+        '. Confirma na caderneta («Descrito na C.R.P. de …») ou na certidão.');
+    /* ARTIGO MATRICIAL POR CONFIRMAR. Lido por imagem, só passa depois de
+       confirmado contra o recorte da caderneta. Um dígito errado é o CE de
+       outro prédio. */
+    const ea=estadoArtigo();
+    if(ea.estado==='divergente')
+      E('Identificação','Artigo matricial '+D.numeroMatriz+': as leituras não batem certo'+
+        ((ea.v&&ea.v.avisos&&ea.v.avisos.length)?' ('+ea.v.avisos.join('; ')+')':'')+
+        '. Confirma no documento, no ecrã dos documentos.');
+    else if(ea.estado==='por_confirmar')
+      E('Identificação','Artigo matricial '+D.numeroMatriz+' por confirmar contra a caderneta. '+
+        'Confirma no ecrã dos documentos — um dígito errado é o certificado de outro prédio.');
+    if(D._avisoFracaoLida) E('Identificação','Fração: '+D._avisoFracaoLida+'. Confirma no documento.');
+    if(D._avisoConcelhoLido) A('Identificação','Concelho corrigido pelo código: '+D._avisoConcelhoLido+'.');
+  }catch(e){}
+
+  /* O TXT PRONTO, CONFERIDO — ver auditarCoerencia(). */
+  try{
+    auditarCoerencia().forEach(a=>{
+      if(a.tipo==='codigo') E('Coerência do TXT','⚠ ERRO DA APP — '+a.msg+'. Não emitas sem corrigir; manda o JSON.');
+      else A('Coerência do TXT',a.msg);
     });
   }catch(e){}
 
@@ -7968,6 +8220,23 @@ function verificarLevantamento(){
     }
   });
 
+  /* ÁREA ÚTIL ACIMA DA BRUTA PRIVATIVA.
+     A bruta inclui as paredes: a útil é sempre menor. Se a passa, ou há uma
+     divisão a mais, ou uma medida trocada, ou a caderneta é de outra fração.
+     Esta regra não existia — um teste passava por acaso, apanhado pelo aviso
+     falso de «só uma parede medida», que dizia «área» no texto. */
+  try{
+    const bruta=parseFloat(String(D.areaBrutaPrivativa||'').replace(/\s/g,'').replace(',','.'));
+    if(bruta>0){
+      const util=(Array.isArray(D.divisoes)?D.divisoes:[]).reduce((a,dv)=>{
+        const x=parseFloat(String(resolverAreaDivisaoGlobal(dv)||'').replace(',','.'));
+        return a+(x>0?x:0); },0);
+      if(util>bruta+0.05)
+        E('Áreas','Área útil '+util.toFixed(2).replace('.',',')+' m² acima da área bruta privativa da caderneta ('+
+          bruta.toFixed(2).replace('.',',')+' m²). A útil é sempre menor — há uma medida ou uma divisão a mais, ou a caderneta é de outra fração.');
+    }
+  }catch(e){}
+
   // ── área útil sem base: divisão com uma só parede medida ──
   // Com uma única medida a segunda dimensão é estimada, logo a área resultante
   // não é uma medição. Não deve entrar como área útil sem ser assinalada.
@@ -7975,7 +8244,12 @@ function verificarLevantamento(){
     const dd=obj(D.divisoesDados)[div]||{};
     const medidas=Object.values(obj(dd.comprimentos))
       .filter(v=>parseFloat(String(v||'').replace(',','.').replace(/[^\d.]/g,''))>0);
-    if(medidas.length===1&&!dd.area){
+    /* Procurava dd.area, campo que não existe (a área está em areaUtil e
+       areaRect): avisava em todas as divisões com uma só parede exterior,
+       mesmo com a área medida por rectângulo. */
+    let _temArea=false;
+    try{ _temArea=parseFloat(String(resolverAreaDivisaoGlobal(div)||'').replace(',','.'))>0; }catch(e){}
+    if(medidas.length===1&&!_temArea){
       A('Áreas',`${div}: só uma parede medida — a área útil não pode ser apurada sem a segunda dimensão`);
     }
   });
@@ -9314,13 +9588,30 @@ function reordenarSeccoesTxt(txt){
 /* Parte uma morada de caderneta em arruamento, código postal e localidade.
    Formato típico: "RUA DAS FLORES, 12, 2º DTO, 8500-450 PORTIMÃO".
    Sai tudo em maiúsculas, que é como vai para o certificado. */
+/* OS RÓTULOS DA CADERNETA NÃO SÃO MORADA.
+   A caderneta escreve «Av./Rua/Praça: ESTRUMAL Lote: 3 Lugar: PRAIA DA ROCHA
+   Código Postal: 8500-327 PORTIMÃO», e a leitura trazia os rótulos colados.
+   Iam assim para o TXT, para a DV e para o nome do ficheiro. */
+function limparRotulosMorada(txt){
+  return String(txt||'')
+    .replace(/Av\.?\s*\/\s*Rua\s*\/\s*Pra[çc]a\s*:\s*/gi,'')
+    .replace(/\bC[óo]digo\s+Postal\s*:\s*/gi,'')
+    .replace(/\bLugar\s*:\s*/gi,', ')
+    .replace(/\b(Lote|N[º°o]\.?\s*de\s*pol[íi]cia|N[º°o]|Bloco|Andar\s*\/\s*Divis[ãa]o)\s*:\s*/gi,'$1 ')
+    .replace(/\s+,/g,',').replace(/,\s*,+/g,',').replace(/\s{2,}/g,' ')
+    .replace(/^[,\s]+|[,\s]+$/g,'').trim();
+}
+/* Separa pelo código postal. O andar que vier depois dele («8500-327
+   PORTIMÃO, 2ºDto») é do arruamento, não da localidade. */
 function partirMorada(txt){
-  const s2=String(txt||'').replace(/\s+/g,' ').trim().toUpperCase();
+  const s2=limparRotulosMorada(txt).replace(/\s+/g,' ').trim().toUpperCase();
   const m=s2.match(/(\d{4}-\d{3})/);
   if(!m) return {arruamento:s2,codigoPostal:'',localidade:''};
   const i=s2.indexOf(m[1]);
-  const antes=s2.slice(0,i).replace(/[,\s·—–-]+$/,'').trim();
-  const depois=s2.slice(i+m[1].length).replace(/^[,\s·-]+/,'').trim();
+  let antes=s2.slice(0,i).replace(/[,\s·—–-]+$/,'').trim();
+  let depois=s2.slice(i+m[1].length).replace(/^[,\s·-]+/,'').trim();
+  const pAnd=depois.match(/^([^,]+),\s*((?:R\/?C|\d{1,2}\s*\.?\s*[ºO°]|CAVE)[^,]*)$/);
+  if(pAnd){ depois=pAnd[1].trim(); antes=(antes?antes+', ':'')+pAnd[2].trim(); }
   return {arruamento:antes,codigoPostal:m[1],localidade:depois};
 }
 
@@ -9363,7 +9654,10 @@ function condutasDoLevantamento(){
   }
   return [{
     escoamento, ventax:'Não',
-    perdaCarga:'Baixa',            // conduta corrente e desimpedida
+    /* Alta, como no texto-tipo do Renato («condutas … com perda de carga
+       elevada»). Estava 'Baixa' aqui e «elevada» no texto do CE: a folha e o
+       certificado diziam o contrário um do outro. */
+    perdaCarga:'Alta',
     cobertura:(D.coberturaInclinada==='Sim')?'Inclinada (10° a 30°)':'Terraço, inclinada (<10°)',
     n, altura:null,                // não se mede em obra; a folha estima
     quais:(D.ventCondutasISWCs||[]).slice(),
@@ -9396,24 +9690,56 @@ function condutasDoLevantamento(){
    Se as alturas forem medidas em obra (D.ventHEdificio, D.ventHFracao), são
    essas que valem — o manual só manda usar os 3 m quando não há medida. */
 const ALTURA_PISO_SCE=3.00;   // Manual SCE, pág. 31
+/* ORDEM DO PISO NO PRÉDIO, CONTADA DO TERRENO: 1 = R/C, 2 = 1.º andar…
+   Vem do ANDAR («Andar/Divisão» da caderneta, ou a morada). NÃO vem do
+   pisoLocal: esse é a classificação térmica (1 sobre cave, 2 intermédio,
+   3 último, 4 térreo). Lia-se o pisoLocal como andar e todos os apartamentos
+   intermédios saíam com H_FA = 6 m — num 3.º andar são 12 m —, os últimos pisos
+   com 9 m fosse qual fosse o prédio, e um R/C térreo com 12 m. */
+function ordemDoAndar(txt){
+  const a=String(txt||'').trim();
+  if(!a) return null;
+  if(/sub-?cave|\bcave\b|\bcv\b/i.test(a)) return 0;
+  if(/^r\s*\/?\s*c\b|r[ée]s[\s-]*do[\s-]*ch[ãa]o|^rc|^0\s*$/i.test(a)) return 1;
+  const m=a.match(/^(\d{1,2})\s*(?:\.?\s*[ºo°]|\s*(?:andar|esq|dt|dir|frt|tr)|$)/i);
+  if(m) return parseInt(m[1])+1;
+  return null;
+}
+function ordemPisoFracao(){
+  if(/moradia/i.test(D.edificioTipo||'')) return {ordem:1,origem:'moradia'};
+  let and='';
+  try{ and=_dvAndar(); }catch(e){ and=D.dvAndar||''; }
+  const o=ordemDoAndar(and);
+  if(o!=null) return {ordem:o,origem:'andar',andar:and};
+  const pl=String(D.pisoLocal||'').trim();
+  if(pl==='4') return {ordem:1,origem:'categoria'};              // térreo = R/C
+  if(pl==='1') return {ordem:1,origem:'categoria',incerto:true}; // sobre cave: quase sempre o R/C
+  if(pl==='3'){
+    const acima=pisosAcimaDoSolo();
+    if(acima) return {ordem:acima-(parseInt(D.pisos)||1)+1,origem:'categoria'};
+  }
+  return {ordem:null,origem:'desconhecido',incerto:true};
+}
+/* Pisos acima do terreno. O «Nº de pisos do artigo» da caderneta conta as
+   caves: «cave, rés-do-chão, primeiro, segundo, terceiro e quarto andares»
+   são 6 pisos, e o edifício tem 5 acima do terreno. */
+function pisosAcimaDoSolo(){
+  const n=parseInt(D.nPisosEdificio)||0;
+  const cv=parseInt(D.nPisosAbaixoSolo)||0;
+  return n>0?Math.max(1,n-cv):0;
+}
 function ventAlturas(){
   const pd=_n(D.peDireitoMedio)||
     (Object.values(D.peDireitos||{}).map(_n).filter(x=>x>0)[0])||2.60;
-  const nEdif=parseInt(D.nPisosEdificio)||parseInt(D.pisos)||1;
+  const nEdif=pisosAcimaDoSolo()||parseInt(D.pisos)||1;
   const nFrac=parseInt(D.pisos)||1;
-
-  // ordem do piso no prédio: 1=R/C, 2=1.º, 3=2.º…
-  const pl=String(D.pisoLocal||'').trim();
-  let ordem=null;
-  if(/^r\/?c$|^0$|^r[ée]s/i.test(pl)) ordem=1;
-  else{
-    const nn=parseInt(pl);
-    if(isFinite(nn)&&nn>0) ordem=nn;
-  }
-  /* Pisos abaixo do TETO da fração = os que estão por baixo dela, mais os
-     dela própria. Num 1.º andar de um prédio de 3: 1 piso abaixo + 1 piso da
-     fração = 2 → H_FA = 6,00 m. O teto do 3.º piso é a cobertura: 3 × 3 = 9. */
-  const pisosAteTeto=(ordem===null)?nFrac:(ordem-1+nFrac);
+  const op=ordemPisoFracao();
+  const ordem=op.ordem;
+  /* Pisos até ao TETO da fração = os que estão por baixo dela, mais os
+     dela própria. Num 1.º andar: 1 piso abaixo + 1 da fração = 2 → H_FA = 6 m.
+     Sem andar conhecido fica 2 pisos, e o TXT diz que é para confirmar. */
+  const pisosAteTeto=Math.min(nEdif,Math.max(1,
+    (ordem===null)?(nEdif>=2?2:nFrac):(ordem-1+nFrac)));
 
   const medidoEdif=_n(D.ventHEdificio), medidoFA=_n(D.ventHFracao);
   const hEdif=medidoEdif>0?medidoEdif:nEdif*ALTURA_PISO_SCE;
@@ -9424,7 +9750,8 @@ function ventAlturas(){
     hFracao:+hFA.toFixed(2),
     hEdificioMedido:medidoEdif>0,
     hFracaoMedida:medidoFA>0,
-    pisosAteTeto,ordemPiso:ordem,
+    pisosAteTeto,ordemPiso:ordem,origemAndar:op.origem,andarIncerto:!!op.incerto,
+    pisosAbaixoSolo:parseInt(D.nPisosAbaixoSolo)||0,
     pisosEdificio:nEdif,pisosFracao:nFrac};
 }
 function ventVolume(){
@@ -9460,6 +9787,9 @@ function ventResumoITeCons(){
     hFracaoMedida:a.hFracaoMedida,
     pisosAteTeto:a.pisosAteTeto,
     ordemPiso:a.ordemPiso,
+    origemAndar:a.origemAndar,
+    andarIncerto:a.andarIncerto,
+    pisosAbaixoSolo:a.pisosAbaixoSolo,
     pisosEdificio:a.pisosEdificio,
     obstaculos:D.ventObstaculos||'',
     hObstaculo:_n(D.ventHObstaculo)||null,
@@ -10066,6 +10396,10 @@ function renderDVInline(wrap){
   l('Requerente',D.dvRequerente||D.nome);
   l('Morada',[D.moradaCaderneta||'',D.morada||''].sort((a,b)=>b.length-a.length)[0]);
   l('Matriz',D.numeroMatriz,!D.numeroMatriz);
+  /* A DV é assinada: o artigo tem de estar confirmado antes de sair. */
+  if(D.numeroMatriz&&estadoArtigo().estado!=='confirmado'){
+    const ca=document.createElement('div'); box.appendChild(ca); renderConfirmacaoArtigo(ca);
+  }
   l('Fração',D.numeroFracao||(/moradia/i.test(D.edificioTipo||'')?'não aplicável':''),
     !D.numeroFracao&&!/moradia/i.test(D.edificioTipo||''));
   const codigos=[D.dvCodDistrito,D.dvCodConcelho,D.dvCodFreguesia].filter(Boolean);
@@ -10214,11 +10548,13 @@ const DV_TIPOS_EDIF=[
 ];
 function dvMorada(){
   // a mais completa das duas
-  let m=[D.moradaCaderneta||'',D.morada||''].sort((a,b)=>b.length-a.length)[0]||'';
+  let m=limparRotulosMorada([D.moradaCaderneta||'',D.morada||''].sort((a,b)=>b.length-a.length)[0]||'');
   const out={tipoVia:'',nomeVia:'',tipoEdif:'',designacao:'',porta:'',cp:'',localidade:''};
   // código postal e o que vem depois dele é localidade
   const cp=m.match(/\b(\d{4}-\d{3})\s*(.*)$/);
-  if(cp){ out.cp=cp[1]; out.localidade=(cp[2]||'').replace(/^[,\s]+/,'').trim();
+  if(cp){ out.cp=cp[1]; out.localidade=(cp[2]||'').replace(/^[,\s]+/,'').trim()
+      // o andar depois da localidade («PORTIMÃO, 2ºDto») não é localidade
+      .replace(/,\s*(?:R\/?C|\d{1,2}\s*\.?\s*[ºo°]|cave)[^,]*$/i,'').trim();
     m=m.slice(0,cp.index).replace(/[,\s]+$/,''); }
   /* Tipo de via primeiro de todos: é o que está no princípio da morada. Tirar
      a designação do edifício antes desalinhava o princípio e o "R." deixava de
@@ -10291,10 +10627,11 @@ function dvPisoAndar(){
   const semCP=String(D.moradaCaderneta||D.morada||'').replace(/\b\d{4}-\d{3}\b/g,'');
   const m=semCP.match(/(?:^|[\s,])(\d{1,2})\.?[ºo°]/);
   if(m) return m[1]+'º';
+  /* O pisoLocal é a classificação térmica, não o andar: «2» é intermédio,
+     não 1.º andar. Só o térreo diz o andar sem dúvida. */
   const pl=String(D.pisoLocal||'').trim();
-  if(/^r\/?c$|^1$/i.test(pl)) return 'R/C';
-  const n=parseInt(pl);
-  return (isFinite(n)&&n>1)?(n-1)+'º':(pl||'');
+  if(pl==='4'||/^r\/?c$/i.test(pl)) return 'R/C';
+  return '';
 }
 // Os códigos vão dígito a dígito, uma caixa por dígito — daí o espaço.
 function dvCodigo(v){
@@ -10604,7 +10941,7 @@ function buildTxt(){
 
   let t='';
   t+=`# CERTIFICADO ENERGÉTICO — RECOLHA DE DADOS\n`;
-  t+=ln('Projeto',D.nome);t+=ln('Morada',String(D.morada||'').toLocaleUpperCase('pt-PT'));t+=ln('Data',d);
+  t+=ln('Projeto',D.nome);t+=ln('Morada',limparRotulosMorada(D.morada||'').toLocaleUpperCase('pt-PT'));t+=ln('Data',d);
   /* CERTIFICADO MAIS PARECIDO — logo no cabeçalho, que é onde se olha primeiro.
      Poupa reabrir meia dúzia de processos à procura de um semelhante. */
   try{
@@ -10631,9 +10968,11 @@ function buildTxt(){
   t+=ln('Versão da app',APP_VERSION);
 
   // ── IDENTIFICAÇÃO DO IMÓVEL (extraída de caderneta predial / certidão permanente) ──
-  if(D.numeroMatriz||D.numeroFracao||D.moradaCaderneta||D.concelhoCaderneta||D.numeroDescricaoPredial){
+  if(D.numeroMatriz||D.numeroFracao||D.moradaCaderneta||D.concelhoCaderneta||D.conservatoria||D.numeroDescricaoPredial){
     t+=sep('IDENTIFICAÇÃO DO IMÓVEL');
-    t+=ln('Nº de matriz predial urbana',D.numeroMatriz);
+    { const ea=estadoArtigo();
+      t+=ln('Nº de matriz predial urbana',D.numeroMatriz+
+        (ea.estado==='confirmado'?'':(ea.estado==='vazio'?'':'  ⚠ POR CONFIRMAR contra a caderneta'))); }
     t+=ln('Fração',D.numeroFracao);
     /* MORADA: maiúsculas e uma coisa por linha.
        Vinha tudo numa linha só, misturada, e ao passar para o certificado era
@@ -10648,7 +10987,9 @@ function buildTxt(){
       if(fc) t+=ln('Freguesia · Concelho',fc.toUpperCase());
       if(m.codigoPostal) t+=ln('Código postal',m.codigoPostal);
     }
-    if(D.concelhoCaderneta) t+=ln('Conservatória do Registo Predial de',D.concelhoCaderneta);
+    /* A conservatória é a do documento; sem ela, a do concelho da caderneta. */
+    { const crp=D.conservatoria||D.concelhoCaderneta;
+      if(crp) t+=ln('Conservatória do Registo Predial de',crp); }
     if(D.numeroDescricaoPredial) t+=ln('Nº de descrição predial',D.numeroDescricaoPredial);
     if(D.anoInscricaoMatriz) t+=ln('Ano de inscrição na matriz',D.anoInscricaoMatriz);
     if(D.numeroFracao&&D.nPisosEdificio) t+=ln('Nº de pisos do prédio',D.nPisosEdificio);
@@ -10782,7 +11123,13 @@ function buildTxt(){
     }
     if(D.divisoes.length){
       t+=sep('ÁREA E PÉ-DIREITO POR DIVISÃO');
-      const colDiv=Math.max(20,...D.divisoes.map(dv=>{const s=String(dv);return(s.charAt(0).toUpperCase()+s.slice(1)+' ('+((D.divisoesDados[dv]||{}).piso||'R/C')+')').length;}))+2;
+      /* O piso entre parêntesis é o piso DENTRO da fração — serve numa moradia
+         de dois pisos. Numa fração de um piso só não diz nada, e num 2.º andar
+         escrevia «Sala (R/C)» em todas as divisões. */
+      const _mostraPiso=(parseInt(D.pisos)||1)>1;
+      const _rotDiv=dv=>{const s=String(dv);return s.charAt(0).toUpperCase()+s.slice(1)+
+        (_mostraPiso?' ('+((D.divisoesDados[dv]||{}).piso||'R/C')+')':'');};
+      const colDiv=Math.max(20,...D.divisoes.map(dv=>_rotDiv(dv).length))+2;
       t+=`${'Divisão'.padEnd(colDiv)} | ${'Área (m²)'.padEnd(10)} | ${'Pé-direito (m)'}\n`;
       t+=`${'─'.repeat(colDiv+2)}┼${'─'.repeat(12)}┼${'─'.repeat(16)}\n`;
       /* A CAVE NÃO É ÁREA ÚTIL.
@@ -10798,7 +11145,7 @@ function buildTxt(){
         const dd=D.divisoesDados[dv]||{};
         const pisoLabel=dd.piso||'R/C';
         const dvStr=String(dv);
-        const nomeDiv=(dvStr.charAt(0).toUpperCase()+dvStr.slice(1)+' ('+pisoLabel+')');
+        const nomeDiv=_rotDiv(dvStr);
         const area=resolverAreaDivisao(dv);
         if(area){
           if(_ehENUdiv(dv)){ _areaENU+=parseFloat(area); _listaENU.push(dv); }
@@ -10944,12 +11291,14 @@ function buildTxt(){
        Manual SCE, ponto 5.2.3, pág. 30-31. */
     t+=ln('Altura do edifício, Hedf (m)',v.hEdificio.toFixed(2).replace('.',',')+
       (v.hEdificioMedido?'  (medida em obra)'
-        :'  ('+v.pisosEdificio+' piso(s) × 3,00 m — regra do Manual SCE pág. 31 '+
-         'quando não é possível medir; do terreno ao teto do último piso)'));
+        :'  ('+v.pisosEdificio+' piso(s) acima do terreno × 3,00 m — regra do Manual SCE pág. 31 '+
+         'quando não é possível medir; do terreno ao teto do último piso'+
+         (v.pisosAbaixoSolo?'; a caderneta conta '+v.pisosAbaixoSolo+' cave(s), que não entram':'')+')'));
     t+=ln('Altura da fração, HFA (m)',v.hFracao.toFixed(2).replace('.',',')+
       (v.hFracaoMedida?'  (medida em obra)'
         :'  ('+v.pisosAteTeto+' piso(s) × 3,00 m — do terreno ao TETO da fração'+
-         (v.ordemPiso?', que está no '+(v.ordemPiso===1?'R/C':(v.ordemPiso-1)+'º andar'):'')+')'));
+         (v.ordemPiso?', que está no '+(v.ordemPiso===1?'R/C':(v.ordemPiso-1)+'º andar'):'')+')'+
+         (v.andarIncerto?'  ⚠ andar da fração desconhecido — CONFIRMAR':'')));
     if(v.obstaculos) t+=ln('Edifícios/obstáculos',v.obstaculos);
     if(v.hObstaculo) t+=ln('Altura do obstáculo, Hobs (m)',v.hObstaculo.toFixed(1).replace('.',','));
     if(v.dObstaculo) t+=ln('Distância ao obstáculo, Dobs (m)',v.dObstaculo.toFixed(1).replace('.',','));
@@ -11038,7 +11387,7 @@ function buildTxt(){
            não passarem por medidos. */
         t+='    Tipo de escoamento              '+(c.escoamento||'Exaustão')+'\n';
         t+='    Exaustores tipo ventax?         '+(c.ventax||'Não')+'  ← confirmar\n';
-        t+='    Perda de carga                  '+(c.perdaCarga||'Baixa')+'  ← confirmar\n';
+        t+='    Perda de carga                  '+(c.perdaCarga||'Alta')+'  ← confirmar\n';
         t+='    Tipo de cobertura               '+(c.cobertura||'Inclinada (10° a 30°)')+
            '  ← conforme a cobertura do edifício\n';
         t+='    Número de condutas semelhantes  '+(c.n||1)+'\n';
@@ -12198,8 +12547,8 @@ function buildTxt(){
     // 0,30 nas ligações com caixilharia (e caixa de estores).
     const PSI_PAV_PAREDE=0.70, PSI_CAIXILHARIA=0.30;
     // Porta de entrada da fração para a circulação comum: o perímetro que faz
-    // ponte térmica são as duas ombreiras e a padieira — 2,00 + 2,00 + 0,80.
-    const PORTA_ENTRADA={altura:2.00,largura:0.80};
+    // ponte térmica são as duas ombreiras e a padieira — 2,00 + 2,00 + 0,90.
+    const PORTA_ENTRADA=PORTA_DEFEITO;
     const PERIM_PORTA=PORTA_ENTRADA.altura*2+PORTA_ENTRADA.largura;
     const _envIntPTLKeys=_envIntKeys.filter(tp=>tp!=='Edifício adjacente'&&_envIntRaw[tp].length);
     // Num apartamento a porta de entrada dá sempre para a circulação comum —
@@ -12297,7 +12646,8 @@ function buildTxt(){
       if(_temPortaEntrada){
         t+=`  Porta de entrada: 2 ombreiras de ${PORTA_ENTRADA.altura.toFixed(2)} m + padieira de ${PORTA_ENTRADA.largura.toFixed(2)} m`;
         t+=` = ${PERIM_PORTA.toFixed(2)} m   (Ψ×L = ${(PERIM_PORTA*PSI_CAIXILHARIA).toFixed(2)} W/ºC)\n`;
-        t+='  → Se a porta da fração tiver outras medidas, corrige aqui (o valor por omissão é 2,00 × 0,80 m).\n';
+        t+='  → Se a porta da fração tiver outras medidas, corrige aqui (o valor por omissão é '+
+          PORTA_DEFEITO.altura.toFixed(2).replace('.',',')+' × '+PORTA_DEFEITO.largura.toFixed(2).replace('.',',')+' m).\n';
       }
       t+='Regra: cada ligação da parede com o ENU mede o mesmo que o troço de parede.\n'+
          'O que varia é o NÚMERO de ligações, conforme o piso: num piso intermédio são duas\n'+
@@ -12572,7 +12922,7 @@ function buildTxt(){
   // não serve para contas. Já rebentou aqui uma vez com "toFixed is not a function".
   const _num=v=>{const x=parseFloat(String(v==null?'':v).replace(',','.'));
     return isFinite(x)?x:0;};
-  const PORTA_AREA_DEFEITO=1.80;
+  const PORTA_AREA_DEFEITO=+(PORTA_DEFEITO.largura*PORTA_DEFEITO.altura).toFixed(2);
     const portas=[], portasENU=[];
     const apart=(D.edificioTipo==='Apartamento');
     /* Uma divisão que É um espaço não útil — garagem, arrumos da cave — não faz
@@ -12778,7 +13128,10 @@ function buildTxt(){
   // "0,00 m" como se a ligação não existisse, quando na realidade é que não foi medida
   // (ex: modo "não medir paredes", só fotos + vãos).
   const pl=D.pisoLocal||'';
-  let _ptlSemComprimentos=false, _ptlPisoUnico=null, _pdParaAngulos=2.60;
+  /* Um valor só para o pé-direito dos ângulos: o quadro das PTL e o detalhe
+     dos ângulos faziam a conta cada um à sua maneira, e num apartamento
+     saíam 2,69 m num e 2,60 m no outro. */
+  let _ptlSemComprimentos=false, _ptlPisoUnico=null;
   let _ptlNotaCaveENU=false;
   if(compTotalGlobal>0){
     // Nota (1) da Tabela 34: para pavimento de nível intermédio (e varanda), o
@@ -12966,10 +13319,6 @@ function buildTxt(){
            parte do perímetro cabe a cada uma, reparte-se em partes iguais e
            assinala-se — melhor do que atribuir tudo a uma só. */
         // guardado para o cálculo dos ângulos, mais abaixo
-      _pdParaAngulos=(()=>{
-        const vals=Object.values(D.peDireitos||{}).map(v=>num(v)).filter(v=>v>0);
-        return vals.length?vals.reduce((a,b)=>a+b,0)/vals.length:2.60;
-      })();
       const _cobs=(D.coberturaTipos&&D.coberturaTipos.length)
           ? D.coberturaTipos.filter(c=>!/desv[aã]o/i.test(String(c)))
           : [];
@@ -13098,26 +13447,11 @@ function buildTxt(){
     _notaENUnoQuadroExt=compENU;
   }
 
-  // 4. Ângulos salientes — contar a partir das orientações únicas por divisão
-  // Regra simplificada: nº ângulos = nº de mudanças de orientação exterior
-  // Estimativa: (nº orientações distintas nas paredes exteriores) - 1 = nº ângulos mínimo
-  const orientacoes=[...new Set(Object.values(D.divisoesDados||{}).flatMap(dd=>Object.keys(dd.comprimentos||{})))].filter(Boolean);
-  const nAngulos=Math.max(0,orientacoes.length-1);
-  // comprimento de referência: soma comp de todas as paredes / número médio orientações
-  // usa compTotalGlobal/orientacoes.length como estimativa por ângulo
-  if(nAngulos>0){
-    const compAngulo=compTotalGlobal/orientacoes.length;
-    // Para ângulo saliente: L é o pé-direito (comprimento vertical), mas na PTL é por metro linear de ângulo
-    // usa pé-direito médio × nAngulos como comprimento estimado. Já é uma
-    // estimativa grosseira (nº de ângulos e o próprio comprimento de
-    // referência já são aproximados) — usa-se a MÉDIA de todos os pés-direitos
-    // registados (não só o do primeiro piso), para não enviesar a estimativa
-    // num prédio/moradia com pés-direitos diferentes por piso.
-    const pdRegistados=Object.values(D.peDireitos||{}).map(v=>num(v)).filter(v=>v>0);
-    const pdRegistado=pdRegistados.length?pdRegistados.reduce((a,b)=>a+b,0)/pdRegistados.length:0;
-    const pdMed=pdRegistado||2.70;
-    const Langulo=pdMed*nAngulos;
-    ptlRows.push({tipo:`Dois planos verticais em ângulo saliente (${nAngulos})`+(pdRegistado?'':' ⚠️ sem pé-direito registado, assumido 2,70m'),L:Langulo,psi:PSI.angulo});
+  // 4. Ângulos salientes — a mesma conta do detalhe (angulosSalientes)
+  { const ang=angulosSalientes();
+    if(ang.nCantos>0)
+      ptlRows.push({tipo:`Dois planos verticais em ângulo saliente (${ang.nCantos} canto(s) × ${ang.nPisos} piso(s))`+
+        (ang.pdAssumido?' ⚠️ sem pé-direito registado, assumido 2,70m':''),L:ang.L,psi:PSI.angulo});
   }
 
   // 5. Zona caixa de estore
@@ -13162,15 +13496,11 @@ function buildTxt(){
      Só o número mínimo — reentrâncias e recuados acrescentam mais e têm de ser
      medidos. */
   {
-    const nOri=(D.orientacoesConfirmadas||[]).length||
-      [...new Set((D.divisoes||[]).flatMap(d=>
-        Object.keys((D.divisoesDados[d]||{}).trocos||{})))].length;
-    if(nOri>=2){
-      const nCantos=nOri>=4?4:(nOri===3?2:1);
-      const nPisos=Math.max(1,parseInt(D.pisos)||1);
-      const Lang=nCantos*_pdParaAngulos*nPisos;
+    const ang=angulosSalientes();
+    const nOri=ang.nOri, nCantos=ang.nCantos, nPisos=ang.nPisos, Lang=ang.L;
+    if(nCantos>0){
       t+='\nÂNGULOS SALIENTES (Ψ = '+PSI.angulo.toFixed(2).replace('.',',')+' W/m.ºC — Tabela 34)\n';
-      t+='  '+nCantos+' canto(s) × '+_pdParaAngulos.toFixed(2).replace('.',',')+
+      t+='  '+nCantos+' canto(s) × '+ang.pd.toFixed(2).replace('.',',')+
          ' m de pé-direito × '+nPisos+' piso(s) = '+Lang.toFixed(2).replace('.',',')+' m\n';
       t+='  Ψ×L = '+(Lang*PSI.angulo).toFixed(2).replace('.',',')+' W/ºC\n';
       t+='  ⚠ MÍNIMO, a partir das '+nOri+' orientações medidas. Reentrâncias, recuados e\n'+
@@ -14305,7 +14635,11 @@ async function _peca(nome,fn){
   try{ return await fn(); }
   catch(e){ _pacoteFalhas.push(nome+': '+(e&&e.message||e)); console.error(nome+' falhou:',e); return null; }
 }
-async function buildPacoteZipBlob(show){
+/* opc.semEsboco — o ZIP que vai para o OneDrive não leva o esboço da planta
+   (pedido do Renato: na pasta do processo não serve para nada). O «Exportar»
+   local continua a levá-lo, e o botão «Gerar esboço da planta» fica. */
+async function buildPacoteZipBlob(show,opc){
+  opc=opc||{};
   _pacoteFalhas=[];
   try{registarExportacao();}catch(e){}
   show=show||(()=>{});
@@ -14362,7 +14696,7 @@ async function buildPacoteZipBlob(show){
   }catch(e){ _pacoteFalhas.push('backup JSON do levantamento: '+(e.message||e)); console.error('backup JSON não gerado:',e.message); }
 
   // 1b. Esboço esquemático da planta (PDF) — opcional, não interrompe o pacote se falhar
-  try{
+  if(!opc.semEsboco) try{
     const pdfEsboco=gerarEsbocoPlantaPDF();
     // arraybuffer em vez de blob, pela mesma razão do KMZ e das fotos
     raiz.file('6_'+_nomeCurto+'_esboco_planta.pdf',pdfEsboco.output('arraybuffer'),{binary:true});
@@ -14835,7 +15169,8 @@ function abreviarMorada(t){
   return x.replace(/\s{2,}/g,' ').trim();
 }
 function nomePacoteExportacao(){
-  const bruta=(D.moradaCaderneta||D.morada||D.nome||'CE').trim();
+  // sem os rótulos da caderneta: saía «Av._R._P_._ESTRUMAL_Lt._3»
+  const bruta=limparRotulosMorada(D.moradaCaderneta||D.morada||D.nome||'CE').trim()||'CE';
   // tirar código postal e o que vem depois — o nome fica mais curto e legível
   let n=bruta.split(/\s\d{4}-\d{3}/)[0];
   n=abreviarMorada(n);
@@ -16268,6 +16603,377 @@ async function rasterizarPaginaPDF(dataURL,numeroPagina,dpi){
   return {jpegDataURL:canvas.toDataURL('image/jpeg',0.92),nPaginas:pdfDoc.numPages};
 }
 
+/* ══════════ ARTIGO MATRICIAL — LEITURA COM RIGOR ══════════
+   Um dígito errado no artigo é um certificado emitido para outro prédio. Numa
+   caderneta da Praia da Rocha o artigo 15203 foi lido 15263: a caderneta era
+   uma captura de ecrã de 945 px, a app reduzia-a a 808 px e a API a 723 — o
+   «0» ficava com 8 px de altura, indistinguível de um «6».
+   Quatro camadas, por esta ordem:
+   1. TEXTO DO PDF. A caderneta tirada do Portal das Finanças traz o texto
+      dentro do PDF. Lido daí não há erro possível, nem gasto de IA.
+   2. SEGUNDA LEITURA, SÓ DO ARTIGO, sobre um recorte da linha do cabeçalho e
+      do rodapé em resolução máxima — não sobre a página inteira reduzida.
+   3. CONFERÊNCIA: leitura geral, cabeçalho e rodapé têm de dar o mesmo.
+   4. CONFIRMAÇÃO HUMANA: o artigo lido por imagem só passa quando se olha
+      para o recorte ao lado do número e se toca «Confirmo». Até lá o
+      verificador acusa e o TXT diz «POR CONFIRMAR». */
+const ARTIGO_DPI=300;
+let VERIF_ARTIGO_MS=60000;          // tempo máximo da verificação do artigo
+const ARTIGO_LARGURA_MAX=1560;       // abaixo do limite da API: não é reduzido lá
+const ARTIGO_RECORTE_GUARDAR=1000;   // o recorte que fica no processo para conferir
+const _soDigitos=v=>String(v==null?'':v).replace(/\D/g,'');
+
+/* Do texto de uma caderneta (camada de texto do PDF). */
+function artigoDoTexto(txt){
+  const t=String(txt||'').replace(/\s+/g,' ');
+  const r={artigo:null,rodape:[],fracao:null,codigo:null,origem:null};
+  const m=t.match(/ARTIGO\s+MATRICIAL\s*:?\s*(\d{1,7})\b/i);
+  if(m) r.artigo=m[1];
+  const re=/\b(\d{6})\s*-\s*[^-]{2,60}?-\s*U\s*-\s*(\d{1,7})\s*(?:-\s*([A-Z]{1,3}|\d{1,3}))?/g;
+  let f; while((f=re.exec(t))){ r.rodape.push(f[2]); if(!r.codigo) r.codigo=f[1]; if(f[3]&&!r.fracao) r.fracao=f[3]; }
+  const o=t.match(/TEVE\s+ORIGEM\s+NOS\s+ARTIGOS.*?Artigo\s*:?\s*(\d{1,7})/i);
+  if(o) r.origem=o[1];
+  return r;
+}
+async function textoDoPDF(dataURL,maxPag){
+  if(!window.pdfjsLib) return '';
+  const bin=atob(String(dataURL).split(',')[1]); const bytes=new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) bytes[i]=bin.charCodeAt(i);
+  const pdf=await window.pdfjsLib.getDocument({data:bytes}).promise;
+  let txt='';
+  for(let p=1;p<=Math.min(pdf.numPages,maxPag||3);p++){
+    const pg=await pdf.getPage(p); const tc=await pg.getTextContent();
+    txt+=tc.items.map(i=>i.str).join(' ')+'\n';
+  }
+  return txt;
+}
+/* Faixa horizontal [y0,y1] (fração da altura) de uma imagem; à largura total,
+   ou só entre x0 e x1 (fração da largura). */
+function recortarFaixa(dataURL,y0,y1,largMax,qualidade,x0,x1){
+  return new Promise((res,rej)=>{
+    // sem canvas não há recorte possível: desiste já, sem esperar pela imagem
+    const _cv0=document.createElement('canvas');
+    if(!_cv0.getContext||!_cv0.getContext('2d')) return rej(new Error('sem canvas'));
+    // uma imagem que nunca carrega não pode prender a leitura da caderneta
+    const tm=setTimeout(()=>rej(new Error('recorte: a imagem não carregou')),8000);
+    const _res=res, _rej=rej; res=v=>{clearTimeout(tm);_res(v);}; rej=e=>{clearTimeout(tm);_rej(e);};
+    const img=new Image();
+    img.onload=()=>{
+      try{
+        const W0=img.naturalWidth||img.width, H=img.naturalHeight||img.height;
+        const a=Math.max(0,Math.floor(H*Math.max(0,y0))), b=Math.min(H,Math.ceil(H*Math.min(1,y1)));
+        const xa=Math.max(0,Math.floor(W0*(x0||0))), xb=Math.min(W0,Math.ceil(W0*(x1==null?1:x1)));
+        const W=Math.max(1,xb-xa);
+        const k=Math.min(1,(largMax||ARTIGO_LARGURA_MAX)/W);
+        const cv=document.createElement('canvas');
+        cv.width=Math.round(W*k); cv.height=Math.max(1,Math.round((b-a)*k));
+        const cx=cv.getContext('2d'); if(!cx) return rej(new Error('sem canvas'));
+        cx.fillStyle='#fff'; cx.fillRect(0,0,cv.width,cv.height);
+        cx.drawImage(img,xa,a,W,b-a,0,0,cv.width,cv.height);
+        res(cv.toDataURL('image/jpeg',qualidade||0.92));
+      }catch(e){ rej(e); }
+    };
+    img.onerror=()=>rej(new Error('imagem ilegível')); img.src=dataURL;
+  });
+}
+/* A imagem de maior resolução disponível da 1.ª página. */
+async function paginaEmAlta(fonte,tipo){
+  if(/pdf/i.test(tipo||'')||/^data:application\/pdf/i.test(String(fonte))){
+    return (await rasterizarPaginaPDF(fonte,1,ARTIGO_DPI)).jpegDataURL;
+  }
+  return fonte;
+}
+const PROMPT_ARTIGO='Estas imagens são recortes, em resolução máxima, de uma Caderneta Predial Urbana portuguesa. '+
+  'Preciso só do ARTIGO MATRICIAL, lido dígito a dígito, sem adivinhar. Responde com JSON: '+
+  'artigo_cabecalho (o número a seguir a «ARTIGO MATRICIAL:» — NÃO o NIP, NÃO o de «Teve origem nos artigos», '+
+  'NÃO o nº de registo da C.R.P., NÃO a ficha de avaliação; null se não aparecer), '+
+  'artigo_rodape (no rodapé «081103 - PORTIMÃO - U - 15203 - G», o número entre «U -» e a fração; null se não aparecer), '+
+  'fracao_rodape (a letra ou número depois do artigo no rodapé; null se não houver), '+
+  'codigo_rodape (os seis dígitos do início do rodapé; null se não aparecer), '+
+  'artigo_origem (o número em «Teve origem nos artigos … Artigo:», se aparecer; null se não), '+
+  'rotulo_visto (true se vês o texto «ARTIGO MATRICIAL» nas imagens), '+
+  'digitos_duvidosos (posições, a contar de 1, dos dígitos do artigo que não consegues ler com certeza — '+
+  'um 0 que pode ser 6 ou 8, um 1 que pode ser 7, um 3 que pode ser 8; [] se todos nítidos). '+
+  'Lê o cabeçalho e o rodapé separadamente: não copies um para o outro. Responde APENAS com JSON válido.';
+async function _lerArtigoDedicado(recortes){
+  return comRetry(async(rep)=>{
+    const data=await _pedidoIA('artigo',{model:'claude-sonnet-4-6',max_tokens:200,
+      messages:[{role:'user',content:[...recortes.map(du=>({type:'image',
+        source:{type:'base64',media_type:'image/jpeg',data:du.split(',')[1]}})),{type:'text',text:PROMPT_ARTIGO}]}]},rep);
+    const raw=(data.content.find(c=>c.type==='text')||{}).text||'';
+    return parseJsonIA(raw);
+  });
+}
+/* Junta tudo o que se leu e decide. Devolve o objecto que fica em
+   D.matrizVerificacao; a proposta é o artigo a gravar. Pura: testa-se sem rede. */
+function decidirArtigo(l){
+  const geral=_soDigitos(l.geral), rodGeral=_soDigitos(l.rodapeGeral);
+  const cab=_soDigitos(l.cabecalho), rods=(l.rodapes||[]).map(_soDigitos).filter(Boolean);
+  const texto=_soDigitos(l.texto), textoRod=(l.textoRodapes||[]).map(_soDigitos).filter(Boolean);
+  const leituras=[];
+  if(texto) leituras.push({fonte:'texto do PDF — cabeçalho',valor:texto});
+  textoRod.forEach(v=>leituras.push({fonte:'texto do PDF — rodapé',valor:v}));
+  if(geral) leituras.push({fonte:'leitura geral — cabeçalho',valor:geral});
+  if(rodGeral) leituras.push({fonte:'leitura geral — rodapé',valor:rodGeral});
+  if(cab) leituras.push({fonte:'recorte em alta — cabeçalho',valor:cab});
+  rods.forEach(v=>leituras.push({fonte:'recorte em alta — rodapé',valor:v}));
+  const distintos=[...new Set(leituras.map(x=>x.valor))];
+  const avisos=[];
+  let proposta=texto||cab||geral||rods[0]||rodGeral||'';
+  let estado;
+  if(texto){
+    const textoDiverge=textoRod.some(v=>v!==texto);
+    estado=textoDiverge?'divergente':'confirmado';
+    if(textoDiverge) avisos.push('o texto do PDF tem '+texto+' no cabeçalho e '+textoRod.join('/')+' no rodapé');
+    if(geral&&geral!==texto) avisos.push('a leitura por imagem dava '+geral+' — o texto do PDF manda');
+  } else {
+    estado=(distintos.length>1)?'divergente':'por_confirmar';
+    if(distintos.length>1) avisos.push('leituras diferentes: '+leituras.map(x=>x.valor+' ('+x.fonte+')').join(', '));
+    if((l.duvidosos||[]).length) { estado='divergente';
+      avisos.push('dígito(s) pouco nítido(s) na posição '+l.duvidosos.join(', ')); }
+    if(leituras.length<2) avisos.push('só uma leitura — sem conferência');
+  }
+  const origem=_soDigitos(l.origem);
+  if(origem&&proposta===origem){ estado='divergente';
+    avisos.push('o valor é igual ao de «Teve origem nos artigos» ('+origem+') — esse é o artigo antigo'); }
+  return {proposta,estado,leituras,avisos,
+    fonte:texto?'texto do PDF':(cab?'recorte em alta':'leitura geral'),
+    fracaoRodape:l.fracaoRodape||null,ts:new Date().toLocaleString('pt-PT')};
+}
+/* A verificação completa. `fonte` é o documento na maior resolução que houver
+   (o PDF, ou a foto a 2200 px), `ocr` a leitura geral já feita. */
+async function verificarArtigoMatricial(fonte,tipo,ocr){
+  ocr=ocr||{};
+  const l={geral:ocr.numero_matriz,rodapeGeral:ocr.artigo_rodape};
+  // 1. texto do PDF
+  if(/pdf/i.test(tipo||'')||/^data:application\/pdf/i.test(String(fonte))){
+    try{
+      const t=artigoDoTexto(await textoDoPDF(fonte,3));
+      if(t.artigo){ l.texto=t.artigo; l.textoRodapes=t.rodape; l.origem=t.origem; l.fracaoRodape=t.fracao;
+        const v=decidirArtigo(l); v.recorte=null; return v; }
+    }catch(e){ console.warn('texto do PDF não lido:',e.message); }
+  }
+  // 2. recortes em alta: à volta de onde a leitura geral viu o artigo e o rodapé
+  let pagina=null, recortes=[], recorteGuardar=null;
+  try{ pagina=await paginaEmAlta(fonte,tipo); }catch(e){}
+  const faixas=[];
+  const ya=parseFloat(ocr.y_artigo), yr=parseFloat(ocr.y_rodape);
+  if(isFinite(ya)&&ya>=0&&ya<=1) faixas.push([ya-0.07,ya+0.07]);
+  if(isFinite(yr)&&yr>=0&&yr<=1) faixas.push([yr-0.05,yr+0.05]);
+  const semPosicao=!faixas.length;
+  if(semPosicao) faixas.push([0,0.38],[0.31,0.69],[0.62,1]);
+  if(pagina){
+    for(const [a,b] of faixas){ try{ recortes.push(await recortarFaixa(pagina,a,b)); }catch(e){} }
+    /* O recorte para conferir é apertado: a metade esquerda, onde está o
+       «ARTIGO MATRICIAL», e pouca altura — no telemóvel o número tem de se
+       ver em grande. Sem posição conhecida vai o topo da página. */
+    try{
+      const [a,b]=faixas[0], c=(a+b)/2;
+      const [ya2,yb2]=semPosicao?[0,0.38]:[c-0.045,c+0.045];
+      recorteGuardar=await recortarFaixa(pagina,ya2,yb2,ARTIGO_RECORTE_GUARDAR,0.8,0,0.62);
+    }catch(e){}
+  }
+  let ded=null;
+  if(recortes.length){
+    try{ ded=await _lerArtigoDedicado(recortes); }catch(e){ console.warn('2.ª leitura do artigo falhou:',e.message); }
+    // a posição podia estar errada: se o rótulo não apareceu, repete com a página em faixas
+    if(ded&&!ded.rotulo_visto&&!semPosicao&&pagina){
+      try{
+        const r2=[];
+        for(const [a,b] of [[0,0.38],[0.31,0.69],[0.62,1]]) r2.push(await recortarFaixa(pagina,a,b));
+        const d2=await _lerArtigoDedicado(r2);
+        if(d2&&d2.rotulo_visto){ ded=d2;
+          try{ recorteGuardar=await recortarFaixa(pagina,0,0.38,ARTIGO_RECORTE_GUARDAR,0.8,0,0.62); }catch(e){ recorteGuardar=null; } }
+      }catch(e){}
+    }
+  }
+  if(ded){
+    l.cabecalho=ded.artigo_cabecalho; l.rodapes=ded.artigo_rodape?[ded.artigo_rodape]:[];
+    l.duvidosos=Array.isArray(ded.digitos_duvidosos)?ded.digitos_duvidosos:[];
+    l.origem=ded.artigo_origem; l.fracaoRodape=ded.fracao_rodape;
+  }
+  const v=decidirArtigo(l);
+  v.recorte=recorteGuardar;
+  if(!ded) v.avisos.push('a segunda leitura não correu — confirma com atenção');
+  return v;
+}
+/* DA LEITURA AOS CAMPOS — UM DONO SÓ.
+   A app em obra e a revisão aplicavam a leitura cada uma à sua maneira: a
+   revisão gravava o concelho e o artigo tal como vinham da IA, e o «Lagoa»
+   continuava lá depois de corrigido na app. Esta função decide; as duas
+   aplicam o resultado. Não mexe em D: devolve o que gravar. */
+function camposMatriciais(ocr,Dctx){
+  ocr=ocr||{}; const Dc=Dctx||{};
+  const set={}, achados=[];
+  ['distrito','concelho','freguesia'].forEach(k=>{
+    const v=_soDigitos(ocr['codigo_'+k]);
+    if(v) set['dvCod'+k.charAt(0).toUpperCase()+k.slice(1)]=v.padStart(2,'0');
+  });
+  const cc=_soDigitos(ocr.codigo_composto||(ocr._artigo&&ocr._artigo.codigoRodape));
+  if(cc.length===6){
+    if(!set.dvCodDistrito&&!Dc.dvCodDistrito) set.dvCodDistrito=cc.slice(0,2);
+    if(!set.dvCodConcelho&&!Dc.dvCodConcelho) set.dvCodConcelho=cc.slice(2,4);
+    if(!set.dvCodFreguesia&&!Dc.dvCodFreguesia) set.dvCodFreguesia=cc.slice(4,6);
+  }
+  const dist=set.dvCodDistrito||Dc.dvCodDistrito, conc=set.dvCodConcelho||Dc.dvCodConcelho;
+  // concelho: o código manda; uma entidade nunca é concelho
+  let nome=ocr.concelho?String(ocr.concelho).trim():'';
+  if(pareceEntidade(nome)) nome='';
+  const doCod=concelhoPorCodigo(dist,conc);
+  if(doCod&&nome&&!mesmoConcelho(nome,doCod))
+    set._avisoConcelhoLido='a leitura dizia «'+nome+'», o código do cabeçalho ('+dist+'-'+conc+') é '+doCod;
+  if(doCod) nome=doCod;
+  if(nome){ set.concelho=nome; set.concelhoCaderneta=nome; achados.push('concelho '+nome); }
+  // conservatória: a do documento; sem ela, a do concelho
+  let crp=ocr.conservatoria?String(ocr.conservatoria).trim():'';
+  crp=crp.replace(/^(conservat[óo]ria\s+do\s+registo\s+predial\s+de\s+|c\.?\s*r\.?\s*p\.?\s*(de\s+)?)/i,'').trim();
+  if(pareceEntidade(crp)) crp='';
+  if(crp){ set.conservatoria=nomeProprio(crp); achados.push('conservatória de '+set.conservatoria); }
+  else if(nome&&!Dc.conservatoria) set.conservatoria=nome;
+  if(ocr.numero_descricao_predial){
+    set.numeroDescricaoPredial=String(ocr.numero_descricao_predial).split('/')[0].trim();
+    achados.push('nº descrição predial '+set.numeroDescricaoPredial);
+  }
+  // artigo: a proposta da verificação; lido por imagem, nunca fica confirmado sozinho
+  const v=ocr._artigo||null;
+  const artigo=_soDigitos(v&&v.proposta)||_soDigitos(ocr.numero_matriz);
+  if(artigo){
+    set.numeroMatriz=artigo;
+    if(ocr.artigo_rodape) set.numeroMatrizRodape=_soDigitos(ocr.artigo_rodape);
+    const vv=v?Object.assign({},v):{proposta:artigo,estado:'por_confirmar',
+      leituras:[{fonte:'leitura geral — cabeçalho',valor:artigo}],
+      avisos:['só uma leitura — sem conferência'],fonte:'leitura geral',ts:new Date().toLocaleString('pt-PT')};
+    set.matrizVerificacao=vv;
+    if(vv.estado==='confirmado'){ set.numeroMatrizConfirmado=artigo; vv.confirmadoPor='texto do PDF';
+      achados.push('matriz nº '+artigo+' (texto do PDF)'); }
+    else { set.numeroMatrizConfirmado=''; achados.push('matriz nº '+artigo+' — '+
+      (vv.estado==='divergente'?'⚠ LEITURAS DIFERENTES, confirma':'confirma no documento')); }
+  }
+  if(ocr.numero_fracao){
+    set.numeroFracao=String(ocr.numero_fracao).trim();
+    const fr=v&&v.fracaoRodape;
+    if(fr&&_semAcento(fr)!==_semAcento(set.numeroFracao))
+      set._avisoFracaoLida='fração '+set.numeroFracao+' no quadro da fração e '+fr+' no rodapé';
+    achados.push('fração '+set.numeroFracao);
+  }
+  return {set,achados};
+}
+/* Leitura de um documento oficial, com a verificação do artigo. É o que a app
+   em obra e a revisão chamam. */
+async function lerDocumentoMatricial(dataURL,mediaType,nome,fonteAlta,tipoFonteAlta){
+  const ocr=await identificarDocumentoOficial(dataURL,mediaType,nome);
+  if(ocr&&!ocr.__erro&&ocr.tipo_documento==='caderneta_predial'&&(ocr.numero_matriz||ocr.artigo_rodape)){
+    /* A verificação nunca prende a leitura: se não acabar a tempo, o artigo
+       fica POR CONFIRMAR e o resto da caderneta entra na mesma. */
+    try{
+      ocr._artigo=await Promise.race([
+        verificarArtigoMatricial(fonteAlta||dataURL,tipoFonteAlta||mediaType,ocr),
+        new Promise((_,rej)=>setTimeout(()=>rej(new Error('não terminou a tempo')),VERIF_ARTIGO_MS))]);
+    }catch(e){
+      console.warn('verificação do artigo falhou:',e.message);
+      ocr._artigo=decidirArtigo({geral:ocr.numero_matriz,rodapeGeral:ocr.artigo_rodape});
+      ocr._artigo.avisos.push('a verificação do artigo não correu ('+e.message+') — confirma com atenção');
+    }
+  }
+  return ocr;
+}
+/* CARTÃO DE CONFIRMAÇÃO DO ARTIGO. O recorte da caderneta ao lado do número,
+   em grande, e as leituras que se fizeram. «Confirmo» só depois de olhar. */
+function renderConfirmacaoArtigo(cont){
+  if(!cont) return;
+  const ea=estadoArtigo();
+  if(ea.estado==='vazio'){ cont.innerHTML=''; return; }
+  const v=D.matrizVerificacao||{};
+  const ok=ea.estado==='confirmado';
+  cont.innerHTML='';
+  cont.className='artigo-conf';
+  cont.style.cssText='border-radius:10px;padding:10px 12px;margin:8px 0;border:2px solid '+
+    (ok?'var(--ac)':(ea.estado==='divergente'?'var(--red)':'var(--amber,#e0a030)'))+';background:var(--bg3)';
+  const h=document.createElement('div');
+  h.style.cssText='font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:'+
+    (ok?'var(--ac)':(ea.estado==='divergente'?'var(--red)':'var(--amber,#e0a030)'));
+  h.textContent=ok?'✓ Artigo matricial confirmado'+(ea.como?' — '+ea.como:'')
+    :(ea.estado==='divergente'?'⚠ Artigo matricial — as leituras não batem':'Artigo matricial — confirma no documento');
+  cont.appendChild(h);
+  const num=document.createElement('div');
+  num.className='artigo-num';
+  num.style.cssText='font-size:30px;font-weight:800;letter-spacing:.18em;font-variant-numeric:tabular-nums;margin:4px 0;color:var(--tx)';
+  num.textContent=D.numeroMatriz;
+  cont.appendChild(num);
+  if(v.recorte){
+    const im=document.createElement('img');
+    im.src=v.recorte; im.alt='recorte da caderneta';
+    im.style.cssText='width:100%;border-radius:6px;border:1px solid var(--br);background:#fff;cursor:zoom-in';
+    im.title='Toca para ver em tamanho real';
+    // em tamanho real, com deslocamento — para não ter dúvidas num dígito
+    im.onclick=()=>{
+      const f=document.createElement('div');
+      f.style.cssText='position:fixed;inset:0;z-index:10050;background:#000d;overflow:auto;-webkit-overflow-scrolling:touch';
+      const g=document.createElement('img'); g.src=v.recorte; g.style.cssText='display:block;max-width:none;width:auto;margin:40px auto;background:#fff';
+      const x=document.createElement('button'); x.type='button'; x.textContent='✕ Fechar';
+      x.style.cssText='position:fixed;top:8px;right:8px;padding:8px 12px;border-radius:8px;border:none;font-weight:700';
+      x.onclick=()=>f.remove(); f.appendChild(g); f.appendChild(x); document.body.appendChild(f);
+    };
+    cont.appendChild(im);
+    const zz=document.createElement('div'); zz.style.cssText='font-size:11px;color:var(--tx3);margin-top:2px';
+    zz.textContent='toca no recorte para o ver em tamanho real'; cont.appendChild(zz);
+  }
+  const ls=(v.leituras||[]);
+  if(ls.length){
+    const l=document.createElement('div');
+    l.style.cssText='font-size:11.5px;color:var(--tx2);margin-top:6px;line-height:1.5';
+    l.textContent=ls.map(x=>x.valor+' — '+x.fonte).join(' · ');
+    cont.appendChild(l);
+  }
+  // «leituras diferentes: …» repete a linha de cima — fica só no verificador
+  (v.avisos||[]).filter(a=>!/^leituras diferentes/.test(a)).forEach(a=>{ const d=document.createElement('div');
+    d.style.cssText='font-size:11.5px;color:var(--red);margin-top:3px'; d.textContent='⚠ '+a; cont.appendChild(d); });
+  if(ok) return;
+  const nota=document.createElement('div');
+  nota.style.cssText='font-size:12px;color:var(--tx2);margin:6px 0';
+  nota.textContent=v.recorte?'Compara o número com o recorte, dígito a dígito.'
+    :'Abre a caderneta e compara o número com o «ARTIGO MATRICIAL» do cabeçalho e com o rodapé.';
+  cont.appendChild(nota);
+  const row=document.createElement('div'); row.style.cssText='display:flex;gap:6px;flex-wrap:wrap';
+  const b1=document.createElement('button'); b1.type='button'; b1.className='btn-next';
+  b1.style.cssText='flex:1;min-width:140px';
+  b1.textContent='✓ Confirmo '+D.numeroMatriz;
+  b1.onclick=e=>{ e.preventDefault(); confirmarArtigo(D.numeroMatriz,'confirmado por ti');
+    renderConfirmacaoArtigo(cont); };
+  const b2=document.createElement('button'); b2.type='button';
+  b2.style.cssText='flex:1;min-width:140px;border:1px solid var(--br);background:var(--bg2);color:var(--tx);border-radius:9px;padding:9px';
+  b2.textContent='✎ Está errado';
+  row.appendChild(b1); row.appendChild(b2); cont.appendChild(row);
+  const ed=document.createElement('div'); ed.style.cssText='display:none;gap:6px;margin-top:6px';
+  const inp=document.createElement('input'); inp.className='inp'; inp.inputMode='numeric';
+  inp.placeholder='artigo como está na caderneta'; inp.style.flex='1';
+  const b3=document.createElement('button'); b3.type='button'; b3.className='btn-next'; b3.textContent='Gravar e confirmar';
+  ed.appendChild(inp); ed.appendChild(b3); cont.appendChild(ed);
+  b2.onclick=e=>{ e.preventDefault(); ed.style.display='flex'; inp.focus(); };
+  b3.onclick=e=>{ e.preventDefault();
+    if(!_soDigitos(inp.value)){ inp.focus(); return; }
+    confirmarArtigo(inp.value,'escrito à mão'); renderConfirmacaoArtigo(cont); };
+}
+/* Estado da confirmação do artigo, para o verificador, o TXT e os ecrãs. */
+function estadoArtigo(){
+  const m=_soDigitos(D.numeroMatriz);
+  if(!m) return {estado:'vazio'};
+  const v=D.matrizVerificacao||null;
+  if(_soDigitos(D.numeroMatrizConfirmado)===m)
+    return {estado:'confirmado',como:(v&&v.confirmadoPor)||'confirmado',v};
+  return {estado:(v&&v.estado==='divergente')?'divergente':'por_confirmar',v};
+}
+function confirmarArtigo(valor,como){
+  const m=_soDigitos(valor); if(!m) return false;
+  const antes=D.numeroMatriz;
+  D.numeroMatriz=m; D.numeroMatrizConfirmado=m;
+  D.matrizVerificacao=Object.assign({},D.matrizVerificacao||{},
+    {confirmadoPor:como||'confirmado por ti',confirmadoEm:new Date().toLocaleString('pt-PT')});
+  if(antes&&_soDigitos(antes)!==m){ try{ registarAlteracao('numeroMatriz',m,antes); }catch(e){} }
+  try{ autoSave(); }catch(e){}
+  return true;
+}
+
 /* Primeiro o topo; só se faltar o essencial é que se paga a página inteira. */
 async function identificarDocumentoOficial(dataURL,mediaType,nomeFicheiro){
   /* Se o nome do ficheiro diz «certidão», vai só o topo da 1ª página — é lá que
@@ -16334,7 +17040,7 @@ const PROMPT_CERTIDAO='Esta imagem é o CABEÇALHO de uma Certidão Permanente d
   'Se vires também a conservatória, a freguesia ou o concelho, inclui-os. Ignora tudo o resto. '+
   'Responde APENAS com JSON válido, sem texto à volta e sem blocos de código: '+
   '{"tipo_documento":"certidao_permanente","numero_descricao_predial":null,'+
-  '"numero_certidao_permanente":null,"freguesia":null,"concelho":null}';
+  '"numero_certidao_permanente":null,"conservatoria":null,"freguesia":null,"concelho":null}';
 async function _chamarOCRDocumento(blocosFicheiro,perfil){
   if(perfil==='certidao'){
     return comRetry(async(rep)=>{
@@ -16357,7 +17063,7 @@ async function _chamarOCRCompleto(blocosFicheiro){
     '"3291/20080724") e o código de acesso da certidão no cabeçalho (formato XXXX-XXXX-XXXX); a conservatória e a '+
     'freguesia vêm no topo, a composição do prédio a seguir. Ignora titulares, quotas, inscrições, ónus e hipotecas — '+
     'não são precisos. A imagem pode estar cortada em baixo: se um campo não aparecer, devolve null em vez de o inventar. '+
-    'Extrai em JSON (usa null nos campos que não encontrares ou não se apliquem): tipo_documento ("caderneta_predial"|"certidao_permanente"|"outro"), numero_matriz (número de matriz predial urbana, só o número/código, ex: "1234"), numero_fracao (letra ou número de identificação da fração autónoma, ex: "A" ou "12"), morada_completa (morada do prédio/fração tal como consta no documento: rua, número de polícia, andar se aplicável, código postal e localidade, tudo numa só linha), localidade (apenas o nome da localidade/cidade/vila onde se situa o imóvel, ex: "Portimão"), freguesia (nome da freguesia tal como consta no documento), concelho (nome do concelho/município, ex: "Portimão"), ano_inscricao_matriz (ano em que o prédio foi inscrito na matriz predial, só o ano, ex: "1995"), numero_pisos_predio (nº total de pisos do EDIFÍCIO/prédio — este valor serve APENAS para a descrição do prédio; null se não constar), numero_pisos_fracao (nº de pisos da FRAÇÃO/moradia em si, ou seja quantos pisos tem a habitação que está a ser certificada — numa moradia unifamiliar coincide com os pisos do prédio; num apartamento é normalmente 1, ou 2 se for duplex; null se não constar explicitamente), numero_descricao_predial (número de descrição predial — canto superior direito, formato "3291/20080724" → extrai só "3291", nunca a data), numero_certidao_permanente (código de acesso da certidão permanente, formato XXXX-XXXX-XXXX, DIFERENTE do número de descrição predial), codigo_distrito (o número do DISTRITO no cabeçalho da caderneta, ex: em «DISTRITO: 08 - FARO» devolve \"08\"; dois dígitos, com o zero à frente; null se não constar), codigo_concelho (idem para «CONCELHO: 06 - LAGOA» → \"06\"), codigo_freguesia (idem para «FREGUESIA: 08 - UNIÃO DAS FREGUESIAS...» → \"08\"), codigo_composto (o código de SEIS dígitos que aparece no RODAPÉ de todas as páginas da caderneta, antes do nome da freguesia — ex: em «080607 - UNIÃO DAS FREGUESIAS DE ESTÔMBAR E PARCHAL - U - 4559 - H» devolve \"080607\". É o distrito+concelho+freguesia juntos e serve de recurso quando os três do cabeçalho não se leem; null se não constar), tipologia (SÓ se o documento a disser de forma explícita — «T2», «tipologia T3», «tipo T1», na descrição da fração ou nas divisões; devolve no formato \"T2\"; null se não constar ou se for preciso deduzir do número de quartos), andar_fracao (o campo «Andar/Divisão» da caderneta, tal como lá está — «RC», «RC/1º», «2º Esq», «3º Dto»; null se não constar), area_bruta_privativa_m2 (área bruta privativa em m², só o número; null se não constar), area_bruta_dependente_m2 (área bruta dependente em m², só o número; null se não constar). Responde APENAS com JSON válido, sem texto adicional e sem blocos de código.';
+    'Extrai em JSON (usa null nos campos que não encontrares ou não se apliquem): tipo_documento ("caderneta_predial"|"certidao_permanente"|"outro"), numero_matriz (número de matriz predial urbana, só o número/código, ex: "1234" — é o «ARTIGO MATRICIAL» do cabeçalho), artigo_rodape (o artigo tal como vem no RODAPÉ da caderneta, o número a seguir ao «U» — em «081103 - PORTIMÃO - U - 15203 - G» devolve "15203"; lê-o à parte, sem copiar o do cabeçalho: serve para conferir; null se não constar), y_artigo (posição vertical da linha «ARTIGO MATRICIAL» na PRIMEIRA imagem, como fração da altura — 0 no topo, 1 no fundo, duas casas; null se não estiver na primeira imagem), y_rodape (idem para a linha do rodapé com o código de seis dígitos e o artigo, na primeira imagem; null se não estiver), numero_fracao (letra ou número de identificação da fração autónoma, ex: "A" ou "12"), morada_completa (morada do prédio/fração tal como consta no documento: rua, número de polícia, andar se aplicável, código postal e localidade, tudo numa só linha), localidade (apenas o nome da localidade/cidade/vila onde se situa o imóvel, ex: "Portimão"), freguesia (nome da freguesia tal como consta no documento), concelho (nome do concelho do CABEÇALHO da caderneta, a seguir ao código — em «CONCELHO: 11 - PORTIMÃO» devolve "Portimão". NUNCA o que vem na linha dos TITULARES: «Entidade: C.N. LAGOA» é o Cartório Notarial onde se fez a escritura, não o concelho; nem a morada dos titulares), conservatoria (a Conservatória do Registo Predial onde o prédio está descrito — na caderneta vem em «Descrito na C.R.P. de : PORTIMÃO sob o registo nº: 6976» → "Portimão"; na certidão, no topo; null se não constar), ano_inscricao_matriz (ano em que o prédio foi inscrito na matriz predial, só o ano, ex: "1995"), numero_pisos_predio (nº total de pisos do EDIFÍCIO/prédio — este valor serve APENAS para a descrição do prédio; null se não constar), numero_pisos_abaixo_solo (nº de pisos ABAIXO do terreno — caves, subcaves — que a «Descrição» do prédio refere: «composto por cave, rés-do-chão, primeiro…» → 1; 0 se a descrição não falar em cave; null se não houver descrição), numero_pisos_fracao (nº de pisos da FRAÇÃO/moradia em si, ou seja quantos pisos tem a habitação que está a ser certificada — numa moradia unifamiliar coincide com os pisos do prédio; num apartamento é normalmente 1, ou 2 se for duplex; null se não constar explicitamente), numero_descricao_predial (número de descrição predial — na certidão, canto superior direito, formato "3291/20080724" → extrai só "3291", nunca a data; na caderneta, o número em «Descrito na C.R.P. de : … sob o registo nº: 6976» → "6976"), numero_certidao_permanente (código de acesso da certidão permanente, formato XXXX-XXXX-XXXX, DIFERENTE do número de descrição predial), codigo_distrito (o número do DISTRITO no cabeçalho da caderneta, ex: em «DISTRITO: 08 - FARO» devolve \"08\"; dois dígitos, com o zero à frente; null se não constar), codigo_concelho (idem para «CONCELHO: 06 - LAGOA» → \"06\"), codigo_freguesia (idem para «FREGUESIA: 08 - UNIÃO DAS FREGUESIAS...» → \"08\"), codigo_composto (o código de SEIS dígitos que aparece no RODAPÉ de todas as páginas da caderneta, antes do nome da freguesia — ex: em «080607 - UNIÃO DAS FREGUESIAS DE ESTÔMBAR E PARCHAL - U - 4559 - H» devolve \"080607\". É o distrito+concelho+freguesia juntos e serve de recurso quando os três do cabeçalho não se leem; null se não constar), tipologia (SÓ se o documento a disser de forma explícita — «T2», «tipologia T3», «tipo T1», na descrição da fração ou nas divisões; devolve no formato \"T2\"; null se não constar ou se for preciso deduzir do número de quartos), andar_fracao (o campo «Andar/Divisão» da caderneta, tal como lá está — «RC», «RC/1º», «2º Esq», «3º Dto»; null se não constar), area_bruta_privativa_m2 (área bruta privativa em m², só o número; null se não constar), area_bruta_dependente_m2 (área bruta dependente em m², só o número; null se não constar). Responde APENAS com JSON válido, sem texto adicional e sem blocos de código.';
   return comRetry(async(rep)=>{
     const data=await _pedidoIA('documento',{model:'claude-sonnet-4-6',max_tokens:600,
       messages:[{role:'user',content:[...blocosFicheiro,{type:'text',text:PROMPT_OCR}]}]},rep);
@@ -16874,7 +17580,9 @@ async function dbGetAllDocsDoProjeto(){
    ao imóvel certo. Só se limpa o que veio de documentos; o que foi respondido
    em obra fica. */
 const CAMPOS_DE_DOCUMENTO=['numeroMatriz','numeroFracao','numeroDescricaoPredial',
-  'certidaoPermanenteNumero','moradaCaderneta','concelhoCaderneta','anoInscricaoMatriz',
+  'certidaoPermanenteNumero','moradaCaderneta','concelhoCaderneta','conservatoria','numeroMatrizRodape','nPisosAbaixoSolo',
+  'matrizVerificacao','numeroMatrizConfirmado','_avisoFracaoLida',
+  '_avisoConcelhoLido','anoInscricaoMatriz',
   'areaBrutaPrivativa','areaBrutaDependente','permilagem','dvAndar','dvCodPostal',
   'dvCodDistrito','dvCodConcelho','dvCodFreguesia'];
 function limparDadosDeDocumentos(){
@@ -17728,7 +18436,7 @@ function renderDocsInline(wrap){
     if(D.anoConstrucao) lidos.push(['Ano de construção',D.anoConstrucao]);
     if(D.nPisosEdificio) lidos.push(['Pisos do prédio (só descrição)',D.nPisosEdificio]);
     if(D.pisosDeDocumento&&D.pisos) lidos.push(['Pisos da fração/moradia',String(D.pisos)+(D.pisos>1?' (R/C + '+(D.pisos-1)+'º)':' (R/C)')]);
-    if(D.numeroMatriz) lidos.push(['Matriz',D.numeroMatriz]);
+    if(D.numeroMatriz) lidos.push(['Matriz',D.numeroMatriz+(estadoArtigo().estado==='confirmado'?' ✓':'  ⚠ por confirmar')]);
     if(D.numeroFracao) lidos.push(['Fração',D.numeroFracao]);
     if(D.tipologiaDeDocumento&&D.tipologia) lidos.push(['Tipologia',D.tipologia]);
     if(D.areaBrutaPrivativa) lidos.push(['Área bruta privativa',D.areaBrutaPrivativa+' m²']);
@@ -17756,6 +18464,9 @@ function renderDocsInline(wrap){
       nota.style.cssText='font-size:10.5px;color:var(--tx3);margin-top:6px;line-height:1.4';
       nota.textContent='Confirma os valores. Se algum estiver errado, corrige-o no Modo de Revisão no fim.';
       boxLidos.appendChild(nota);
+      // o artigo não se confirma «no fim»: confirma-se aqui, com o documento à frente
+      const ca=document.createElement('div'); ca.id='docs-artigo-conf';
+      boxLidos.appendChild(ca); renderConfirmacaoArtigo(ca);
     } else {
       boxLidos.style.cssText='';
     }
@@ -18059,7 +18770,10 @@ async function processarFicheirosDocumento(files){
         // ela. O documento é guardado já e a leitura da caderneta continua a
         // correr atrás, preenchendo os campos quando terminar. Antes ficava-se
         // parado à porta do imóvel à espera da rede, documento a documento.
-        promessaOcr=identificarDocumentoOficial(dataURLParaOcr,mediaTypeParaOcr,file.name)
+        /* O artigo confere-se num recorte da foto a 2200 px (a mesma geometria
+           da cópia que vai ao modelo), não na cópia reduzida. */
+        promessaOcr=lerDocumentoMatricial(dataURLParaOcr,mediaTypeParaOcr,file.name,
+            paginaProcessada?paginaProcessada.jpegDataURL:dataURL,paginaProcessada?'image/jpeg':file.type)
           .catch(e=>{console.error('OCR de identificação matricial falhou:',e);return {__erro:(e.name||'Erro')+': '+e.message};});
         st.textContent='A converter foto para PDF…';
         try{
@@ -18074,7 +18788,7 @@ async function processarFicheirosDocumento(files){
         // PDFs também passam pela identificação automática — antes eram saltados em
         // silêncio: "Documento guardado" sem tentar ler nada, parecendo que a app
         // tinha ignorado a caderneta/certidão anexada como PDF.
-        promessaOcr=identificarDocumentoOficial(dataURL,'application/pdf',file.name)
+        promessaOcr=lerDocumentoMatricial(dataURL,'application/pdf',file.name)
           .catch(e=>{console.error('Identificação matricial de PDF falhou:',e);return {__erro:(e.name||'Erro')+': '+e.message};});
       }
 
@@ -18129,10 +18843,8 @@ async function processarFicheirosDocumento(files){
 
           // Aplicar os dados lidos
           const achados=[];
-          if(ocr.numero_matriz){D.numeroMatriz=String(ocr.numero_matriz);achados.push('matriz nº '+ocr.numero_matriz);}
-          if(ocr.numero_fracao){D.numeroFracao=String(ocr.numero_fracao);achados.push('fração '+ocr.numero_fracao);}
           if(ocr.morada_completa){
-            D.moradaCaderneta=String(ocr.morada_completa);
+            D.moradaCaderneta=limparRotulosMorada(ocr.morada_completa);
             if(!D.morada){
               D.morada=D.moradaCaderneta;
               const inpM=document.getElementById('start-morada');
@@ -18142,40 +18854,37 @@ async function processarFicheirosDocumento(files){
           }
           if(ocr.localidade){D.localidade=String(ocr.localidade);achados.push('localidade');}
           if(ocr.freguesia){D.freguesia=String(ocr.freguesia);achados.push('freguesia');}
-          if(ocr.concelho){
-            D.concelho=String(ocr.concelho);D.concelhoCaderneta=D.concelho;
-            achados.push('conservatória de '+D.concelho);
+          /* ARTIGO, FRAÇÃO, CÓDIGOS, CONCELHO, CONSERVATÓRIA — pela regra única
+             (camposMatriciais), a mesma que a revisão usa. O concelho vem do
+             código do cabeçalho; o artigo lido por imagem fica POR CONFIRMAR. */
+          {
+            const concAntes=D.concelho;
+            const cm=camposMatriciais(ocr,D);
+            Object.assign(D,cm.set); achados.push(...cm.achados);
+            if(D.dvCodDistrito&&D.dvCodConcelho&&D.dvCodFreguesia)
+              achados.push('códigos da DV '+D.dvCodDistrito+'·'+D.dvCodConcelho+'·'+D.dvCodFreguesia);
             // a zona climática depende do concelho — recalcular se estiver em automático
-            if(D.zonaClimaticaAuto!==false){
+            if(cm.set.concelho&&cm.set.concelho!==concAntes&&D.zonaClimaticaAuto!==false){
               const alt=D.gpsCoords&&D.gpsCoords.altitude!=null?D.gpsCoords.altitude:null;
               const z=calcularZonaClimatica(D.concelho,alt);
               if(z){D.zonaClimatica=z;}
             }
           }
-          /* OS CÓDIGOS DA DECLARAÇÃO DE VISITA VÊM DA CADERNETA.
-             Estão no cabeçalho — «DISTRITO: 08 · CONCELHO: 06 · FREGUESIA: 08»
-             — e a app pedia-os à mão no fim, quando já tinha o documento na
-             mão desde o princípio. */
-          ['distrito','concelho','freguesia'].forEach(k=>{
-            const v=String((ocr&&ocr['codigo_'+k])||'').replace(/\D/g,'');
-            if(v){ D['dvCod'+k.charAt(0).toUpperCase()+k.slice(1)]=v.padStart(2,'0'); }
-          });
-          if(D.dvCodDistrito&&D.dvCodConcelho&&D.dvCodFreguesia)
-            achados.push('códigos da DV '+D.dvCodDistrito+'·'+D.dvCodConcelho+'·'+D.dvCodFreguesia);
           if(ocr.ano_inscricao_matriz){
             D.anoConstrucao=String(ocr.ano_inscricao_matriz);
             D.anoInscricaoMatriz=D.anoConstrucao;
             achados.push('ano de construção');
           }
           if(ocr.numero_pisos_predio){D.nPisosEdificio=String(ocr.numero_pisos_predio);achados.push('nº pisos do prédio');}
+          if(ocr.numero_pisos_abaixo_solo!=null&&ocr.numero_pisos_abaixo_solo!==''){
+            const cv=parseInt(ocr.numero_pisos_abaixo_solo);
+            if(isFinite(cv)&&cv>=0&&cv<5){ D.nPisosAbaixoSolo=String(cv); if(cv) achados.push(cv+' cave(s)'); }
+          }
           if(ocr.numero_pisos_fracao){
             const nf=parseInt(ocr.numero_pisos_fracao);
             if(nf>0&&nf<=6){D.pisos=nf;D.pisosDeDocumento=true;achados.push('nº pisos da fração');}
           }
-          if(ocr.numero_descricao_predial){
-            D.numeroDescricaoPredial=String(ocr.numero_descricao_predial).split('/')[0].trim();
-            achados.push('nº descrição predial '+D.numeroDescricaoPredial);
-          }
+          // nº de descrição predial: aplicado em camposMatriciais
           if(ocr.numero_certidao_permanente){D.certidaoPermanenteNumero=String(ocr.numero_certidao_permanente);}
 
           /* TIPOLOGIA EXPLÍCITA NA CADERNETA. Só quando o documento a diz —
@@ -18721,6 +19430,32 @@ function renderOrdemDivisoes(wrap){
     wrap.appendChild(warn);
   }
 }
+
+/* CONCELHO PELO CÓDIGO DO CABEÇALHO DA CADERNETA.
+   «DISTRITO: 08 - FARO CONCELHO: 11 - PORTIMÃO». O nome lido pela IA não é de
+   confiança: numa fração da Praia da Rocha a leitura devolveu «Lagoa», que era
+   a entidade da escritura na linha dos titulares («Entidade: C.N. LAGOA» —
+   Cartório Notarial), e o CE ia sair com concelho e conservatória errados. O
+   código não engana. Só o distrito de Faro, que é onde se trabalha; noutro
+   distrito fica o nome lido. */
+const CONCELHOS_POR_CODIGO={'08':{'01':'Albufeira','02':'Alcoutim','03':'Aljezur','04':'Castro Marim',
+  '05':'Faro','06':'Lagoa','07':'Lagos','08':'Loulé','09':'Monchique','10':'Olhão','11':'Portimão',
+  '12':'São Brás de Alportel','13':'Silves','14':'Tavira','15':'Vila do Bispo','16':'Vila Real de Santo António'}};
+function concelhoPorCodigo(dist,conc){
+  const d=String(dist||'').replace(/\D/g,''), c=String(conc||'').replace(/\D/g,'');
+  if(!d||!c) return null;
+  return ((CONCELHOS_POR_CODIGO[d.padStart(2,'0')]||{})[c.padStart(2,'0')])||null;
+}
+const _semAcento=v=>String(v||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().toLowerCase();
+function mesmoConcelho(a,b){ return _semAcento(a)===_semAcento(b); }
+/* «PORTIMÃO» → «Portimão», «VILA REAL DE SANTO ANTÓNIO» → «Vila Real de Santo António». */
+function nomeProprio(v){
+  return String(v||'').trim().toLowerCase()
+    .replace(/(^|[\s-])(\S)/g,(m,a,b)=>a+b.toUpperCase())
+    .replace(/ (De|Da|Do|Dos|Das|E) /g,x=>x.toLowerCase());
+}
+/* «C.N. LAGOA», «Cartório Notarial de…», «Conservatória…» não são concelhos. */
+function pareceEntidade(v){ return /^\s*(c\.?\s*n\.?\s|c\.?\s*r\.?\s*p\.?|cart[óo]rio|conservat[óo]ria|notari)/i.test(String(v||'')); }
 
 // ── FREGUESIAS POR CONCELHO (Algarve) — pergunta seguinte depende do concelho escolhido ──
 const FREGUESIAS_POR_CONCELHO={
@@ -19342,8 +20077,8 @@ const CAMPOS_HERDADOS=[
   // envolvente e construção (iguais no prédio todo)
   'espParede','espVidros','caixaArGlobal','inerciaTermica','inerciaConfirmada',
   // localização e clima
-  'localidade','freguesia','concelho','concelhoCaderneta','zonaClimatica','zonaClimaticaAuto',
-  'anoConstrucao','anoInscricaoMatriz','nPisosEdificio','numeroDescricaoPredial',
+  'localidade','freguesia','concelho','concelhoCaderneta','conservatoria','zonaClimatica','zonaClimaticaAuto',
+  'anoConstrucao','anoInscricaoMatriz','nPisosEdificio','nPisosAbaixoSolo','numeroDescricaoPredial',
   // sistemas — normalmente iguais em prédios do mesmo promotor/época
   'ventTipo','ventCondutasIS','ventCondutasISAbrang','ventTaxaRenovacao',
   'edificioTipo','levParedes',
@@ -19501,7 +20236,8 @@ function marcarAlcadosPendentes(){
    estão as janelas. Numa fachada com vinte varandas iguais, quem recebe o
    certificado tem de saber qual delas é a do processo.
    Duas formas de a contornar:
-     ▭ Rectângulo — arrastar, e depois rodar pela pega, como no Paint. Serve
+     ▭ Rectângulo — arrastar, e depois, como no Paint: rodar pela pega
+       redonda, esticar pelos cantos, mover arrastando por dentro. Serve
        para a esmagadora maioria das fracções.
      ⬠ Polígono — canto a canto, para as que não são rectangulares: a varanda
        que avança, o degrau da empena, o recuo do último piso.
@@ -19540,12 +20276,31 @@ function abrirMarcadorAlcado(idbKey,depois){
         return [[-hw,-hh],[hw,-hh],[hw,hh],[-hw,hh]]
           .map(([x,y])=>({x:f.cx+x*c-y*s2, y:f.cy+x*s2+y*c}));
       };
-      const pegaRodar=f=>{
-        /* Acima do meio do lado de cima, como no Paint. */
-        const c=Math.cos(f.ang), s2=Math.sin(f.ang);
-        const dy=-(f.h/2)-PEGA*2.2;
-        return {x:f.cx-dy*s2, y:f.cy+dy*c};
+      /* ESCALA DO ECRÃ. As pegas medem-se em píxeis do ecrã, não da foto: uma
+         foto de 1600 px mostrada em 390 px punha a pega com 7 px de raio e
+         11 px de alvo, e o dedo precisa de ~24. Falhava-se a pega e o arrasto
+         apagava o rectângulo para desenhar outro. */
+      const escEcra=()=>{
+        const r=cv.getBoundingClientRect();
+        const e=Math.min(r.width/cv.width,r.height/cv.height);
+        return (e>0&&isFinite(e))?e:1;
       };
+      const emImg=px=>px/escEcra();           // px do ecrã → px da foto
+      const ALVO=26, RAIO_ROD=12, LADO_CANTO=14, AFAST=36;   // px do ecrã
+      const dentroImg=(q,m)=>q.x>=m&&q.y>=m&&q.x<=cv.width-m&&q.y<=cv.height-m;
+      const pegaRodar=f=>{
+        /* Acima do meio do lado de cima, como no Paint. Numa fracção do último
+           piso isso fica fora da foto — então vai para baixo, ou para um lado,
+           ou em último caso para o centro. Tem sempre de se ver. */
+        const c=Math.cos(f.ang), s2=Math.sin(f.ang), d=emImg(AFAST), m=emImg(RAIO_ROD);
+        const loc=[[0,-(f.h/2)-d],[0,(f.h/2)+d],[(f.w/2)+d,0],[-(f.w/2)-d,0]];
+        for(const [x,y] of loc){
+          const q={x:f.cx+x*c-y*s2, y:f.cy+x*s2+y*c};
+          if(dentroImg(q,m)) return q;
+        }
+        return {x:f.cx,y:f.cy};
+      };
+      const graus=f=>{ let g=Math.round(f.ang*180/Math.PI)%360; if(g>180) g-=360; if(g<=-180) g+=360; return g; };
       const pintar=(previa)=>{
         ctx.drawImage(img,0,0);
         ctx.lineWidth=ESP; ctx.strokeStyle=VERM;
@@ -19579,18 +20334,27 @@ function abrirMarcadorAlcado(idbKey,depois){
         pintar();
         if(forma&&forma.tipo==='rect'){
           const p=pegaRodar(forma), cs=cantosDoRect(forma);
-          const topo={x:(cs[0].x+cs[1].x)/2,y:(cs[0].y+cs[1].y)/2};
-          ctx.strokeStyle='#fff'; ctx.lineWidth=Math.max(2,ESP/2.5);
-          ctx.beginPath(); ctx.moveTo(topo.x,topo.y); ctx.lineTo(p.x,p.y); ctx.stroke();
-          ctx.beginPath(); ctx.arc(p.x,p.y,PEGA,0,7);
+          const fino=Math.max(1.5,emImg(2));
+          // linha da pega ao meio do lado mais próximo
+          const meios=[0,1,2,3].map(i=>({x:(cs[i].x+cs[(i+1)%4].x)/2,y:(cs[i].y+cs[(i+1)%4].y)/2}));
+          const ancora=meios.reduce((m,q)=>dist(q,p)<dist(m,p)?q:m,meios[0]);
+          ctx.strokeStyle='#fff'; ctx.lineWidth=fino;
+          ctx.beginPath(); ctx.moveTo(ancora.x,ancora.y); ctx.lineTo(p.x,p.y); ctx.stroke();
+          ctx.beginPath(); ctx.arc(p.x,p.y,emImg(RAIO_ROD),0,7);
           ctx.fillStyle='#fff'; ctx.fill();
-          ctx.strokeStyle=VERM; ctx.lineWidth=Math.max(2,ESP/2.5); ctx.stroke();
+          ctx.strokeStyle=VERM; ctx.lineWidth=fino; ctx.stroke();
+          // quatro cantos para esticar
+          const L=emImg(LADO_CANTO);
+          cs.forEach(q=>{ ctx.fillStyle='#fff'; ctx.fillRect(q.x-L/2,q.y-L/2,L,L);
+            ctx.strokeStyle=VERM; ctx.lineWidth=fino; ctx.strokeRect(q.x-L/2,q.y-L/2,L,L); });
         }
+        if(bRodE){ const ha=!!(forma&&forma.tipo==='rect');
+          [bRodE,bRodD,bZero].forEach(b=>{ b.style.display=ha?'':'none'; }); }
         info.textContent=
           !forma ? (modo==='rect'
               ? 'Arrasta sobre a fracção para a envolver num rectângulo.'
               : 'Toca em cada canto da fracção. Fecha no primeiro ponto.')
-          : forma.tipo==='rect' ? 'Roda pela pega branca. Arrasta de novo para refazer.'
+          : forma.tipo==='rect' ? 'Roda pela pega redonda, estica pelos cantos, arrasta por dentro para mover. Rodado '+graus(forma)+'°.'
           : forma.fechado ? 'Fracção marcada.'
           : forma.pts.length+' canto(s). Toca no primeiro ponto para fechar.';
       };
@@ -19601,21 +20365,38 @@ function abrirMarcadorAlcado(idbKey,depois){
         return {x:(ev.clientX-r.left-ox)/esc, y:(ev.clientY-r.top-oy)/esc};
       };
       const dist=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
+      /* ponto da foto → coordenadas do rectângulo (sem rotação, centro na origem) */
+      const local=(f,q)=>{ const c=Math.cos(-f.ang), s2=Math.sin(-f.ang), dx=q.x-f.cx, dy=q.y-f.cy;
+        return {x:dx*c-dy*s2, y:dx*s2+dy*c}; };
+      const ENCAIXE=3*Math.PI/180;
+      const encaixar=a=>{ const q=Math.PI/2, k=Math.round(a/q); return Math.abs(a-k*q)<ENCAIXE?k*q:a; };
 
       cv.addEventListener('pointerdown',ev=>{
         ev.preventDefault();
+        try{ cv.setPointerCapture&&ev.pointerId!=null&&cv.setPointerCapture(ev.pointerId); }catch(e){}
         const p=paraImg(ev);
         if(modo==='poli'){
           if(!forma||forma.tipo!=='poli') forma={tipo:'poli',pts:[],fechado:false};
           if(forma.fechado) return;
           /* Tocar no primeiro ponto fecha a forma. */
-          if(forma.pts.length>=3&&dist(p,forma.pts[0])<PEGA*1.6){
+          if(forma.pts.length>=3&&dist(p,forma.pts[0])<Math.max(PEGA*1.6,emImg(ALVO))){
             forma.fechado=true; pintarComPegas(); return;
           }
           forma.pts.push(p); pintarComPegas(); return;
         }
-        if(forma&&forma.tipo==='rect'&&dist(p,pegaRodar(forma))<PEGA*1.6){
-          arrasto={tipo:'rodar'}; return;
+        if(forma&&forma.tipo==='rect'){
+          const alvo=emImg(ALVO);
+          /* Ordem do Paint: pega de rodar, depois cantos, depois dentro. */
+          if(dist(p,pegaRodar(forma))<alvo){
+            arrasto={tipo:'rodar',a0:forma.ang,p0:Math.atan2(p.y-forma.cy,p.x-forma.cx)}; return;
+          }
+          const cs=cantosDoRect(forma);
+          const i=cs.findIndex(q=>dist(p,q)<alvo);
+          if(i>=0){ arrasto={tipo:'esticar',oposto:cs[(i+2)%4]}; return; }
+          const l=local(forma,p);
+          if(Math.abs(l.x)<=forma.w/2&&Math.abs(l.y)<=forma.h/2){
+            arrasto={tipo:'mover',dx:p.x-forma.cx,dy:p.y-forma.cy}; return;
+          }
         }
         arrasto={tipo:'novo',a:p};
       });
@@ -19623,7 +20404,24 @@ function abrirMarcadorAlcado(idbKey,depois){
         if(!arrasto) return;
         const p=paraImg(ev);
         if(arrasto.tipo==='rodar'&&forma){
-          forma.ang=Math.atan2(p.y-forma.cy,p.x-forma.cx)+Math.PI/2;
+          /* Roda pelo quanto o dedo andou à volta do centro — a forma não salta
+             quando a pega foi posta ao lado ou em baixo. */
+          const a=Math.atan2(p.y-forma.cy,p.x-forma.cx);
+          forma.ang=encaixar(arrasto.a0+(a-arrasto.p0));
+          pintarComPegas(); return;
+        }
+        if(arrasto.tipo==='mover'&&forma){
+          forma.cx=p.x-arrasto.dx; forma.cy=p.y-arrasto.dy; pintarComPegas(); return;
+        }
+        if(arrasto.tipo==='esticar'&&forma){
+          /* O canto oposto fica parado, como no Paint; a rotação mantém-se. */
+          const o=arrasto.oposto, c=Math.cos(-forma.ang), s2=Math.sin(-forma.ang);
+          const vx=(p.x-o.x)*c-(p.y-o.y)*s2, vy=(p.x-o.x)*s2+(p.y-o.y)*c;
+          const min=emImg(20);
+          const w2=Math.max(min,Math.abs(vx)), h2=Math.max(min,Math.abs(vy));
+          const hx=(vx<0?-w2:w2)/2, hy=(vy<0?-h2:h2)/2, c2=Math.cos(forma.ang), s3=Math.sin(forma.ang);
+          forma.w=w2; forma.h=h2;
+          forma.cx=o.x+hx*c2-hy*s3; forma.cy=o.y+hx*s3+hy*c2;
           pintarComPegas(); return;
         }
         if(arrasto.tipo==='novo'){
@@ -19644,6 +20442,9 @@ function abrirMarcadorAlcado(idbKey,depois){
       };
       cv.addEventListener('pointerup',largar);
       cv.addEventListener('pointercancel',()=>{ arrasto=null; pintarComPegas(); });
+      let bRodE=null,bRodD=null,bZero=null;
+      const rodarGraus=g=>{ if(!forma||forma.tipo!=='rect') return;
+        forma.ang+=g*Math.PI/180; pintarComPegas(); };
 
       const bt=(txt,fn,forte)=>{
         const b=document.createElement('button'); b.type='button'; b.textContent=txt;
@@ -19662,6 +20463,10 @@ function abrirMarcadorAlcado(idbKey,depois){
         });
       };
       marcarModo();
+      /* Afinar a rotação com o dedo é difícil numa foto pequena: 1° de cada vez. */
+      bRodE=bt('⟲ 1°',()=>rodarGraus(-1));
+      bRodD=bt('⟳ 1°',()=>rodarGraus(1));
+      bZero=bt('0°',()=>{ if(forma&&forma.tipo==='rect'){ forma.ang=0; pintarComPegas(); } });
       barra.appendChild(info);
       bt('↻ Recomeçar',()=>{ forma=null; pintarComPegas(); });
       bt('Sem marca',()=>{ fundo.remove(); if(depois) depois(); });
@@ -20982,7 +21787,7 @@ async function guardarNoOneDrive(){
     show('A ligar ao OneDrive…');
     const conta=await oneDriveLogin();
     show(`A preparar pacote (${conta.username})…`);
-    const {zipBlob,nFotos,docsCount}=await buildPacoteZipBlob(show);
+    const {zipBlob,nFotos,docsCount}=await buildPacoteZipBlob(show,{semEsboco:true});
     // nome do ficheiro/pasta no OneDrive = morada completa do imóvel (mais fácil de encontrar depois);
     // usa o nome do projeto como recurso apenas se a morada ainda não tiver sido preenchida
     // mesma regra de nomenclatura do pacote local (morada da caderneta → morada
