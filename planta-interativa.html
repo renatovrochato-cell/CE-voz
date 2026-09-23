@@ -308,6 +308,82 @@ table.bal tr.tot td{border-top:1px solid var(--linha);padding-top:4px}
   .ficheiro{order:3;flex-basis:100%}
 }
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+
+/* ══════════════ TELEMÓVEL E FOLD (v1.75) ══════════════
+   No telemóvel as regras de toque escondiam `main>.corpo` — mas os painéis são
+   <aside>, e continuavam à vista: a tela ficava com um terço do ecrã, entre a
+   lista de divisões, o balanço e as ferramentas da planta de fundo. O
+   cabeçalho levava onze botões e partia em três linhas.
+   Agora, só com o dedo (o PC fica como está):
+   · cabeçalho numa linha: ecrã inteiro, divisões, detalhes, guardar e «⋯»
+     com as outras acções;
+   · os painéis só aparecem quando se pedem — por cima da tela no ecrã de
+     fora, encostados ao lado com o Fold aberto;
+   · as ferramentas passam para uma fila em baixo, com o nome, e a tela fica
+     com a largura toda. */
+@media (pointer:coarse){
+  body{grid-template-rows:auto minmax(0,1fr)}
+  header{flex-wrap:nowrap;padding:5px 8px;gap:6px;min-height:52px;position:relative}
+  header .marca{font-size:12px;letter-spacing:.1em;white-space:nowrap}
+  #versao,.ficheiro{display:none}
+  header .acoes{flex-wrap:nowrap;gap:5px;margin-left:auto}
+  header .acoes button,header .acoes label.btn{min-height:44px;min-width:44px;padding:6px 10px;font-size:17px}
+  #btJson{font-size:14px!important}
+  #btMais{font-size:20px!important;line-height:1}
+  #menuAcoes{position:absolute;top:100%;right:6px;z-index:60;display:flex;flex-direction:column;gap:4px;
+    min-width:240px;max-width:calc(100vw - 12px);max-height:75vh;overflow-y:auto;padding:6px;
+    background:var(--chrome-2);border:1px solid var(--linha);border-radius:10px;box-shadow:0 12px 32px rgba(0,0,0,.55)}
+  #menuAcoes[hidden]{display:none!important}
+  #menuAcoes>button,#menuAcoes>label.btn{min-height:48px;text-align:left;font-size:15px;padding:10px 14px;
+    display:flex;align-items:center;justify-content:flex-start;white-space:normal}
+  body.menu-acoes #btMais{background:var(--sel);border-color:var(--sel)}
+  /* ☰ e ▤ nunca apareciam: a regra geral «display:none» vinha depois da de
+     toque e ganhava-lhe (v1.75) */
+  #btPainelEsq,#btPainelDir{display:inline-flex!important;align-items:center;justify-content:center}
+  body.painel-esq #btPainelEsq,body.painel-dir #btPainelDir{background:var(--sel);border-color:var(--sel);color:#fff}
+
+  main{grid-template-columns:1fr!important;grid-template-rows:minmax(0,1fr)!important;position:relative}
+  aside.esq,aside.dir{display:none!important}
+  body.painel-esq aside.esq,body.painel-dir aside.dir{display:block!important;position:absolute;top:0;bottom:0;
+    width:min(88vw,400px);max-height:none;z-index:40;overflow-y:auto;background:var(--chrome-2);
+    box-shadow:0 0 32px rgba(0,0,0,.6);-webkit-overflow-scrolling:touch}
+  body.painel-esq aside.esq{left:0;border-right:1px solid var(--linha)}
+  body.painel-dir aside.dir{right:0;border-left:1px solid var(--linha);border-top:0}
+
+  /* a tela ocupa tudo; as ferramentas numa fila em baixo, fora do desenho */
+  .tela{display:flex;flex-direction:column;min-height:0}
+  #svg{flex:1 1 auto;min-height:0;height:auto}
+  .barra{position:static!important;order:2;flex:0 0 auto;width:auto!important;max-width:none!important;
+    flex-direction:row!important;flex-wrap:nowrap!important;overflow-x:auto!important;overflow-y:hidden!important;
+    gap:4px!important;padding:5px 6px calc(5px + env(safe-area-inset-bottom))!important;border-radius:0!important;
+    border:0!important;border-top:1px solid var(--linha)!important;box-shadow:none!important;
+    background:var(--chrome-2)!important;scrollbar-width:none;overscroll-behavior-x:contain}
+  .barra button{min-height:56px!important;width:66px!important;flex:0 0 auto!important}
+  .barra .sep{width:1px!important;height:40px!important;margin:auto 3px!important;flex:0 0 auto}
+  .barra .par{flex-direction:column!important;gap:3px!important}
+  .barra .par button{width:44px!important;min-height:26px!important;height:26px;padding:0!important;font-size:18px!important}
+  #tabuleiro{padding-left:0!important}
+  #escalaBarra,#dica{left:auto!important}
+  .dica{display:none!important}
+  .escala{top:8px!important;bottom:auto!important;left:8px!important}
+  /* o aviso de exemplo passa a uma faixa curta no topo da tela */
+  .exemplo{top:6px;bottom:auto;left:6px;right:6px;padding:6px 8px;font-size:12px;flex-wrap:wrap}
+  .exemplo label.btn{min-height:40px;font-size:13px}
+  .modal{padding:8px}
+  .modal .cx{max-height:94vh}
+}
+/* Fold aberto: o painel pedido encosta-se ao lado e a tela encolhe, em vez
+   de ficar tapada */
+@media (pointer:coarse) and (min-width:820px){
+  body.painel-dir main{grid-template-columns:minmax(0,1fr) 340px!important}
+  body.painel-esq main{grid-template-columns:320px minmax(0,1fr)!important}
+  body.painel-esq aside.esq,body.painel-dir aside.dir{position:static;width:auto;box-shadow:none}
+  body.painel-esq aside.esq{grid-column:1;grid-row:1}
+  body.painel-esq .tela{grid-column:2;grid-row:1}
+  body.painel-dir .tela{grid-column:1;grid-row:1}
+  body.painel-dir aside.dir{grid-column:2;grid-row:1}
+  .barra button{width:72px!important}
+}
 </style>
 </head>
 <body>
@@ -322,6 +398,8 @@ table.bal tr.tot td{border-top:1px solid var(--linha);padding-top:4px}
       style="min-height:40px;padding:7px 11px;font-size:17px">☰</button>
     <button id="btPainelDir" onclick="alternarPainel('dir')" title="Detalhes e envolventes"
       style="min-height:40px;padding:7px 11px;font-size:17px">▤</button>
+    <button id="btMais" onclick="alternarMenuAcoes()" title="Mais acções" aria-haspopup="true" aria-expanded="false"
+      style="display:none">⋯</button>
     <label class="btn primaria">Abrir levantamento<input type="file" id="fileIn" accept="application/json,.json"></label>
     <button id="btAcertarTudo" class="primaria" title="Acerta as áreas ao levantamento, solda as paredes e recoloca os vãos — tudo de uma vez">📐 Acertar tudo</button>
     <button id="btAlinhar" class="primaria" title="Solda as paredes que estão quase no mesmo sítio, sem mexer na disposição">⇲⇱ Alinhar paredes</button>
@@ -598,7 +676,7 @@ Ver tudo</button>
   window.addEventListener('online',aviso);
 })();
 "use strict";
-const PLANTA_VERSAO='v1.74.0 (2026-09-18)';
+const PLANTA_VERSAO='v1.75.0 (2026-09-23)';
 /* ══════════════════════════════════════════════════════════════════
    CE Voz · motor de planta interativa
    Fonte de verdade: o levantamento (D). A planta é uma camada de
@@ -803,7 +881,7 @@ function autoLayout(){
 
   const fichas=divisoes().map(nome=>{
     const d=dadosDiv(nome);
-    let rects=(d.areaRect||[]).map(r=>({c:parseM(r.c),l:parseM(r.l),lado:r.lado||''})).filter(r=>r.c>0&&r.l>0);
+    let rects=(d.areaRect||[]).map(r=>({c:parseM(r.c),l:parseM(r.l),lado:r.lado||'',alinh:r.alinh||''})).filter(r=>r.c>0&&r.l>0);
     let estimado=false;
     /* O CONTORNO DE UMA DIVISÃO EM L VINHA VAZIO PARA A PLANTA.
        Na app, marcar «Divisão recortada (L, U, T)» grava o contorno por ordem
@@ -936,23 +1014,26 @@ function autoLayout(){
       const empilharAuto=h>w;
       f.rects.slice(1).forEach(r=>{
         const lado=r.lado||'';
+        /* encostado ao início, ao centro ou ao fim do lado (FIX326) */
+        const dx=r.alinh==='fim'?w-r.c:r.alinh==='centro'?(w-r.c)/2:0;
+        const dy=r.alinh==='fim'?h-r.l:r.alinh==='centro'?(h-r.l)/2:0;
         if(lado==='N'){        // acima do anterior
-          blocos.push({id:'b'+(k++),div:f.nome,x:x-w,y:(alinharBaixo?(yTopo-h):y)-r.l,
+          blocos.push({id:'b'+(k++),div:f.nome,x:x-w+dx,y:(alinharBaixo?(yTopo-h):y)-r.l,
             w:r.c,h:r.l,principal:false,auto:true,estimado:f.estimado});
           return;
         }
         if(lado==='S'){        // abaixo
-          blocos.push({id:'b'+(k++),div:f.nome,x:x-w,y:(alinharBaixo?(yTopo-h):y)+h,
+          blocos.push({id:'b'+(k++),div:f.nome,x:x-w+dx,y:(alinharBaixo?(yTopo-h):y)+h,
             w:r.c,h:r.l,principal:false,auto:true,estimado:f.estimado});
           return;
         }
         if(lado==='O'){        // à esquerda
-          blocos.push({id:'b'+(k++),div:f.nome,x:x-w-r.c,y:alinharBaixo?(yTopo-r.l):yTopo,
+          blocos.push({id:'b'+(k++),div:f.nome,x:x-w-r.c,y:(alinharBaixo?(yTopo-r.l):yTopo)+dy,
             w:r.c,h:r.l,principal:false,auto:true,estimado:f.estimado});
           return;
         }
         if(lado==='E'){        // à direita
-          blocos.push({id:'b'+(k++),div:f.nome,x,y:alinharBaixo?(yTopo-r.l):yTopo,
+          blocos.push({id:'b'+(k++),div:f.nome,x,y:(alinharBaixo?(yTopo-r.l):yTopo)+dy,
             w:r.c,h:r.l,principal:false,auto:true,estimado:f.estimado});
           x+=r.c;
           return;
@@ -1945,13 +2026,19 @@ const mX=p=>(p-view.ox)/view.ppm, mY=p=>(p-view.oy)/view.ppm;
 function corDiv(nome){const i=divisoes().indexOf(nome);return CORES_DIV[(i<0?0:i)%CORES_DIV.length];}
 
 function enquadrar(){
-  const r=tela.getBoundingClientRect();
+  /* No telemóvel a fila de ferramentas está dentro da tela, por baixo do
+     desenho: conta só a área do desenho. E o mínimo de 14 px/m não deixava
+     caber uma planta de 30 m num ecrã de 412 px (v1.75). No PC fica igual. */
+  const _toque=!!(window.matchMedia&&matchMedia('(pointer:coarse)').matches);
+  const _svg=document.getElementById('svg');
+  const r=(_toque&&_svg?_svg:tela).getBoundingClientRect();
   if(!L||!L.blocos.length)return;
   const cx=L.blocos.map(caixa);
   const x0=Math.min(...cx.map(c=>c.x0)), x1=Math.max(...cx.map(c=>c.x1));
   const y0=Math.min(...cx.map(c=>c.y0)), y1=Math.max(...cx.map(c=>c.y1));
   const m=1.8;
-  view.ppm=Math.max(14,Math.min((r.width-90)/((x1-x0)+m),(r.height-90)/((y1-y0)+m)));
+  const _mg=_toque?40:90;
+  view.ppm=Math.max(_toque?3:14,Math.min((r.width-_mg)/((x1-x0)+m),(r.height-_mg)/((y1-y0)+m)));
   view.ox=r.width/2-((x0+x1)/2)*view.ppm;
   view.oy=r.height/2-((y0+y1)/2)*view.ppm;
 }
@@ -1972,7 +2059,11 @@ function poeEtiqueta(x,y,larg,alt,nx,ny){
   return null;   // desiste: melhor não escrever nada do que escrever por cima
 }
 function desenhar(dimForcada){
-  const r=dimForcada||tela.getBoundingClientRect();
+  /* o tamanho é o do próprio svg: no telemóvel a fila de ferramentas fica
+     dentro da tela, por baixo, e o viewBox com a altura da tela encolhia o
+     desenho e desviava os toques. No PC o svg ocupa a tela toda — dá o mesmo. */
+  const _rs=svg.getBoundingClientRect();
+  const r=dimForcada||(_rs.width>0&&_rs.height>0?_rs:tela.getBoundingClientRect());
   const W=r.width, H=r.height;
   _etiq=[];
   svg.setAttribute('viewBox','0 0 '+W+' '+H);
@@ -7952,7 +8043,9 @@ document.addEventListener('pointerdown',ev=>{
   if(!document.body.classList.contains('painel-esq')&&
      !document.body.classList.contains('painel-dir')) return;
   const t=ev.target;
-  if(t.closest&&(t.closest('.corpo')||t.closest('header'))) return;
+  if(t.closest&&(t.closest('.corpo')||t.closest('aside')||t.closest('header'))) return;
+  // com o Fold aberto o painel está encostado ao lado: tocar no desenho não o fecha
+  if(window.matchMedia&&matchMedia('(pointer:coarse) and (min-width:820px)').matches) return;
   fecharPaineis();
 },true);
 
@@ -8480,6 +8573,60 @@ function carregar(j,doUtilizador){
   enquadrar(); pintarRoda(); repintarTudo();
 }
 window.addEventListener('resize',()=>{pintar();});
+/* ajustarTela era chamada ao abrir e fechar os painéis e nunca existiu: o
+   try apanhava o erro e o pintar() a seguir não corria — a tela ficava com o
+   tamanho antigo até se lhe tocar (v1.75). */
+function ajustarTela(){ try{ pintar(); }catch(e){} }
+
+/* MENU «⋯» NO TELEMÓVEL (v1.75).
+   As acções que não se usam a desenhar mudam-se para um menu. Os botões são
+   os mesmos (mesmo id, mesma acção) — só mudam de sítio, e voltam ao
+   cabeçalho se o ecrã deixar de ser de toque. */
+const ACOES_NO_MENU=['fileIn','btAcertarTudo','btAlinhar','btAuto','btAreas','btRel','btRelHtml','btPdfEnv','btPng'];
+function _noAcao(id){ const e=document.getElementById(id); return e&&(e.tagName==='INPUT'?e.closest('label'):e); }
+function montarMenuAcoes(){
+  const acoes=document.querySelector('header .acoes'); if(!acoes) return;
+  const toque=!!(window.matchMedia&&matchMedia('(pointer:coarse)').matches);
+  let menu=document.getElementById('menuAcoes');
+  const bt=document.getElementById('btMais');
+  if(toque){
+    if(!menu){ menu=document.createElement('div'); menu.id='menuAcoes'; menu.hidden=true; menu.setAttribute('role','menu');
+      document.querySelector('header').appendChild(menu);
+      menu.addEventListener('click',ev=>{ if(ev.target.closest('button')) fecharMenuAcoes(); });
+      menu.addEventListener('change',()=>fecharMenuAcoes()); }
+    ACOES_NO_MENU.forEach(id=>{ const n=_noAcao(id); if(n&&n.parentNode!==menu){ n.dataset.voltaA='acoes'; menu.appendChild(n); } });
+    const g=document.getElementById('btJson'); if(g&&!g.dataset.rotuloPc){ g.dataset.rotuloPc=g.textContent; g.textContent='💾'; g.setAttribute('aria-label','Guardar'); }
+    if(bt) bt.style.display='';
+  } else if(menu){
+    const antesDe=document.getElementById('btJson');
+    Array.from(menu.children).forEach(n=>acoes.insertBefore(n,antesDe));
+    const g=document.getElementById('btJson'); if(g&&g.dataset.rotuloPc){ g.textContent=g.dataset.rotuloPc; delete g.dataset.rotuloPc; }
+    menu.remove(); if(bt) bt.style.display='none';
+    document.body.classList.remove('menu-acoes');
+  }
+}
+function alternarMenuAcoes(){
+  const m=document.getElementById('menuAcoes'); if(!m) return;
+  m.hidden=!m.hidden;
+  document.body.classList.toggle('menu-acoes',!m.hidden);
+  const bt=document.getElementById('btMais'); if(bt) bt.setAttribute('aria-expanded',String(!m.hidden));
+  if(!m.hidden) document.body.classList.remove('painel-esq','painel-dir');
+}
+function fecharMenuAcoes(){
+  const m=document.getElementById('menuAcoes'); if(!m||m.hidden) return;
+  m.hidden=true; document.body.classList.remove('menu-acoes');
+  const bt=document.getElementById('btMais'); if(bt) bt.setAttribute('aria-expanded','false');
+}
+document.addEventListener('pointerdown',ev=>{
+  const m=document.getElementById('menuAcoes'); if(!m||m.hidden) return;
+  if(ev.target.closest&&(ev.target.closest('#menuAcoes')||ev.target.closest('#btMais'))) return;
+  fecharMenuAcoes();
+},true);
+try{ montarMenuAcoes();
+  if(window.matchMedia){ const mq=matchMedia('(pointer:coarse)');
+    (mq.addEventListener?mq.addEventListener('change',()=>{montarMenuAcoes();pintar();}):mq.addListener(()=>{montarMenuAcoes();pintar();})); }
+}catch(e){}
+
 
 const DEMO={"app": "v2026.07.26-FIX124", "exportado": "2026-07-28T12:10:47.218Z", "D": {"nome": "Era nuno", "morada": "Res do Chão – Apartamento B, Portimão", "tipologia": "T2", "pisos": 1, "peDireitos": {"1": "2.63m"}, "coberturaInclinada": "", "peDireitoMax": "", "peDireitoMin": "", "divisoes": ["Quarto 1", "Quarto 2", "WC", "Circulação 1", "Sala", "Cozinha", "Despensa"], "climaSistemas": [], "aqsTipo": "Esquentador gás", "aqsMarca": "Junkers", "aqsModelo": "W11 E31 83595", "aqsRendimento": "", "aqsPotencia": "", "aqsCapacidade": "", "aqsIdadeEquip": "mais_20_pos95", "aqsFatorIdade": 0.95, "aqsAnoFabrico": "", "aqsManutencao": "", "solar": "Não", "solDet": "", "solN": "", "solArea": "", "solMarca": "", "edificioTipo": "Apartamento", "pisoLocal": "4", "levParedes": "Sim", "ventTipo": "Natural", "ventCondutasIS": "Só exaustão", "ventCondutasISAbrang": "Em todas", "ventCondutasISDetalhe": "", "ventCondutasISWCs": [], "ventTaxaRenovacao": "", "obs": "", "obsAudioKey": null, "climaDivisoes": {"Quarto 1": {"tipos": [""], "marcas": [], "local": []}, "Quarto 2": {"tipos": [""], "marcas": [], "local": []}, "Sala": {"tipos": [""], "marcas": [], "local": []}}, "enuYN": "Não", "enuMedida": "", "enuTipos": {}, "enuVaosYN": "", "enuVaosLoc": [], "enuVaosDim": "", "enuVaosDimLarg": "", "enuVaosDimAlt": "", "espParede": "27", "espVidros": "", "caixaArGlobal": 6, "fotoEtiquetas": [{"nome": "17852396435235802836536781884677.jpg", "idbKey": "etq:1785239646990:3ddxr0", "div": "AQS", "tipo": null, "ts": "28/07/2026, 12:54:07", "dados": {"marca": "Junkers", "modelo": null, "potencia_aquecimento_kw": null, "potencia_arrefecimento_kw": null, "potencia_absorvida_aquecimento_kw": null, "potencia_absorvida_arrefecimento_kw": null, "cop": null, "eer": null, "scop": null, "seer": null, "potencia_kw": null, "capacidade_l": null, "rendimento": null, "refrigerante": null, "ano_fabrico": null}}, {"nome": "17852396479803659407118840887752.jpg", "idbKey": "etq:1785239652189:foc1er", "div": "AQS", "tipo": null, "ts": "28/07/2026, 12:54:12", "dados": {"marca": null, "modelo": "W11 E31 83595", "potencia_aquecimento_kw": null, "potencia_arrefecimento_kw": null, "potencia_absorvida_aquecimento_kw": null, "potencia_absorvida_arrefecimento_kw": null, "cop": null, "eer": null, "scop": null, "seer": null, "potencia_kw": null, "capacidade_l": null, "rendimento": null, "refrigerante": null, "ano_fabrico": null}}], "localidade": "Portimão", "freguesia": "Portimão", "concelho": "Portimão", "zonaClimatica": "I1-V3", "zonaClimaticaAuto": true, "anoConstrucao": "1991", "inerciaTermica": "Forte", "nPisosEdificio": "5", "numeroMatriz": "10279", "numeroFracao": "E", "moradaCaderneta": "URBª MONTE DA BEMPOSTA Lote 19, R/C B, 8500-450 Portimão", "certidaoPermanenteNumero": "PA-3453-03849-081103-010279", "concelhoCaderneta": "Portimão", "anoInscricaoMatriz": "1991", "numeroDescricaoPredial": "3068", "fotosCampos": {"peDireito": {"idbKey": "campo_peDireito:1785239719233:1pbdk5", "ts": "28/07/2026, 12:55:19"}, "parede": {"idbKey": "campo_parede:1785239781583:n6jrya", "ts": "28/07/2026, 12:56:21"}}, "areasPlanta": [], "areaUtilPlantaTotal": null, "_hist": [{"ts": "2026-07-28T11:43:52.655Z", "campo": "tipologia", "de": "", "para": "T2"}, {"ts": "2026-07-28T11:43:58.236Z", "campo": "levParedes", "de": "sim", "para": "Sim"}, {"ts": "2026-07-28T11:44:37.243Z", "campo": "divisoes", "de": "", "para": "2 quartos, 1 casa de banho, 1 circulação, sala, cozinha, despensa"}, {"ts": "2026-07-28T11:44:37.785Z", "campo": "divisoes", "de": "Quarto 1,Quarto 2,WC,Circulação 1,Sala,Cozinha,Despensa", "para": "2 quartos, 1 casa de banho, 1 circulação, sala, cozinha, despensa"}, {"ts": "2026-07-28T11:44:45.178Z", "campo": "orient:Quarto 1", "de": "", "para": "NO"}, {"ts": "2026-07-28T11:44:47.328Z", "campo": "orient:Quarto 2", "de": "", "para": "NO"}, {"ts": "2026-07-28T11:44:59.473Z", "campo": "orient:Despensa", "de": "", "para": "SE"}, {"ts": "2026-07-28T11:44:59.953Z", "campo": "orient:Cozinha", "de": "", "para": "SE"}], "divisoesDados": {"Quarto 1": {"comprimentos": {"NO": "2.62 m"}, "vaos": [{"id": "VE1", "orient": "NO", "larg": "1.30", "alt": "1.78", "tipo": "Simples", "prot": "Persiana", "caixCor": "Cor escura", "abertura": "Correr", "caixEstore": true, "corteTerm": false, "caixMat": "Alumínio", "caixAr": 6, "portadaPermeab": "", "sombAquec": "Sombreamento normal/standard", "sombArref": "Sombreamento normal/standard", "protInt": "Sem proteção interior"}], "fotos": [{"idbKey": "div:1785239120259:0dyqu2", "ts": "28/07/2026, 12:45:20"}, {"idbKey": "div:1785239127420:wwr4dq", "ts": "28/07/2026, 12:45:27"}, {"idbKey": "div:1785239131534:uretp1", "ts": "28/07/2026, 12:45:31"}], "trocos": {"NO": ["2.62"]}, "envInt": {"Edifício adjacente": "5.41m"}, "envIntTrocos": {"Edifício adjacente": ["5.41"]}, "areaRect": [{"c": "2.62", "l": "5.41"}], "areaUtil": "14.17", "nVaos": 1}, "Quarto 2": {"comprimentos": {"NO": "2.85 m"}, "vaos": [{"id": "VE1", "orient": "NO", "larg": "1.50", "alt": "1.08", "tipo": "Simples", "prot": "Persiana", "caixCor": "Cor escura", "abertura": "Correr", "caixEstore": true, "corteTerm": false, "caixMat": "Alumínio", "caixAr": 6, "portadaPermeab": "", "sombAquec": "Sombreamento normal/standard", "sombArref": "Sombreamento normal/standard", "protInt": "Sem proteção interior"}], "fotos": [{"idbKey": "div:1785239213740:woj2nr", "ts": "28/07/2026, 12:46:53"}, {"idbKey": "div:1785239236803:qvvsg6", "ts": "28/07/2026, 12:47:16"}], "trocos": {"NO": ["2.85"]}, "envInt": {"Circulação comum": "1.65m"}, "envIntTrocos": {"Circulação comum": ["1.65"]}, "areaRect": [{"c": "2.85", "l": "5.57"}], "areaUtil": "15.87", "nVaos": 1}, "WC": {"comprimentos": {}, "vaos": [], "fotos": [{"idbKey": "div:1785239331570:d98taz", "ts": "28/07/2026, 12:48:51"}, {"idbKey": "div:1785239338159:j95ddf", "ts": "28/07/2026, 12:48:58"}], "trocos": {}, "envInt": {}, "envIntTrocos": {}, "areaRect": [{"c": "1.81", "l": "2.59"}], "areaUtil": "4.69", "nVaos": 0}, "Circulação 1": {"comprimentos": {}, "vaos": [], "fotos": [{"idbKey": "div:1785239367686:jug2s2", "ts": "28/07/2026, 12:49:27"}, {"idbKey": "div:1785239373666:zqbown", "ts": "28/07/2026, 12:49:33"}], "trocos": {}, "envInt": {"Circulação comum": "5.20m"}, "envIntTrocos": {"Circulação comum": ["5.20"]}, "areaRect": [{"c": "5.2", "l": "1.59"}, {"c": "1.21", "l": "2.10"}], "areaUtil": "10.81", "nVaos": 0}, "Sala": {"comprimentos": {"SE": "3.00 m", "SO": "0.90 m"}, "vaos": [{"id": "VE1", "orient": "SE", "larg": "1.51", "alt": "1.98", "tipo": "Simples", "prot": "Persiana", "caixCor": "Cor escura", "abertura": "Correr", "caixEstore": true, "corteTerm": false, "caixMat": "Alumínio", "caixAr": 6, "portadaPermeab": "", "sombAquec": "Sombreamento normal/standard", "sombArref": "Sombreamento normal/standard", "protInt": "Sem proteção interior"}], "fotos": [{"idbKey": "div:1785239451239:6cjdf0", "ts": "28/07/2026, 12:50:51"}, {"idbKey": "div:1785239456539:ffvtns", "ts": "28/07/2026, 12:50:56"}, {"idbKey": "div:1785239459626:j6mfry", "ts": "28/07/2026, 12:50:59"}], "trocos": {"SE": ["3.00"], "SO": ["0.9"]}, "envInt": {"Circulação comum": "5.20m"}, "envIntTrocos": {"Circulação comum": ["5.20"]}, "areaRect": [{"c": "3.00", "l": "5.21"}], "areaUtil": "15.63", "nVaos": 1}, "Cozinha": {"comprimentos": {"SE": "2.51 m"}, "vaos": [{"id": "VE1", "orient": "SE", "larg": "0.83", "alt": "0.98", "tipo": "Simples", "prot": "", "caixCor": "Cor escura", "abertura": "Correr", "caixEstore": false, "corteTerm": false, "caixMat": "Alumínio", "caixAr": 6, "portadaPermeab": "", "sombAquec": "Fortemente Sombreado", "sombArref": "Fortemente Sombreado", "protInt": "Estore"}, {"id": "VE2", "orient": "SE", "larg": "0.80", "alt": "2.01", "tipo": "Simples", "prot": "Sem proteção exterior", "caixCor": "Cor escura", "abertura": "Basculante", "caixEstore": false, "corteTerm": false, "caixMat": "Alumínio", "caixAr": 6, "portadaPermeab": "", "sombAquec": "Fortemente Sombreado", "sombArref": "Fortemente Sombreado", "protInt": "Estore"}], "fotos": [{"idbKey": "div:1785239538560:k5wd0r", "ts": "28/07/2026, 12:52:18"}, {"idbKey": "div:1785239544758:eoepjc", "ts": "28/07/2026, 12:52:24"}, {"idbKey": "div:1785239548509:4rdmr8", "ts": "28/07/2026, 12:52:28"}, {"idbKey": "div:1785239554591:hl2bml", "ts": "28/07/2026, 12:52:34"}], "trocos": {"SE": ["2.51"]}, "envInt": {"Edifício adjacente": "4.00m"}, "envIntTrocos": {"Edifício adjacente": ["4.00"]}, "areaRect": [{"c": "2.51", "l": "4"}], "areaUtil": "10.04", "nVaos": 2}, "Despensa": {"comprimentos": {}, "vaos": [], "fotos": [{"idbKey": "div:1785239671421:0g3ezy", "ts": "28/07/2026, 12:54:31"}], "trocos": {"SE": [""]}, "envInt": {"Edifício adjacente": "2.11m"}, "envIntTrocos": {"Edifício adjacente": ["2.11"]}, "areaRect": [{"c": "2.11", "l": "1.40"}], "areaUtil": "2.95", "nVaos": 0}}, "aqsMarcas": [], "unidadesExtFotos": [], "unidExtAcessiveis": "", "fotosAlcado": [{"idbKey": "alcado:1785239856847:p1wdx8", "gps": {"lat": 37.1367637, "lon": -8.5649449, "alt": 99.19999694824219}, "ts": "28/07/2026, 12:57:36", "label": "alcado_1"}, {"idbKey": "alcado:1785239860978:q8p9a0", "gps": {"lat": 37.1367595, "lon": -8.5648355, "alt": 99.19999694824219}, "ts": "28/07/2026, 12:57:40", "label": "alcado_2"}, {"idbKey": "alcado:1785239974078:0m6l7p", "gps": {"lat": 37.1369767, "lon": -8.5649344, "alt": 98.69999694824219}, "ts": "28/07/2026, 12:59:34", "label": "alcado_3"}], "gpsCoords": {"lat": 37.1367868, "lon": -8.5648708, "alt": 101.41846461013628, "ts": "2026-07-28T11:43:25.503Z"}, "ordemDivisoes": "", "ordemDivisoesTemp": null, "pisosDeDocumento": true, "orientacoesConfirmadas": ["NO", "SE"], "_versaoTxt": 1, "_jaExportado": true, "_alteradoDesdeExportacao": false, "_tsExportacao": "28/07/2026, 13:10:47"}};
 /* O EXEMPLO APAGAVA O LEVANTAMENTO QUE A APP TINHA ACABADO DE ENVIAR.
